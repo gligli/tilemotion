@@ -13,11 +13,10 @@ object MainForm: TMainForm
   ClientHeight = 848
   ClientWidth = 793
   KeyPreview = True
+  Position = poScreenCenter
   OnCreate = FormCreate
   OnDestroy = FormDestroy
   OnKeyDown = FormKeyDown
-  Position = poScreenCenter
-  LCLVersion = '2.2.2.0'
   object pbProgress: TProgressBar
     Left = 8
     Height = 16
@@ -60,19 +59,21 @@ object MainForm: TMainForm
     Width = 512
     Frequency = 25
     Max = 0
-    OnChange = tbFrameChange
     Position = 0
     ShowSelRange = False
     TickMarks = tmBoth
     TickStyle = tsNone
+    OnChange = tbFrameChange
     Anchors = [akLeft, akRight, akBottom]
+    Color = 3487029
+    ParentColor = False
     TabOrder = 20
   end
   object chkPlay: TCheckBox
     Left = 272
-    Height = 19
-    Top = 787
-    Width = 42
+    Height = 20
+    Top = 786
+    Width = 40
     Anchors = [akLeft, akBottom]
     Caption = 'Play'
     TabOrder = 14
@@ -88,53 +89,53 @@ object MainForm: TMainForm
   end
   object chkDithered: TCheckBox
     Left = 320
-    Height = 19
-    Top = 787
-    Width = 65
+    Height = 20
+    Top = 786
+    Width = 63
     Anchors = [akLeft, akBottom]
     Caption = 'Dithered'
     Checked = True
-    OnChange = tbFrameChange
     State = cbChecked
     TabOrder = 15
+    OnChange = tbFrameChange
   end
   object Label2: TLabel
     Left = 8
-    Height = 15
+    Height = 16
     Top = 170
-    Width = 118
+    Width = 116
     Caption = 'Tile limit (all; Q based)'
     ParentColor = False
   end
   object seFrameCount: TSpinEdit
     Left = 208
-    Height = 23
+    Height = 24
     Top = 92
     Width = 56
     MaxValue = 10000
     TabOrder = 4
-    Value = 100
+    Value = 10
   end
   object Label3: TLabel
     Left = 8
-    Height = 15
+    Height = 16
     Top = 94
-    Width = 144
+    Width = 142
     Caption = 'Frame count (0: automatic)'
     ParentColor = False
   end
   object edInput: TEdit
     Left = 88
-    Height = 23
+    Height = 24
     Top = 8
     Width = 152
-    OnChange = edInputChange
     TabOrder = 0
-    Text = 'Slayers - 05 (BD 720P x264 10bit AAC)_edit_sms.avi'
+    Text = 'Rick Astley - Never Gonna Give You Up-full9_short.avi'
+    OnChange = edInputChange
   end
   object Label4: TLabel
     Left = 8
-    Height = 15
+    Height = 16
     Top = 10
     Width = 28
     Caption = 'Input'
@@ -146,22 +147,22 @@ object MainForm: TMainForm
     Top = 304
     Width = 69
     Caption = 'Run all (F9)'
-    OnClick = btnRunAllClick
     PopupMenu = pmProcesses
     TabOrder = 10
+    OnClick = btnRunAllClick
   end
   object sePage: TSpinEdit
     Left = 208
-    Height = 23
+    Height = 24
     Top = 369
     Width = 56
     MaxValue = 10000
-    OnChange = tbFrameChange
     TabOrder = 13
+    OnChange = tbFrameChange
   end
   object Label6: TLabel
     Left = 8
-    Height = 15
+    Height = 16
     Top = 373
     Width = 77
     Caption = 'Show tile page'
@@ -169,7 +170,7 @@ object MainForm: TMainForm
   end
   object Label7: TLabel
     Left = 8
-    Height = 15
+    Height = 16
     Top = 198
     Width = 100
     Caption = 'Max tiles per frame'
@@ -177,7 +178,7 @@ object MainForm: TMainForm
   end
   object seMaxTPF: TSpinEdit
     Left = 208
-    Height = 23
+    Height = 24
     Top = 196
     Width = 56
     MaxValue = 414
@@ -187,23 +188,23 @@ object MainForm: TMainForm
   end
   object Label10: TLabel
     Left = 8
-    Height = 15
+    Height = 16
     Top = 66
-    Width = 69
+    Width = 67
     Caption = 'WAV (mono)'
     ParentColor = False
   end
   object edWAV: TEdit
     Left = 88
-    Height = 23
+    Height = 24
     Top = 64
     Width = 176
-    OnChange = edWAVChange
     TabOrder = 3
+    OnChange = edWAVChange
   end
   object Label1: TLabel
     Left = 8
-    Height = 15
+    Height = 16
     Top = 38
     Width = 55
     Caption = 'Output dir'
@@ -211,7 +212,7 @@ object MainForm: TMainForm
   end
   object edOutputDir: TEdit
     Left = 88
-    Height = 23
+    Height = 24
     Top = 36
     Width = 176
     TabOrder = 2
@@ -219,9 +220,9 @@ object MainForm: TMainForm
   end
   object Label9: TLabel
     Left = 8
-    Height = 15
+    Height = 16
     Top = 250
-    Width = 159
+    Width = 155
     Caption = 'Temporal smoothing strength'
     ParentColor = False
   end
@@ -240,21 +241,20 @@ object MainForm: TMainForm
     Top = 304
     Width = 69
     Caption = 'Test debug'
-    OnClick = btnDebugClick
     TabOrder = 11
     Visible = False
   end
   object chkMirrored: TCheckBox
     Left = 464
-    Height = 19
-    Top = 787
-    Width = 66
+    Height = 20
+    Top = 786
+    Width = 64
     Anchors = [akLeft, akBottom]
     Caption = 'Mirrored'
     Checked = True
-    OnChange = tbFrameChange
     State = cbChecked
     TabOrder = 17
+    OnChange = tbFrameChange
   end
   object lblPct: TLabel
     Left = 232
@@ -268,15 +268,15 @@ object MainForm: TMainForm
   end
   object chkSprite: TCheckBox
     Left = 536
-    Height = 19
-    Top = 787
-    Width = 89
+    Height = 20
+    Top = 786
+    Width = 87
     AllowGrayed = True
     Anchors = [akLeft, akBottom]
     Caption = 'Sprite palette'
-    OnChange = tbFrameChange
     State = cbGrayed
     TabOrder = 18
+    OnChange = tbFrameChange
   end
   object chkGamma: TCheckBox
     Left = 632
@@ -286,16 +286,16 @@ object MainForm: TMainForm
     Anchors = [akLeft, akBottom]
     AutoSize = False
     Caption = 'Gamma'
-    OnChange = tbFrameChange
     TabOrder = 19
+    OnChange = tbFrameChange
   end
   object seMaxTiles: TSpinEdit
     Left = 145
-    Height = 23
+    Height = 24
     Top = 168
     Width = 56
-    OnEditingDone = seMaxTilesEditingDone
     TabOrder = 7
+    OnEditingDone = seMaxTilesEditingDone
   end
   object chkReduced: TCheckBox
     Left = 392
@@ -306,9 +306,9 @@ object MainForm: TMainForm
     AutoSize = False
     Caption = 'Reduced'
     Checked = True
-    OnChange = tbFrameChange
     State = cbChecked
     TabOrder = 16
+    OnChange = tbFrameChange
   end
   object lblCorrel: TLabel
     Left = 736
@@ -323,19 +323,19 @@ object MainForm: TMainForm
   end
   object Label5: TLabel
     Left = 696
-    Height = 15
-    Top = 789
-    Width = 35
+    Height = 16
+    Top = 788
+    Width = 34
     Anchors = [akLeft, akBottom]
     Caption = 'Correl:'
     ParentColor = False
   end
   object cbxYilMix: TComboBox
     Left = 208
-    Height = 23
+    Height = 24
     Top = 119
     Width = 56
-    ItemHeight = 15
+    ItemHeight = 16
     ItemIndex = 3
     Items.Strings = (
       '1'
@@ -344,28 +344,26 @@ object MainForm: TMainForm
       '8'
       '16'
     )
-    OnChange = cbxYilMixChange
     TabOrder = 5
     Text = '8'
+    OnChange = cbxYilMixChange
   end
   object Label11: TLabel
     Left = 8
-    Height = 15
+    Height = 16
     Top = 121
-    Width = 157
+    Width = 156
     Caption = 'Yiluoma 2 mixed colors count'
     ParentColor = False
   end
   object chkUseTK: TCheckBox
     Left = 8
-    Height = 19
+    Height = 20
     Top = 144
-    Width = 251
+    Width = 246
     Caption = 'Use Thomas Knoll dithering (not Yiluoma 2)'
-    Checked = True
-    OnChange = chkUseTKChange
-    State = cbChecked
     TabOrder = 6
+    OnChange = chkUseTKChange
   end
   object btChooseFile: TButton
     Left = 240
@@ -373,37 +371,37 @@ object MainForm: TMainForm
     Top = 8
     Width = 24
     Caption = '...'
-    OnClick = btChooseFileClick
     TabOrder = 1
+    OnClick = btChooseFileClick
   end
   object chkPalFT: TCheckBox
     Left = 8
-    Height = 19
+    Height = 20
     Top = 224
-    Width = 154
+    Width = 151
     Caption = 'Palette based frame tiling'
-    OnChange = chkExtFTChange
     TabOrder = 9
+    OnChange = chkExtFTChange
   end
   object seTempoSmoo: TFloatSpinEdit
     Left = 208
-    Height = 23
+    Height = 24
     Top = 248
     Width = 56
     MaxValue = 100
     TabOrder = 21
-    Value = 20
+    Value = 10
   end
   object seQbTiles: TFloatSpinEdit
     Left = 208
-    Height = 23
+    Height = 24
     Top = 168
     Width = 56
     Increment = 0.1
     MaxValue = 100
-    OnEditingDone = seQbTilesEditingDone
     TabOrder = 22
     Value = 0.5
+    OnEditingDone = seQbTilesEditingDone
   end
   object IdleTimer: TIdleTimer
     Enabled = False
