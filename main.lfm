@@ -101,7 +101,7 @@ object MainForm: TMainForm
   object Label2: TLabel
     Left = 8
     Height = 16
-    Top = 178
+    Top = 216
     Width = 116
     Caption = 'Tile limit (all; Q based)'
     ParentColor = False
@@ -113,7 +113,7 @@ object MainForm: TMainForm
     Width = 56
     MaxValue = 10000
     TabOrder = 4
-    Value = 302
+    Value = 100
   end
   object Label3: TLabel
     Left = 8
@@ -129,7 +129,7 @@ object MainForm: TMainForm
     Top = 8
     Width = 152
     TabOrder = 0
-    Text = 'Rick Astley - Never Gonna Give You Up-full9_short.avi'
+    Text = 'Slayers - 05 (BD 720P x264 10bit AAC)_edit_sms.avi'
     OnChange = edInputChange
   end
   object Label4: TLabel
@@ -170,7 +170,7 @@ object MainForm: TMainForm
   object Label7: TLabel
     Left = 8
     Height = 16
-    Top = 214
+    Top = 126
     Width = 100
     Caption = 'Max tiles per frame'
     ParentColor = False
@@ -178,11 +178,11 @@ object MainForm: TMainForm
   object seMaxTPF: TSpinEdit
     Left = 208
     Height = 24
-    Top = 212
+    Top = 124
     Width = 56
     MaxValue = 414
     MinValue = 207
-    TabOrder = 9
+    TabOrder = 5
     Value = 350
   end
   object Label10: TLabel
@@ -220,7 +220,7 @@ object MainForm: TMainForm
   object Label9: TLabel
     Left = 8
     Height = 16
-    Top = 250
+    Top = 248
     Width = 155
     Caption = 'Temporal smoothing strength'
     ParentColor = False
@@ -291,9 +291,9 @@ object MainForm: TMainForm
   object seMaxTiles: TSpinEdit
     Left = 145
     Height = 24
-    Top = 176
+    Top = 214
     Width = 56
-    TabOrder = 7
+    TabOrder = 8
     OnEditingDone = seMaxTilesEditingDone
   end
   object chkReduced: TCheckBox
@@ -332,7 +332,7 @@ object MainForm: TMainForm
   object cbxYilMix: TComboBox
     Left = 208
     Height = 24
-    Top = 119
+    Top = 157
     Width = 56
     ItemHeight = 16
     ItemIndex = 3
@@ -343,14 +343,14 @@ object MainForm: TMainForm
       '8'
       '16'
     )
-    TabOrder = 5
+    TabOrder = 6
     Text = '8'
     OnChange = cbxYilMixChange
   end
   object Label11: TLabel
     Left = 8
     Height = 16
-    Top = 121
+    Top = 159
     Width = 156
     Caption = 'Yiluoma 2 mixed colors count'
     ParentColor = False
@@ -358,10 +358,10 @@ object MainForm: TMainForm
   object chkUseTK: TCheckBox
     Left = 8
     Height = 20
-    Top = 144
+    Top = 182
     Width = 246
     Caption = 'Use Thomas Knoll dithering (not Yiluoma 2)'
-    TabOrder = 6
+    TabOrder = 7
     OnChange = chkUseTKChange
   end
   object btChooseFile: TButton
@@ -376,20 +376,20 @@ object MainForm: TMainForm
   object seTempoSmoo: TFloatSpinEdit
     Left = 208
     Height = 24
-    Top = 248
+    Top = 246
     Width = 56
     MaxValue = 100
     TabOrder = 10
-    Value = 10
+    Value = 20
   end
   object seQbTiles: TFloatSpinEdit
     Left = 208
     Height = 24
-    Top = 176
+    Top = 214
     Width = 56
     Increment = 0.1
     MaxValue = 100
-    TabOrder = 8
+    TabOrder = 9
     Value = 1
     OnEditingDone = seQbTilesEditingDone
   end
