@@ -883,7 +883,7 @@ var
     for i := 0 to High(FFrames) do
     begin
       InitMergeTiles;
-      DoFrameTiling(@FFrames[i], IfThen(Dual, MaxTPF, MaxTPF div 2), Dual);
+      DoFrameTiling(@FFrames[i], MaxTPF, Dual);
       FinishMergeTiles;
 
       Write((i + 1):6,' / ', Length(FFrames), #13);
