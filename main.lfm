@@ -16,14 +16,13 @@ object MainForm: TMainForm
   Position = poScreenCenter
   OnCreate = FormCreate
   OnDestroy = FormDestroy
-  OnKeyDown = FormKeyDown
   object pbProgress: TProgressBar
     Left = 8
     Height = 16
     Top = 336
     Width = 224
     Smooth = True
-    TabOrder = 12
+    TabOrder = 13
   end
   object imgSource: TImage
     Left = 272
@@ -67,7 +66,7 @@ object MainForm: TMainForm
     Anchors = [akLeft, akRight, akBottom]
     Color = 3487029
     ParentColor = False
-    TabOrder = 20
+    TabOrder = 21
   end
   object chkPlay: TCheckBox
     Left = 272
@@ -76,7 +75,7 @@ object MainForm: TMainForm
     Width = 40
     Anchors = [akLeft, akBottom]
     Caption = 'Play'
-    TabOrder = 14
+    TabOrder = 15
   end
   object lblTileCount: TLabel
     Left = 8
@@ -96,13 +95,13 @@ object MainForm: TMainForm
     Caption = 'Dithered'
     Checked = True
     State = cbChecked
-    TabOrder = 15
+    TabOrder = 16
     OnChange = tbFrameChange
   end
   object Label2: TLabel
     Left = 8
     Height = 16
-    Top = 170
+    Top = 178
     Width = 116
     Caption = 'Tile limit (all; Q based)'
     ParentColor = False
@@ -114,7 +113,7 @@ object MainForm: TMainForm
     Width = 56
     MaxValue = 10000
     TabOrder = 4
-    Value = 10
+    Value = 302
   end
   object Label3: TLabel
     Left = 8
@@ -148,7 +147,7 @@ object MainForm: TMainForm
     Width = 69
     Caption = 'Run all (F9)'
     PopupMenu = pmProcesses
-    TabOrder = 10
+    TabOrder = 11
     OnClick = btnRunAllClick
   end
   object sePage: TSpinEdit
@@ -157,7 +156,7 @@ object MainForm: TMainForm
     Top = 369
     Width = 56
     MaxValue = 10000
-    TabOrder = 13
+    TabOrder = 14
     OnChange = tbFrameChange
   end
   object Label6: TLabel
@@ -171,7 +170,7 @@ object MainForm: TMainForm
   object Label7: TLabel
     Left = 8
     Height = 16
-    Top = 198
+    Top = 214
     Width = 100
     Caption = 'Max tiles per frame'
     ParentColor = False
@@ -179,11 +178,11 @@ object MainForm: TMainForm
   object seMaxTPF: TSpinEdit
     Left = 208
     Height = 24
-    Top = 196
+    Top = 212
     Width = 56
     MaxValue = 414
     MinValue = 207
-    TabOrder = 8
+    TabOrder = 9
     Value = 350
   end
   object Label10: TLabel
@@ -241,7 +240,7 @@ object MainForm: TMainForm
     Top = 304
     Width = 69
     Caption = 'Test debug'
-    TabOrder = 11
+    TabOrder = 12
     Visible = False
   end
   object chkMirrored: TCheckBox
@@ -253,7 +252,7 @@ object MainForm: TMainForm
     Caption = 'Mirrored'
     Checked = True
     State = cbChecked
-    TabOrder = 17
+    TabOrder = 18
     OnChange = tbFrameChange
   end
   object lblPct: TLabel
@@ -275,7 +274,7 @@ object MainForm: TMainForm
     Anchors = [akLeft, akBottom]
     Caption = 'Sprite palette'
     State = cbGrayed
-    TabOrder = 18
+    TabOrder = 19
     OnChange = tbFrameChange
   end
   object chkGamma: TCheckBox
@@ -286,13 +285,13 @@ object MainForm: TMainForm
     Anchors = [akLeft, akBottom]
     AutoSize = False
     Caption = 'Gamma'
-    TabOrder = 19
+    TabOrder = 20
     OnChange = tbFrameChange
   end
   object seMaxTiles: TSpinEdit
     Left = 145
     Height = 24
-    Top = 168
+    Top = 176
     Width = 56
     TabOrder = 7
     OnEditingDone = seMaxTilesEditingDone
@@ -307,7 +306,7 @@ object MainForm: TMainForm
     Caption = 'Reduced'
     Checked = True
     State = cbChecked
-    TabOrder = 16
+    TabOrder = 17
     OnChange = tbFrameChange
   end
   object lblCorrel: TLabel
@@ -374,33 +373,24 @@ object MainForm: TMainForm
     TabOrder = 1
     OnClick = btChooseFileClick
   end
-  object chkPalFT: TCheckBox
-    Left = 8
-    Height = 20
-    Top = 224
-    Width = 151
-    Caption = 'Palette based frame tiling'
-    TabOrder = 9
-    OnChange = chkExtFTChange
-  end
   object seTempoSmoo: TFloatSpinEdit
     Left = 208
     Height = 24
     Top = 248
     Width = 56
     MaxValue = 100
-    TabOrder = 21
+    TabOrder = 10
     Value = 10
   end
   object seQbTiles: TFloatSpinEdit
     Left = 208
     Height = 24
-    Top = 168
+    Top = 176
     Width = 56
     Increment = 0.1
     MaxValue = 100
-    TabOrder = 22
-    Value = 0.5
+    TabOrder = 8
+    Value = 1
     OnEditingDone = seQbTilesEditingDone
   end
   object IdleTimer: TIdleTimer
@@ -415,37 +405,34 @@ object MainForm: TMainForm
     Top = 688
     object miLoad: TMenuItem
       Caption = 'Load'
-      ShortCut = 112
       OnClick = btnLoadClick
+    end
+    object miIntra: TMenuItem
+      Caption = 'Tile (frame)'
+      OnClick = btnFrameTileClick
     end
     object MenuItem1: TMenuItem
       Caption = 'Dither'
-      ShortCut = 113
       OnClick = btnDitherClick
     end
     object MenuItem2: TMenuItem
       Caption = 'Tile (global)'
-      ShortCut = 114
       OnClick = btnDoGlobalTilingClick
     end
     object MenuItem3: TMenuItem
-      Caption = 'Tile (key frame)'
-      ShortCut = 115
-      OnClick = btnDoKeyFrameTilingClick
+      Caption = 'Reconstruct'
+      OnClick = btnReconstructClick
     end
     object MenuItem4: TMenuItem
       Caption = 'Reindex'
-      ShortCut = 116
       OnClick = btnReindexClick
     end
     object MenuItem5: TMenuItem
       Caption = 'Smooth'
-      ShortCut = 117
       OnClick = btnSmoothClick
     end
     object MenuItem6: TMenuItem
       Caption = 'Save'
-      ShortCut = 118
       OnClick = btnSaveClick
     end
   end

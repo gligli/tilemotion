@@ -34,6 +34,7 @@
             <Style Value="1"/>
             <SyntaxOptions>
               <IncludeAssertionCode Value="True"/>
+              <TypedAddress Value="True"/>
             </SyntaxOptions>
           </Parsing>
           <CodeGeneration>
@@ -73,6 +74,7 @@
             <Style Value="1"/>
             <SyntaxOptions>
               <IncludeAssertionCode Value="True"/>
+              <TypedAddress Value="True"/>
             </SyntaxOptions>
           </Parsing>
           <CodeGeneration>
@@ -165,6 +167,7 @@
       <Style Value="1"/>
       <SyntaxOptions>
         <IncludeAssertionCode Value="True"/>
+        <TypedAddress Value="True"/>
       </SyntaxOptions>
     </Parsing>
     <CodeGeneration>

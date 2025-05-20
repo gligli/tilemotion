@@ -595,7 +595,7 @@ function GetMinMatchingDissim(const a: TByteDynArray2; const b: TByteDynArray; c
 var
   bd: UInt64;
 begin
-  Result := GetMinMatchingDissim_Asm(@b[0], @a[0], count, @bd);
+  Result := GetMinMatchingDissim_Asm(@b[0], PPByte(@a[0]), count, @bd);
   bestDissim := bd;
 end;
 
@@ -687,7 +687,7 @@ begin
   if idx >= UMD^.NumBins - 1 then
     cnt :=  UMD^.NumPoints - idx;
 
-  UpdateMinDistance_Asm(@UMD^.X[UMD^.icenter, 0], @UMD^.X[idx], @UMD^.used[idx], @UMD^.mindistance[idx], cnt);
+  UpdateMinDistance_Asm(@UMD^.X[UMD^.icenter, 0], PPByte(@UMD^.X[idx]), @UMD^.used[idx], @UMD^.mindistance[idx], cnt);
 end;
 {$endif}
 
@@ -721,7 +721,7 @@ var
   begin
     if (NumThreads <= 1) and not Assigned(Concurrency) then
     begin
-      UpdateMinDistance_Asm(@X[icenter, 0], @X[0], @used[0], @mindistance[0], NumPoints);
+      UpdateMinDistance_Asm(@X[icenter, 0], PPByte(@X[0]), @used[0], @mindistance[0], NumPoints);
     end
     else
     begin
@@ -866,8 +866,8 @@ begin
 
   FGMMD.clust := @clust[0];
   FGMMD.dis := @dis[0];
-  FGMMD.X := @X[0];
-  FGMMD.centroids := @centroids[0];
+  FGMMD.X := PPByte(@X[0]);
+  FGMMD.centroids := PPByte(@centroids[0]);
 
   for bin := 0 to ((NumPoints - 1) div cBinSize + 1) - 1 do
   begin
@@ -1000,8 +1000,8 @@ begin
     begin
       FGMMD.clust := @membship[0];
       FGMMD.dis := nil;
-      FGMMD.X := @X[0];
-      FGMMD.centroids := @centroids[0];
+      FGMMD.X := PPByte(@X[0]);
+      FGMMD.centroids := PPByte(@centroids[0]);
       FPTP.DoParallel(@DoGMMD, 0, NumPoints - 1, nil, GetConcurrentNumThreads);
       FinishGMMD;
     end;
