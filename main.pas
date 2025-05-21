@@ -7,8 +7,8 @@ unit main;
 interface
 
 uses
-  LazLogger, Classes, SysUtils, windows, FileUtil, Forms, Controls, Graphics, Dialogs, ExtCtrls, FPimage, FPReadPNG,
-  StdCtrls, ComCtrls, Spin, Menus, Math, types, Process, strutils, kmodes, MTProcs, correlation, kmeans, extern, typinfo, tbbmalloc;
+  LazLogger, Classes, SysUtils, windows, FileUtil, Forms, Controls, Graphics, Dialogs, ExtCtrls, FPimage, FPReadPNG, fgl,
+  StdCtrls, ComCtrls, Spin, Menus, Math, types, Process, strutils, kmodes, MTProcs, correlation, extern, typinfo, tbbmalloc;
 
 type
   TEncoderStep = (esNone = -1, esLoad = 0, esFrameTiling, esDither, esMakeUnique, esGlobalTiling, esReconstruct, esReindex, esSmooth, esSave);
@@ -245,13 +245,14 @@ type
     TileIdx: Integer;
   end;
 
-  TCountIndexArray = packed record
-    Count, Index, Luma: Integer;
+  TCountIndex = packed record
+    Index, Count, Luma: Integer;
     R, G, B: Byte;
+    Hue, Sat, Val: Byte;
   end;
 
-  PCountIndexArray = ^TCountIndexArray;
-  PPCountIndexArray = ^PCountIndexArray;
+  PCountIndex = ^TCountIndex;
+  TCountIndexList = specialize TFPGList<PCountIndex>;
 
   { TMainForm }
 
@@ -372,8 +373,7 @@ type
 
     // Dithering algorithms ported from http://bisqwit.iki.fi/story/howto/dither/jy/
 
-    function ColorCompare(r1, g1, b1, r2, g2, b2: Int64): Int64;
-    function ColorCompareTK(r1, g1, b1, r2, g2, b2: Int64): Int64;
+    function CompareColor(r1, g1, b1, r2, g2, b2: Int64): Int64;
     procedure PreparePlan(var Plan: TMixingPlan; MixedColors: Integer; const pal: array of Integer);
     procedure TerminatePlan(var Plan: TMixingPlan);
     function DeviseBestMixingPlan(var Plan: TMixingPlan; col: Integer; const List: TByteDynArray): Integer;
@@ -599,13 +599,13 @@ begin
   Result := (alpha - x) / (y - x);
 end;
 
-const
-  CvtPre =  (1 shl cBitsPerComp) - 1;
-  CvtPost = 256 div CvtPre;
-
-function Posterize(v: Byte): Byte; inline;
+function Posterize(v, bpc: Byte): Byte; inline;
+var
+  cvt: Integer;
 begin
-  Result := ((v * CvtPre) div 255) * CvtPost;
+  cvt := (1 shl bpc) - 1;
+
+  Result := min(255, Round(Round((v * cvt) / 255.0) * 255.0 / cvt));
 end;
 
 function Decimate(col: Integer): Integer; inline;
@@ -797,7 +797,6 @@ begin
 
   ProgressRedraw(-1, esDither);
   ProcThreadPool.DoParallelLocalProc(@DoPrepare, 0, High(FKeyFrames));
-  WriteLn;
   ProgressRedraw(1);
 
   ProcThreadPool.DoParallelLocalProc(@DoQuantize, 0, Length(FKeyFrames) * 2 - 1);
@@ -1235,22 +1234,6 @@ begin
 end;
 
 
-function TMainForm.ColorCompare(r1, g1, b1, r2, g2, b2: Int64): Int64;
-var
-  luma1, luma2, lumadiff, diffR, diffG, diffB: Int64;
-begin
-  luma1 := r1 * cRedMul + g1 * cGreenMul + b1 * cBlueMul;
-  luma2 := r2 * cRedMul + g2 * cGreenMul + b2 * cBlueMul;
-  lumadiff := luma1 - luma2;
-  diffR := r1 - r2;
-  diffG := g1 - g2;
-  diffB := b1 - b2;
-  Result := diffR * diffR * cRedMul * cRGBw div 32;
-  Result += diffG * diffG * cGreenMul * cRGBw div 32;
-  Result += diffB * diffB * cBlueMul * cRGBw div 32;
-  Result += lumadiff * lumadiff;
-end;
-
 function TMainForm.DeviseBestMixingPlan(var Plan: TMixingPlan; col: Integer; const List: TByteDynArray): Integer;
 label
   pal_loop, inner_loop, worst;
@@ -1474,7 +1457,7 @@ begin
 {$endif}
 end;
 
-function TMainForm.ColorCompareTK(r1, g1, b1, r2, g2, b2: Int64): Int64;
+function TMainForm.CompareColor(r1, g1, b1, r2, g2, b2: Int64): Int64;
 var
   luma1, luma2, lumadiff, diffR, diffG, diffB: Int64;
 begin
@@ -1553,7 +1536,7 @@ begin
     chosen := c and (length(Plan.Y2Palette) - 1);
     for index := 0 to length(Plan.Y2Palette) - 1 do
     begin
-      penalty := ColorCompareTK(t[0], t[1], t[2], Plan.Y2Palette[index][0], Plan.Y2Palette[index][1], Plan.Y2Palette[index][2]);
+      penalty := CompareColor(t[0], t[1], t[2], Plan.Y2Palette[index][0], Plan.Y2Palette[index][1], Plan.Y2Palette[index][2]);
       if penalty < least_penalty then
       begin
         least_penalty := penalty;
@@ -1609,7 +1592,7 @@ begin
       for c := 0 to 2 do
       begin
         OldPixel := Pixels[y, x, c];
-        NewPixel := Posterize(OldPixel);
+        NewPixel := Posterize(OldPixel, cBitsPerComp);
         QuantError := OldPixel - NewPixel;
 
         yp := y + 1;
@@ -1646,7 +1629,7 @@ begin
       for c := 0 to 2 do
       begin
         OldPixel := ppx^;
-        NewPixel := Posterize(OldPixel);
+        NewPixel := Posterize(OldPixel, cBitsPerComp);
         QuantError := OldPixel - NewPixel;
 
         ppx^ := NewPixel;
@@ -1708,16 +1691,25 @@ begin
     end;
 end;
 
-function CompareCMIntraPalette(Item1,Item2,UserParameter:Pointer):Integer;
+function CompareCMULHS(const Item1,Item2:PCountIndex):Integer;
 begin
-  Result := CompareValue(PPCountIndexArray(Item2)^^.Luma, PPCountIndexArray(Item1)^^.Luma);
+  Result := CompareValue(Item2^.Luma, Item1^.Luma);
   if Result = 0 then
-    Result := CompareValue(PPCountIndexArray(Item2)^^.Index, PPCountIndexArray(Item1)^^.Index);
+    Result := CompareValue(Item2^.Sat, Item1^.Sat);
+  if Result = 0 then
+    Result := CompareValue(Item2^.Hue, Item1^.Hue);
 end;
 
 function ComparePaletteLuma(Item1,Item2,UserParameter:Pointer):Integer;
 begin
   Result := CompareValue(PInteger(Item2)^, PInteger(Item1)^);
+end;
+
+function CompareCMUCnt(const Item1,Item2:PCountIndex):Integer;
+begin
+  Result := CompareValue(Item2^.Count, Item1^.Count);
+  if Result = 0 then
+    Result := CompareValue(Item1^.Luma, Item2^.Luma);
 end;
 
 procedure TMainForm.PrepareDitherTiles(AKeyFrame: PKeyFrame);
@@ -1750,10 +1742,9 @@ begin
   if di > 1 then
   begin
    yakmo_set_num_threads(1);
-   Yakmo := yakmo_create(2, 1, MaxInt, 1, 0, 0, 1);
+   Yakmo := yakmo_create(2, 1, MaxInt, 1, 0, 0, 0);
    yakmo_load_train_data(Yakmo, di, cTileDCTSize, PPFloat(@Dataset[0]));
    SetLength(Dataset, 0); // free up some memmory
-   WriteLn('KF: ', AKeyFrame^.StartFrame, ' Yakmo start');
    yakmo_train_on_data(Yakmo, @Clusters[0]);
    yakmo_get_centroids(Yakmo, PPFloat(@AKeyFrame^.PaletteCentroids[False]));
    yakmo_destroy(Yakmo);
@@ -1774,75 +1765,68 @@ begin
       end;
   assert(di = Length(Clusters));
 
-  WriteLn('KF: ', AKeyFrame^.StartFrame, ' Yakmo end');
-end;
-
-function CompareCMUCnt(Item1,Item2,UserParameter:Pointer):Integer;
-begin
-  Result := CompareValue(PPCountIndexArray(Item2)^^.Count, PPCountIndexArray(Item1)^^.Count);
-  if Result = 0 then
-    Result := CompareValue(PPCountIndexArray(Item1)^^.Luma, PPCountIndexArray(Item2)^^.Luma);
+  WriteLn('KF: ', AKeyFrame^.StartFrame:6, ' Yakmo end');
 end;
 
 procedure TMainForm.QuantizePalette(AKeyFrame: PKeyFrame; ASpritePal: Boolean);
 var
-  CMPal: array of PCountIndexArray;
+  CMPal: TCountIndexList;
 
   procedure DoColorProbabilityBased;
   var
     map_value: Integer;
-    i, j, sy, sx, ty, tx, k: Integer;
+    iFrame, iPal, sy, sx, ty, tx: Integer;
     GTile: PTile;
     CMPlan: TMixingPlan;
+    CMItem: PCountIndex;
     list: TByteDynArray;
   begin
     PreparePlan(CMPlan, FY2MixedColors, FColorMap);
     SetLength(list, cDitheringLen);
-    SetLength(CMPal, cTotalColors);
-    for i := 0 to High(CMPal) do
+
+    for iFrame := 0 to cTotalColors - 1 do
     begin
-      New(CMPal[i]);
-      CMPal[i]^.Count := 0;
-      CMPal[i]^.Index := i;
-      CMPal[i]^.Luma := FColorMapLuma[i];
-      FromRGB(FColorMap[i], CMPal[i]^.R, CMPal[i]^.G, CMPal[i]^.B);
+      New(CMItem);
+      CMItem^.Count := 0;
+      CMItem^.Index := iFrame;
+      CMItem^.Luma := FColorMapLuma[iFrame];
+      FromRGB(FColorMap[iFrame], CMItem^.R, CMItem^.G, CMItem^.B);
+      RGBToHSV(ToRGB(CMItem^.R, CMItem^.G, CMItem^.B), CMItem^.Hue, CMItem^.Sat, CMItem^.Val);
+      CMPal.Add(CMItem);
     end;
 
     // dither area using full SMS palette to find most used colors
 
-    for i := AKeyFrame^.StartFrame to AKeyFrame^.EndFrame do
-    begin
+    for iFrame := AKeyFrame^.StartFrame to AKeyFrame^.EndFrame do
       for sy := 0 to cTileMapHeight - 1 do
         for sx := 0 to cTileMapWidth - 1 do
         begin
-          GTile := FTiles[FFrames[i].TileMap[sy, sx].TileIdx];
+          GTile := FTiles[FFrames[iFrame].TileMap[sy, sx].TileIdx];
 
-          if GTile^.Active and (FFrames[i].TileMap[sy, sx].SpritePal = ASpritePal) then
+          if GTile^.Active and (FFrames[iFrame].TileMap[sy, sx].SpritePal = ASpritePal) then
           begin
-            k := sy * cTileMapWidth + sx;
+            FillChar(list[0], Length(list), 0);
+
             for ty := 0 to cTileWidth - 1 do
-            begin
               for tx := 0 to cTileWidth - 1 do
               begin
                 map_value := cDitheringMap[((ty and 7) shl 3) + (tx and 7)];
-                DeviseBestMixingPlanThomasKnoll(CMPlan, FFrames[i].Tiles[k].RGBPixels[ty, tx], list);
+                DeviseBestMixingPlanThomasKnoll(CMPlan, GTile^.RGBPixels[ty, tx], list);
                 Inc(CMPal[list[map_value]]^.Count);
               end;
-            end;
 
             Inc(AKeyFrame^.PaletteUseCount[ASpritePal].UseCount);
           end;
         end;
-    end;
 
-    QuickSort(CMPal[0], 0, High(CMPal), SizeOf(CMPal[0]), @CompareCMUCnt);
+    CMPal.Sort(@CompareCMUCnt);
 
     // keep 16 most used colors
 
-    for i := cTilePaletteSize to High(CMPal) do
-      Dispose(CMPal[i]);
+    for iPal := cTilePaletteSize to CMPal.Count - 1 do
+      Dispose(CMPal[iPal]);
 
-    SetLength(CMPal, cTilePaletteSize);
+    CMPal.Count := cTilePaletteSize;
 
     TerminatePlan(CMPlan);
   end;
@@ -1850,27 +1834,31 @@ var
 var
   i: Integer;
 begin
-  AKeyFrame^.PaletteUseCount[ASpritePal].UseCount := 0;
+  CMPal := TCountIndexList.Create;
+  try
+    AKeyFrame^.PaletteUseCount[ASpritePal].UseCount := 0;
 
-  DoColorProbabilityBased;
+    DoColorProbabilityBased;
 
-  // split most used colors into tile palettes
+    // split most used colors into tile palettes
 
-  QuickSort(CMPal[0], 0, High(CMPal), SizeOf(CMPal[0]), @CompareCMIntraPalette);
+    CMPal.Sort(@CompareCMULHS);
 
-  SetLength(AKeyFrame^.PaletteIndexes[ASpritePal], cTilePaletteSize);
-  SetLength(AKeyFrame^.PaletteRGB[ASpritePal], cTilePaletteSize);
-  for i := 0 to cTilePaletteSize - 1 do
-  begin
-    AKeyFrame^.PaletteIndexes[ASpritePal, i] := CMPal[i]^.Index;
-    AKeyFrame^.PaletteRGB[ASpritePal, i] := FColorMap[CMPal[i]^.Index];
+    SetLength(AKeyFrame^.PaletteIndexes[ASpritePal], cTilePaletteSize);
+    SetLength(AKeyFrame^.PaletteRGB[ASpritePal], cTilePaletteSize);
+    for i := 0 to cTilePaletteSize - 1 do
+    begin
+      AKeyFrame^.PaletteIndexes[ASpritePal, i] := CMPal[i]^.Index;
+      AKeyFrame^.PaletteRGB[ASpritePal, i] := FColorMap[CMPal[i]^.Index];
+    end;
+
+    for i := 0 to CMPal.Count - 1 do
+      Dispose(CMPal[i]);
+  finally
+    CMPal.Free;
   end;
 
-  for i := 0 to High(CMPal) do
-    Dispose(CMPal[i]);
-
-  if ASpritePal then
-    WriteLn('KF: ', AKeyFrame^.StartFrame);
+  WriteLn('KF: ', AKeyFrame^.StartFrame:6, ', SpritePal: ', ASpritePal);
 end;
 
 procedure TMainForm.FinishQuantizePalette(AKeyFrame: PKeyFrame);
@@ -1997,7 +1985,7 @@ const
   CShotTransMaxTilesPerKF = 96 * 1920 * 1080 div sqr(cTileWidth); // limiter for the amount of data in a keyframe
   CShotTransEuclideanHiThres = 6.0; // frame equivalent accumulated distance
   CShotTransCorrelLoThres = 0.5; // interframe pearson correlation low limit
-  CShotTransGracePeriod = 6; // minimum frames between keyframes
+  CShotTransGracePeriod = 1; // minimum frames between keyframes
 var
   i, j, LastKFIdx: Integer;
   correl, euclidean: TFloat;

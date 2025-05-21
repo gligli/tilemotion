@@ -14,6 +14,7 @@ object MainForm: TMainForm
   ClientWidth = 793
   KeyPreview = True
   Position = poScreenCenter
+  LCLVersion = '4.0.0.4'
   OnCreate = FormCreate
   OnDestroy = FormDestroy
   object pbProgress: TProgressBar
