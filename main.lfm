@@ -183,7 +183,7 @@ object MainForm: TMainForm
     MaxValue = 414
     MinValue = 207
     TabOrder = 5
-    Value = 350
+    Value = 360
   end
   object Label10: TLabel
     Left = 8
