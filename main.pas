@@ -359,8 +359,7 @@ type
     FCS: TRTLCriticalSection;
 
     function ComputeCorrelation(const a, b: TIntegerDynArray): TFloat;
-    function ComputeInterFrameCorrelation(a, b: TFrame; out EuclideanDist: TFloat): TFloat;
-    procedure DitherFloydSteinberg(var AScreen: TByteDynArray);
+    function ComputeInterFrameCorrelation(a, b: TFrame): TFloat;
 
     procedure LoadFrame(AFrame: PFrame; ABitmap: TCustomBitmap);
     procedure FindKeyFrames;
@@ -408,9 +407,9 @@ type
     function GetTileUseCount(ATileIndex: Integer): Integer;
     function WriteTileDatasetLine(const ATile: TTile; DataLine: TByteDynArray; out PalSigni: Integer): Integer;
 
+    procedure Pallettize(AKeyFrame: PKeyFrame);
     procedure QuantizePalette(AKeyFrame: PKeyFrame; ASpritePal: Boolean);
     procedure FinishQuantizePalette(AKeyFrame: PKeyFrame);
-    procedure Pallettize(AKeyFrame: PKeyFrame);
     procedure DitherTiles(AKF: PKeyFrame);
     procedure DitherTile(var ATile: TTile; var Plan: TMixingPlan);
 
@@ -683,9 +682,13 @@ var
   i: Integer;
 begin
   Result := 0;
+  if Length(a) = 0 then
+    Exit;
+
   for i := 0 to High(a) do
     Result += sqr(a[i] - b[i]);
-  Result := sqrt(Result);
+
+  Result := sqrt(Result / Length(a));
 end;
 
 function EqualQualityTileCount(tileCount: TFloat): Integer;
@@ -716,7 +719,7 @@ begin
   Result := PearsonCorrelation(ya, yb, Length(a) * 3);
 end;
 
-function TMainForm.ComputeInterFrameCorrelation(a, b: TFrame; out EuclideanDist: TFloat): TFloat;
+function TMainForm.ComputeInterFrameCorrelation(a, b: TFrame): TFloat;
 var
   sz, i: Integer;
   ya, yb: TFloatDynArray;
@@ -728,12 +731,16 @@ begin
 
   for i := 0 to sz - 1 do
   begin
-    RGBToLAB(a.FSPixels[i * 3 + 0], a.FSPixels[i * 3 + 1], a.FSPixels[i * 3 + 2], ya[i + sz * 0], ya[i + sz * 1], ya[i + sz * 2]);
-    RGBToLAB(b.FSPixels[i * 3 + 0], b.FSPixels[i * 3 + 1], b.FSPixels[i * 3 + 2], yb[i + sz * 0], yb[i + sz * 1], yb[i + sz * 2]);
+    ya[i + sz * 0] := a.FSPixels[i * 3 + 0];
+    ya[i + sz * 1] := a.FSPixels[i * 3 + 1];
+    ya[i + sz * 2] := a.FSPixels[i * 3 + 2];
+
+    yb[i + sz * 0] := b.FSPixels[i * 3 + 0];
+    yb[i + sz * 1] := b.FSPixels[i * 3 + 1];
+    yb[i + sz * 2] := b.FSPixels[i * 3 + 2];
   end;
 
   Result := PearsonCorrelation(ya, yb, Length(ya));
-  EuclideanDist := CompareEuclidean(ya, yb) / Length(a.FSPixels);
 end;
 
 procedure TMainForm.btnDoGlobalTilingClick(Sender: TObject);
@@ -995,6 +1002,8 @@ begin
       raise EFileNotFoundException.Create('File not found: ' + fn);
     end;
   end;
+
+  WriteLn;
 
   ProgressRedraw(1);
 
@@ -1602,38 +1611,6 @@ begin
       RGBPixels[y, x] := ToRGB(min(255, Pixels[y, x, 0]), min(255, Pixels[y, x, 1]), min(255, Pixels[y, x, 2]));
 end;
 
-procedure TMainForm.DitherFloydSteinberg(var AScreen: TByteDynArray);
-var
-  x, y, c, yp, xm, xp: Integer;
-  OldPixel, NewPixel, QuantError: Integer;
-  ppx: PByte;
-begin
-  ppx := @AScreen[0];
-  for y := 0 to CScreenHeight - 1 do
-    for x := 0 to CScreenWidth - 1 do
-    begin
-      yp := IfThen(y < CScreenHeight - 1, cScreenWidth * 3, 0);
-      xp := IfThen(x < CScreenWidth - 1, 3, 0);
-      xm := IfThen(x > 0, -3, 0);
-
-      for c := 0 to 2 do
-      begin
-        OldPixel := ppx^;
-        NewPixel := Posterize(OldPixel, cBitsPerComp);
-        QuantError := OldPixel - NewPixel;
-
-        ppx^ := NewPixel;
-
-        ppx[xp] := EnsureRange(ppx[xp] + (QuantError * 7) shr 4, 0, 255);
-        ppx[yp + xm] := EnsureRange(ppx[yp + xm] + (QuantError * 3) shr 4, 0, 255);
-        ppx[yp] := EnsureRange(ppx[yp] + (QuantError * 5) shr 4, 0, 255);
-        ppx[yp + xp] := EnsureRange(ppx[yp + xp] + (QuantError * 1) shr 4, 0, 255);
-
-        Inc(ppx);
-      end;
-    end;
-end;
-
 procedure TMainForm.DitherTile(var ATile: TTile; var Plan: TMixingPlan);
 var
   x, y: Integer;
@@ -1967,21 +1944,17 @@ end;
 procedure TMainForm.FindKeyFrames;
 var
   Correlations: TFloatDynArray;
-  EuclideanDist: TFloatDynArray;
 
   procedure DoCorrel(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   begin
-    Correlations[AIndex] := ComputeInterFrameCorrelation(FFrames[AIndex - 1], FFrames[AIndex], EuclideanDist[AIndex]);
+    Correlations[AIndex] := ComputeInterFrameCorrelation(FFrames[AIndex - 1], FFrames[AIndex]);
   end;
 
 const
-  CShotTransMaxTilesPerKF = 96 * 1920 * 1080 div sqr(cTileWidth); // limiter for the amount of data in a keyframe
-  CShotTransEuclideanHiThres = 12.0; // frame equivalent accumulated distance
-  CShotTransCorrelLoThres = 0.5; // interframe pearson correlation low limit
-  CShotTransGracePeriod = 0; // minimum frames between keyframes
+  CShotTransCorrelLoThres = 0.4; // interframe pearson correlation low limit
 var
-  i, j, LastKFIdx: Integer;
-  correl, euclidean: TFloat;
+  i, j: Integer;
+  correl: TFloat;
   kfIdx: Integer;
   isKf: Boolean;
   sfr, efr: Integer;
@@ -1989,26 +1962,18 @@ begin
   // compute interframe correlations
 
   SetLength(Correlations, Length(FFrames));
-  SetLength(EuclideanDist, Length(FFrames));
   Correlations[0] := 0.0;
-  EuclideanDist[0] := MaxSingle;
   ProcThreadPool.DoParallelLocalProc(@DoCorrel, 1, High(FFrames));
 
   // find keyframes
 
   SetLength(FKeyFrames, Length(FFrames));
   kfIdx := 0;
-  euclidean := 0.0;
-  LastKFIdx := Low(Integer);
   for i := 0 to High(FFrames) do
   begin
     correl := Correlations[i];
-    euclidean += EuclideanDist[i];
 
-    isKf := (correl < CShotTransCorrelLoThres) or (euclidean > CShotTransEuclideanHiThres) or
-      ((i - LastKFIdx) * cTileMapSize > CShotTransMaxTilesPerKF);
-
-    isKf := isKf and ((i - LastKFIdx) > CShotTransGracePeriod);
+    isKf := correl < CShotTransCorrelLoThres;
 
     if isKf then
     begin
@@ -2016,10 +1981,7 @@ begin
       InitializeCriticalSection(FKeyFrames[kfIdx]^.CS);
       Inc(kfIdx);
 
-      WriteLn('KF: ', kfIdx, #9'Frame: ', i, #9'Correlation: ', FloatToStr(correl), #9'Euclidean: ', FloatToStr(euclidean));
-
-      euclidean := 0.0;
-      LastKFIdx := i;
+      WriteLn('KF: ', kfIdx, #9'Frame: ', i, #9'Correlation: ', correl:9:6);
     end;
 
     FFrames[i].KeyFrame := FKeyFrames[kfIdx - 1];
@@ -2378,8 +2340,6 @@ begin
           Inc(pfs, 3);
         end;
     end;
-
-    DitherFloydSteinberg(AFrame^.FSPixels);
 
     for i := 0 to (cTileMapSize - 1) do
     begin
@@ -3251,32 +3211,34 @@ begin
 end;
 
 procedure TMainForm.MirrorTiles;
-var
-  i: Integer;
-  q00, q01, q10, q11: Integer;
-  TileFrame: TFrame;
-  TileTMI: PTileMapItem;
-begin
-  for i := 0 to High(FTiles) do
+
+  procedure DoMirror(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  var
+    q00, q01, q10, q11: Integer;
+    TileFrame: TFrame;
+    TileTMI: PTileMapItem;
   begin
-    if not FTiles[i]^.Active then
-      Continue;
+    if not FTiles[AIndex]^.Active then
+      Exit;
 
     // enforce a 'spin' on tiles mirrors (brighter top-left corner)
 
-    q00 := GetTileZoneSum(FTiles[i]^, 0, 0, cTileWidth div 2, cTileWidth div 2);
-    q01 := GetTileZoneSum(FTiles[i]^, cTileWidth div 2, 0, cTileWidth div 2, cTileWidth div 2);
-    q10 := GetTileZoneSum(FTiles[i]^, 0, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2);
-    q11 := GetTileZoneSum(FTiles[i]^, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2);
+    q00 := GetTileZoneSum(FTiles[AIndex]^, 0, 0, cTileWidth div 2, cTileWidth div 2);
+    q01 := GetTileZoneSum(FTiles[AIndex]^, cTileWidth div 2, 0, cTileWidth div 2, cTileWidth div 2);
+    q10 := GetTileZoneSum(FTiles[AIndex]^, 0, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2);
+    q11 := GetTileZoneSum(FTiles[AIndex]^, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2);
 
-    TileTMI := GetTileIndexTMItem(FTiles[i]^, TileFrame);
+    TileTMI := GetTileIndexTMItem(FTiles[AIndex]^, TileFrame);
 
     TileTMI^.HMirror := q00 + q10 < q01 + q11;
     TileTMI^.VMirror := q00 + q01 < q10 + q11;
 
-    if TileTMI^.HMirror then HMirrorTile(FTiles[i]^);
-    if TileTMI^.VMirror then VMirrorTile(FTiles[i]^);
+    if TileTMI^.HMirror then HMirrorTile(FTiles[AIndex]^);
+    if TileTMI^.VMirror then VMirrorTile(FTiles[AIndex]^);
   end;
+
+begin
+  ProcThreadPool.DoParallelLocalProc(@DoMirror, 0, High(FTiles));
 end;
 
 procedure TMainForm.DoFrameTiling(AFrame: PFrame; DesiredNbTiles: Integer; Dual: Boolean);
