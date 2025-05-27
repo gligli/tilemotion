@@ -33,8 +33,6 @@ const
 {$endif}
   cLumaDiv = cRedMul + cGreenMul + cBlueMul;
   cRGBw = 13; // in 1 / 32th
-  cYUVLumaFactor = 1.5;
-  cYUVChromaFactor = 1.0;
 
   // SMS consts
   cVecInvWidth = 16;
@@ -235,7 +233,6 @@ type
 
     CS: TRTLCriticalSection;
 
-    PaletteCentroids: array[Boolean] of TFloatDynArray;
     PaletteUseCount: array [Boolean] of packed record
       UseCount: Integer;
       PaletteIndexes: TIntegerDynArray;
@@ -413,8 +410,8 @@ type
 
     procedure QuantizePalette(AKeyFrame: PKeyFrame; ASpritePal: Boolean);
     procedure FinishQuantizePalette(AKeyFrame: PKeyFrame);
-    procedure PrepareDitherTiles(AKeyFrame: PKeyFrame);
-    procedure FinishDitherTiles(AKF: PKeyFrame);
+    procedure Pallettize(AKeyFrame: PKeyFrame);
+    procedure DitherTiles(AKF: PKeyFrame);
     procedure DitherTile(var ATile: TTile; var Plan: TMixingPlan);
 
     procedure HMirrorTile(var ATile: TTile);
@@ -681,11 +678,6 @@ begin
   Result := CompareValue(pi1^, pi2^);
 end;
 
-function ColorCompare(r1, g1, b1, r2, g2, b2: Integer): Int64; inline;
-begin
-  Result := sqr(r1 - r2) + sqr(g1 - g2) + sqr(b1 - b2);
-end;
-
 function CompareEuclidean(const a, b: TFloatDynArray): TFloat; inline;
 var
   i: Integer;
@@ -763,12 +755,12 @@ end;
 
 procedure TMainForm.btnDitherClick(Sender: TObject);
 
-  procedure DoPrepare(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  procedure DoPalettize(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   begin
     if not InRange(AIndex, 0, High(FKeyFrames)) then
       Exit;
 
-    PrepareDitherTiles(FKeyFrames[AIndex]);
+    Pallettize(FKeyFrames[AIndex]);
   end;
 
   procedure DoQuantize(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
@@ -779,12 +771,12 @@ procedure TMainForm.btnDitherClick(Sender: TObject);
     QuantizePalette(FKeyFrames[AIndex div 2], Odd(AIndex));
   end;
 
-  procedure DoFinish(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  procedure DoDither(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   begin
     if not InRange(AIndex, 0, High(FKeyFrames)) then
       Exit;
 
-    FinishDitherTiles(FKeyFrames[AIndex]);
+    DitherTiles(FKeyFrames[AIndex]);
   end;
 
 var
@@ -794,7 +786,7 @@ begin
     Exit;
 
   ProgressRedraw(-1, esDither);
-  ProcThreadPool.DoParallelLocalProc(@DoPrepare, 0, High(FKeyFrames));
+  ProcThreadPool.DoParallelLocalProc(@DoPalettize, 0, High(FKeyFrames));
   ProgressRedraw(1);
 
   ProcThreadPool.DoParallelLocalProc(@DoQuantize, 0, Length(FKeyFrames) * 2 - 1);
@@ -804,7 +796,7 @@ begin
 
   ProgressRedraw(2);
 
-  ProcThreadPool.DoParallelLocalProc(@DoFinish, 0, High(FKeyFrames));
+  ProcThreadPool.DoParallelLocalProc(@DoDither, 0, High(FKeyFrames));
   ProgressRedraw(3);
 
   tbFrameChange(nil);
@@ -1710,7 +1702,7 @@ begin
     Result := CompareValue(Item1^.Luma, Item2^.Luma);
 end;
 
-procedure TMainForm.PrepareDitherTiles(AKeyFrame: PKeyFrame);
+procedure TMainForm.Pallettize(AKeyFrame: PKeyFrame);
 var
   sx, sy, i: Integer;
 
@@ -1722,15 +1714,13 @@ var
 begin
   SetLength(Dataset, AKeyFrame^.FrameCount * cTileMapSize, cTileDCTSize);
   SetLength(Clusters, Length(Dataset));
-  SetLength(AKeyFrame^.PaletteCentroids[False], cTileDCTSize);
-  SetLength(AKeyFrame^.PaletteCentroids[True], cTileDCTSize);
 
   di := 0;
   for i := AKeyFrame^.StartFrame to AKeyFrame^.EndFrame do
     for sy := 0 to cTileMapHeight - 1 do
       for sx := 0 to cTileMapWidth - 1 do
       begin
-        ComputeTilePsyVisFeatures(FFrames[i].Tiles[sy * cTileMapWidth + sx], pvsWeightedDCT, False, True, False, False, cColorCpns, nil, @Dataset[di, 0]);
+        ComputeTilePsyVisFeatures(FTiles[FFrames[i].TileMap[sy, sx].TileIdx]^, pvsWeightedDCT, False, True, False, False, cColorCpns, nil, @Dataset[di, 0]);
         Inc(di);
       end;
   assert(di = Length(Dataset));
@@ -1742,7 +1732,6 @@ begin
    yakmo_load_train_data(Yakmo, di, cTileDCTSize, PPFloat(@Dataset[0]));
    SetLength(Dataset, 0); // free up some memmory
    yakmo_train_on_data(Yakmo, @Clusters[0]);
-   yakmo_get_centroids(Yakmo, PPFloat(@AKeyFrame^.PaletteCentroids[False]));
    yakmo_destroy(Yakmo);
   end
   else
@@ -1767,31 +1756,21 @@ procedure TMainForm.QuantizePalette(AKeyFrame: PKeyFrame; ASpritePal: Boolean);
 var
   CMPal: TCountIndexList;
 
-  procedure DoColorProbabilityBased;
+  procedure DoDLv3;
   var
-    map_value: Integer;
-    iFrame, iPal, sy, sx, ty, tx: Integer;
+    buf: TByteDynArray;
+    iMap, iPal, iFrame, sy, sx, ty, tx: Integer;
+    rr, gg, bb: Byte;
+    best, v: Int64;
     GTile: PTile;
-    CMPlan: TMixingPlan;
+    p: PByte;
+    pal: TDLUserPal;
     CMItem: PCountIndex;
-    list: TByteDynArray;
+    CMPicked: TBooleanDynArray;
   begin
-    PreparePlan(CMPlan, FY2MixedColors, FColorMap);
-    SetLength(list, cDitheringLen);
+    SetLength(buf, AKeyFrame^.FrameCount * cTileMapSize * Sqr(cTileWidth) * cColorCpns);
 
-    for iFrame := 0 to cTotalColors - 1 do
-    begin
-      New(CMItem);
-      CMItem^.Count := 0;
-      CMItem^.Index := iFrame;
-      CMItem^.Luma := FColorMapLuma[iFrame];
-      FromRGB(FColorMap[iFrame], CMItem^.R, CMItem^.G, CMItem^.B);
-      RGBToHSV(ToRGB(CMItem^.R, CMItem^.G, CMItem^.B), CMItem^.Hue, CMItem^.Sat, CMItem^.Val);
-      CMPal.Add(CMItem);
-    end;
-
-    // dither area using full SMS palette to find most used colors
-
+    p := @buf[0];
     for iFrame := AKeyFrame^.StartFrame to AKeyFrame^.EndFrame do
       for sy := 0 to cTileMapHeight - 1 do
         for sx := 0 to cTileMapWidth - 1 do
@@ -1800,30 +1779,56 @@ var
 
           if GTile^.Active and (FFrames[iFrame].TileMap[sy, sx].SpritePal = ASpritePal) then
           begin
-            FillChar(list[0], Length(list), 0);
-
             for ty := 0 to cTileWidth - 1 do
               for tx := 0 to cTileWidth - 1 do
               begin
-                map_value := cDitheringMap[((ty and 7) shl 3) + (tx and 7)];
-                DeviseBestMixingPlanThomasKnoll(CMPlan, GTile^.RGBPixels[ty, tx], list);
-                Inc(CMPal[list[map_value]]^.Count);
+                FromRGB(GTile^.RGBPixels[ty, tx], p[0], p[1], p[2]);
+                Inc(p, 3);
               end;
 
             Inc(AKeyFrame^.PaletteUseCount[ASpritePal].UseCount);
           end;
         end;
 
-    CMPal.Sort(@CompareCMUCnt);
+    dl3quant(@buf[0], cTileWidth, (p - @buf[0]) div (3 * cTileWidth), cTilePaletteSize, cBitsPerComp, @pal);
 
-    // keep 16 most used colors
 
-    for iPal := cTilePaletteSize to CMPal.Count - 1 do
-      Dispose(CMPal[iPal]);
+    SetLength(CMPicked, cTotalColors);
 
-    CMPal.Count := cTilePaletteSize;
+    for iPal := 0 to cTilePaletteSize - 1 do
+    begin
+      New(CMItem);
+      CMItem^.Count := 0;
 
-    TerminatePlan(CMPlan);
+      CMItem^.R := pal[0, iPal];
+      CMItem^.G := pal[1, iPal];
+      CMItem^.B := pal[2, iPal];
+
+      CMItem^.Index := 0;
+
+      best := High(Int64);
+      for iMap := 0 to High(FColorMap) do
+        if not CMPicked[iMap] then
+        begin
+          FromRGB(FColorMap[iMap], rr, gg, bb);
+
+          v := CompareColor(CMItem^.R, CMItem^.G, CMItem^.B, rr, gg, bb);
+
+          if v < best then
+          begin
+            best := v;
+            CMItem^.Index := iMap;
+          end;
+        end;
+
+      Assert(not CMPicked[CMItem^.Index]);
+      CMPicked[CMItem^.Index] := True;
+
+      CMItem^.Luma := FColorMapLuma[CMItem^.Index];
+      FromRGB(FColorMap[CMItem^.Index], CMItem^.R, CMItem^.G, CMItem^.B);
+      RGBToHSV(ToRGB(CMItem^.R, CMItem^.G, CMItem^.B), CMItem^.Hue, CMItem^.Sat, CMItem^.Val);
+      CMPal.Add(CMItem);
+    end;
   end;
 
 var
@@ -1833,7 +1838,7 @@ begin
   try
     AKeyFrame^.PaletteUseCount[ASpritePal].UseCount := 0;
 
-    DoColorProbabilityBased;
+    DoDLv3;
 
     // split most used colors into tile palettes
 
@@ -1860,7 +1865,6 @@ procedure TMainForm.FinishQuantizePalette(AKeyFrame: PKeyFrame);
 var
   i, sy, sx: Integer;
   PalIdxLUT: array[Boolean] of Boolean;
-  TmpCentroids: array[Boolean] of TFloatDynArray;
   SpritePal: Boolean;
 begin
   // sort entire palettes by use count
@@ -1888,15 +1892,9 @@ begin
       begin
         FFrames[i].TileMap[sy, sx].SpritePal := PalIdxLUT[FFrames[i].TileMap[sy, sx].SpritePal];
       end;
-
-  for SpritePal := False to True do
-    TmpCentroids[SpritePal] := AKeyFrame^.PaletteCentroids[SpritePal];
-
-  for SpritePal := False to True do
-    AKeyFrame^.PaletteCentroids[PalIdxLUT[SpritePal]] := TmpCentroids[SpritePal];
 end;
 
-procedure TMainForm.FinishDitherTiles(AKF: PKeyFrame);
+procedure TMainForm.DitherTiles(AKF: PKeyFrame);
 var
   i, sx, sy, frmIdx: Integer;
   pal: Boolean;
@@ -1978,9 +1976,9 @@ var
 
 const
   CShotTransMaxTilesPerKF = 96 * 1920 * 1080 div sqr(cTileWidth); // limiter for the amount of data in a keyframe
-  CShotTransEuclideanHiThres = 6.0; // frame equivalent accumulated distance
+  CShotTransEuclideanHiThres = 12.0; // frame equivalent accumulated distance
   CShotTransCorrelLoThres = 0.5; // interframe pearson correlation low limit
-  CShotTransGracePeriod = 1; // minimum frames between keyframes
+  CShotTransGracePeriod = 0; // minimum frames between keyframes
 var
   i, j, LastKFIdx: Integer;
   correl, euclidean: TFloat;
@@ -2284,7 +2282,7 @@ var
       Result := LABToRGB(yy, uu, vv)
     else
       Result := YUVToRGB(yy, uu, vv);
-  end;
+    end;
 
 begin
   Assert(not (Mode in [pvsSpeDCT, pvsWeightedSpeDCT]), 'Special DCT is non-inversible');
