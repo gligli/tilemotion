@@ -878,7 +878,7 @@ begin
 
   MaxTPF := seMaxTPF.Value;
 
-  Pass(MaxTPF, False);
+  Pass(Ceil(MaxTPF * cInvPhi), False);
   ProgressRedraw(1);
 
   Pass(MaxTPF, True);
