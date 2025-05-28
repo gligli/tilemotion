@@ -48,7 +48,6 @@ object MainForm: TMainForm
     Height = 384
     Top = 398
     Width = 256
-    Anchors = [akTop, akLeft, akBottom]
     PopupMenu = pmProcesses
     Stretch = True
   end
