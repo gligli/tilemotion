@@ -379,7 +379,7 @@ object MainForm: TMainForm
     Increment = 10
     MaxValue = 1000
     TabOrder = 11
-    Value = 200
+    Value = 100
   end
   object seQbTiles: TFloatSpinEdit
     Left = 208

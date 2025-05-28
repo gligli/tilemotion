@@ -855,7 +855,7 @@ begin
   if Length(FKeyFrames) = 0 then
     Exit;
 
-  maxTPF := cMaxTilesPerFrame;
+  maxTPF := cMaxTilesPerFrame - 14;
 
   ProgressRedraw(-1, esReconstruct);
 
@@ -1162,7 +1162,7 @@ procedure TMainForm.btnSmoothClick(Sender: TObject);
   var i: Integer;
   begin
     for i := 1 to High(FFrames) do
-      DoTemporalSmoothing(i, AIndex, seTempoSmoo.Value / 100.0);
+      DoTemporalSmoothing(i, AIndex, seTempoSmoo.Value);
   end;
 begin
   if (Length(FFrames) = 0) or (seTempoSmoo.Value < 0) then
@@ -3540,19 +3540,25 @@ begin
 
     if Abs(cmp) <= Strength then
     begin
-      TMI^.TileIdx := PrevTMI^.TileIdx;
-      TMI^.HMirror := PrevTMI^.HMirror;
-      TMI^.VMirror := PrevTMI^.VMirror;
-      TMI^.SpritePal := PrevTMI^.SpritePal;
+      if TMI^.TileIdx >= PrevTMI^.TileIdx then // lower tile index means the tile is used more often
+      begin
+        TMI^.TileIdx := PrevTMI^.TileIdx;
+        TMI^.HMirror := PrevTMI^.HMirror;
+        TMI^.VMirror := PrevTMI^.VMirror;
+        TMI^.SpritePal := PrevTMI^.SpritePal;
+      end
+      else
+      begin
+        PrevTMI^.TileIdx := TMI^.TileIdx;
+        PrevTMI^.HMirror := TMI^.HMirror;
+        PrevTMI^.VMirror := TMI^.VMirror;
+        PrevTMI^.SpritePal := TMI^.SpritePal;
+      end;
 
       if AFrameIdx >= cSmoothingPrevFrame then
       begin
         PrevTMI := @FFrames[AFrameIdx - cSmoothingPrevFrame].TileMap[Y, sx];
-        TMI^.Smoothed :=
-          (PrevTMI^.TileIdx = TMI^.TileIdx) and
-          (PrevTMI^.HMirror = TMI^.HMirror) and
-          (PrevTMI^.VMirror = TMI^.VMirror) and
-          (PrevTMI^.SpritePal = TMI^.SpritePal);
+        TMI^.Smoothed := CompareMem(PrevTMI, TMI, SizeOf(TTileMapItem));
       end;
     end;
   end;
