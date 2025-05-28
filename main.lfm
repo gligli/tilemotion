@@ -22,7 +22,7 @@ object MainForm: TMainForm
     Top = 336
     Width = 224
     Smooth = True
-    TabOrder = 13
+    TabOrder = 14
   end
   object imgSource: TImage
     Left = 272
@@ -65,7 +65,7 @@ object MainForm: TMainForm
     Anchors = [akLeft, akRight, akBottom]
     Color = 3487029
     ParentColor = False
-    TabOrder = 21
+    TabOrder = 22
   end
   object chkPlay: TCheckBox
     Left = 272
@@ -74,7 +74,7 @@ object MainForm: TMainForm
     Width = 40
     Anchors = [akLeft, akBottom]
     Caption = 'Play'
-    TabOrder = 15
+    TabOrder = 16
   end
   object lblTileCount: TLabel
     Left = 8
@@ -94,7 +94,7 @@ object MainForm: TMainForm
     Caption = 'Dithered'
     Checked = True
     State = cbChecked
-    TabOrder = 16
+    TabOrder = 17
     OnChange = tbFrameChange
   end
   object Label2: TLabel
@@ -143,9 +143,9 @@ object MainForm: TMainForm
     Height = 25
     Top = 304
     Width = 69
-    Caption = 'Run all (F9)'
+    Caption = 'Run all'
     PopupMenu = pmProcesses
-    TabOrder = 11
+    TabOrder = 12
     OnClick = btnRunAllClick
   end
   object sePage: TSpinEdit
@@ -154,7 +154,7 @@ object MainForm: TMainForm
     Top = 369
     Width = 56
     MaxValue = 10000
-    TabOrder = 14
+    TabOrder = 15
     OnChange = tbFrameChange
   end
   object Label6: TLabel
@@ -218,7 +218,7 @@ object MainForm: TMainForm
   object Label9: TLabel
     Left = 8
     Height = 16
-    Top = 248
+    Top = 272
     Width = 155
     Caption = 'Temporal smoothing strength'
     ParentColor = False
@@ -238,7 +238,7 @@ object MainForm: TMainForm
     Top = 304
     Width = 69
     Caption = 'Test debug'
-    TabOrder = 12
+    TabOrder = 13
     Visible = False
   end
   object chkMirrored: TCheckBox
@@ -250,7 +250,7 @@ object MainForm: TMainForm
     Caption = 'Mirrored'
     Checked = True
     State = cbChecked
-    TabOrder = 18
+    TabOrder = 19
     OnChange = tbFrameChange
   end
   object lblPct: TLabel
@@ -272,7 +272,7 @@ object MainForm: TMainForm
     Anchors = [akLeft, akBottom]
     Caption = 'Sprite palette'
     State = cbGrayed
-    TabOrder = 19
+    TabOrder = 20
     OnChange = tbFrameChange
   end
   object chkGamma: TCheckBox
@@ -283,7 +283,7 @@ object MainForm: TMainForm
     Anchors = [akLeft, akBottom]
     AutoSize = False
     Caption = 'Gamma'
-    TabOrder = 20
+    TabOrder = 21
     OnChange = tbFrameChange
   end
   object seMaxTiles: TSpinEdit
@@ -304,7 +304,7 @@ object MainForm: TMainForm
     Caption = 'Reduced'
     Checked = True
     State = cbChecked
-    TabOrder = 17
+    TabOrder = 18
     OnChange = tbFrameChange
   end
   object lblCorrel: TLabel
@@ -374,11 +374,12 @@ object MainForm: TMainForm
   object seTempoSmoo: TFloatSpinEdit
     Left = 208
     Height = 24
-    Top = 246
+    Top = 270
     Width = 56
-    MaxValue = 100
-    TabOrder = 10
-    Value = 20
+    Increment = 10
+    MaxValue = 1000
+    TabOrder = 11
+    Value = 200
   end
   object seQbTiles: TFloatSpinEdit
     Left = 208
@@ -390,6 +391,17 @@ object MainForm: TMainForm
     TabOrder = 9
     Value = 1
     OnEditingDone = seQbTilesEditingDone
+  end
+  object chkRecPal: TCheckBox
+    Left = 8
+    Height = 20
+    Top = 244
+    Width = 187
+    Caption = 'Reconstruct from palettized tiles'
+    Checked = True
+    State = cbChecked
+    TabOrder = 10
+    OnChange = chkRecPalChange
   end
   object IdleTimer: TIdleTimer
     Enabled = False
