@@ -34,9 +34,6 @@ type
 
   PANNkdtree = ^TANNkdtree;
 
-  TDLUserPal = array[0..2, 0..65535] of Byte;
-  PDLUserPal = ^TDLUserPal;
-
   TYakmo = record
   end;
 
@@ -64,9 +61,6 @@ function ann_kdtree_short_create(pa: PPSmallint; n, dd, bs: Integer; split: TANN
 procedure ann_kdtree_short_destroy(akd: PANNkdtree); external 'ANN_short.dll' name 'ann_kdtree_destroy';
 function ann_kdtree_short_search(akd: PANNkdtree; q: PSmallInt; eps: Cardinal; err: PCardinal): Integer; external 'ANN_short.dll' name 'ann_kdtree_search';
 procedure ann_kdtree_short_search_multi(akd: PANNkdtree; idxs: PInteger; errs: PCardinal; cnt: Integer; q: PSmallInt; eps: Cardinal); external 'ANN_short.dll' name 'ann_kdtree_search_multi';
-
-function dl1quant(inbuf: PByte; width, height, quant_to, lookup_bpc: Integer; userpal: PDLUserPal): Integer; stdcall; external 'dlquant_dll.dll';
-function dl3quant(inbuf: PByte; width, height, quant_to, lookup_bpc: Integer; userpal: PDLUserPal): Integer; stdcall; external 'dlquant_dll.dll';
 
 function yakmo_create(k: Cardinal; restartCount: Cardinal; maxIter: Integer; initType: Integer; initSeed: Integer; doNormalize: Integer; isVerbose: Integer): PYakmo; stdcall; external 'yakmo.dll';
 procedure yakmo_destroy(ay: PYakmo); stdcall; external 'yakmo.dll';

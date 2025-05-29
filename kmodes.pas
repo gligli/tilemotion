@@ -983,7 +983,8 @@ begin
       end;
     end;
 
-    WriteLn(LogLabel, 'Init done');
+    if Log then
+      WriteLn(LogLabel, 'Init done');
 
     itr := 0;
     converged := False;
@@ -1026,7 +1027,8 @@ begin
         WriteLn(LogLabel, 'Itr: ', itr:3, ' Moves: ', moves: 6, ' Cost: ', cost:16);
     end;
 
-    WriteLn(LogLabel, 'Itr: ', itr:3, ' Finished!'#9'BestItr: ', bestitr:3, ' BestCost: ', bestcost:16);
+    if Log then
+      WriteLn(LogLabel, 'Itr: ', itr:3, ' Finished!'#9'BestItr: ', bestitr:3, ' BestCost: ', bestcost:16);
 
     all[init_no].Labels := bestmembship;
     all[init_no].Centroids := bestcentroids;

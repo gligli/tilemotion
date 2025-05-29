@@ -22,7 +22,7 @@ object MainForm: TMainForm
     Top = 336
     Width = 224
     Smooth = True
-    TabOrder = 14
+    TabOrder = 13
   end
   object imgSource: TImage
     Left = 272
@@ -65,7 +65,7 @@ object MainForm: TMainForm
     Anchors = [akLeft, akRight, akBottom]
     Color = 3487029
     ParentColor = False
-    TabOrder = 22
+    TabOrder = 21
   end
   object chkPlay: TCheckBox
     Left = 272
@@ -74,7 +74,7 @@ object MainForm: TMainForm
     Width = 40
     Anchors = [akLeft, akBottom]
     Caption = 'Play'
-    TabOrder = 16
+    TabOrder = 15
   end
   object lblTileCount: TLabel
     Left = 8
@@ -94,13 +94,13 @@ object MainForm: TMainForm
     Caption = 'Dithered'
     Checked = True
     State = cbChecked
-    TabOrder = 17
+    TabOrder = 16
     OnChange = tbFrameChange
   end
   object Label2: TLabel
     Left = 8
     Height = 16
-    Top = 216
+    Top = 128
     Width = 116
     Caption = 'Tile limit (all; Q based)'
     ParentColor = False
@@ -127,7 +127,7 @@ object MainForm: TMainForm
     Top = 8
     Width = 152
     TabOrder = 0
-    Text = 'Slayers - 05 (BD 720P x264 10bit AAC)_edit_sms.avi'
+    Text = 'sonic2020.mkv'
     OnChange = edInputChange
   end
   object Label4: TLabel
@@ -145,7 +145,7 @@ object MainForm: TMainForm
     Width = 69
     Caption = 'Run all'
     PopupMenu = pmProcesses
-    TabOrder = 12
+    TabOrder = 11
     OnClick = btnRunAllClick
   end
   object sePage: TSpinEdit
@@ -154,7 +154,7 @@ object MainForm: TMainForm
     Top = 369
     Width = 56
     MaxValue = 10000
-    TabOrder = 15
+    TabOrder = 14
     OnChange = tbFrameChange
   end
   object Label6: TLabel
@@ -168,7 +168,7 @@ object MainForm: TMainForm
   object Label7: TLabel
     Left = 8
     Height = 16
-    Top = 126
+    Top = 162
     Width = 100
     Caption = 'Max tiles per frame'
     ParentColor = False
@@ -176,11 +176,11 @@ object MainForm: TMainForm
   object seMaxTPF: TSpinEdit
     Left = 208
     Height = 24
-    Top = 124
+    Top = 160
     Width = 56
     MaxValue = 414
-    MinValue = 207
-    TabOrder = 5
+    MinValue = 1
+    TabOrder = 7
     Value = 360
   end
   object Label10: TLabel
@@ -218,7 +218,7 @@ object MainForm: TMainForm
   object Label9: TLabel
     Left = 8
     Height = 16
-    Top = 272
+    Top = 256
     Width = 155
     Caption = 'Temporal smoothing strength'
     ParentColor = False
@@ -238,7 +238,7 @@ object MainForm: TMainForm
     Top = 304
     Width = 69
     Caption = 'Test debug'
-    TabOrder = 13
+    TabOrder = 12
     Visible = False
   end
   object chkMirrored: TCheckBox
@@ -250,7 +250,7 @@ object MainForm: TMainForm
     Caption = 'Mirrored'
     Checked = True
     State = cbChecked
-    TabOrder = 19
+    TabOrder = 18
     OnChange = tbFrameChange
   end
   object lblPct: TLabel
@@ -272,7 +272,7 @@ object MainForm: TMainForm
     Anchors = [akLeft, akBottom]
     Caption = 'Sprite palette'
     State = cbGrayed
-    TabOrder = 20
+    TabOrder = 19
     OnChange = tbFrameChange
   end
   object chkGamma: TCheckBox
@@ -283,15 +283,15 @@ object MainForm: TMainForm
     Anchors = [akLeft, akBottom]
     AutoSize = False
     Caption = 'Gamma'
-    TabOrder = 21
+    TabOrder = 20
     OnChange = tbFrameChange
   end
   object seMaxTiles: TSpinEdit
     Left = 145
     Height = 24
-    Top = 214
+    Top = 126
     Width = 56
-    TabOrder = 8
+    TabOrder = 5
     OnEditingDone = seMaxTilesEditingDone
   end
   object chkReduced: TCheckBox
@@ -304,7 +304,7 @@ object MainForm: TMainForm
     Caption = 'Reduced'
     Checked = True
     State = cbChecked
-    TabOrder = 18
+    TabOrder = 17
     OnChange = tbFrameChange
   end
   object lblCorrel: TLabel
@@ -330,7 +330,7 @@ object MainForm: TMainForm
   object cbxYilMix: TComboBox
     Left = 208
     Height = 24
-    Top = 157
+    Top = 196
     Width = 56
     ItemHeight = 16
     ItemIndex = 3
@@ -341,14 +341,14 @@ object MainForm: TMainForm
       '8'
       '16'
     )
-    TabOrder = 6
+    TabOrder = 8
     Text = '8'
     OnChange = cbxYilMixChange
   end
   object Label11: TLabel
     Left = 8
     Height = 16
-    Top = 159
+    Top = 198
     Width = 156
     Caption = 'Yiluoma 2 mixed colors count'
     ParentColor = False
@@ -356,10 +356,10 @@ object MainForm: TMainForm
   object chkUseTK: TCheckBox
     Left = 8
     Height = 20
-    Top = 182
+    Top = 224
     Width = 246
     Caption = 'Use Thomas Knoll dithering (not Yiluoma 2)'
-    TabOrder = 7
+    TabOrder = 9
     OnChange = chkUseTKChange
   end
   object btChooseFile: TButton
@@ -374,34 +374,23 @@ object MainForm: TMainForm
   object seTempoSmoo: TFloatSpinEdit
     Left = 208
     Height = 24
-    Top = 270
+    Top = 254
     Width = 56
     Increment = 10
     MaxValue = 1000
-    TabOrder = 11
+    TabOrder = 10
     Value = 100
   end
   object seQbTiles: TFloatSpinEdit
     Left = 208
     Height = 24
-    Top = 214
+    Top = 126
     Width = 56
     Increment = 0.1
     MaxValue = 100
-    TabOrder = 9
+    TabOrder = 6
     Value = 1
     OnEditingDone = seQbTilesEditingDone
-  end
-  object chkRecPal: TCheckBox
-    Left = 8
-    Height = 20
-    Top = 244
-    Width = 187
-    Caption = 'Reconstruct from palettized tiles'
-    Checked = True
-    State = cbChecked
-    TabOrder = 10
-    OnChange = chkRecPalChange
   end
   object IdleTimer: TIdleTimer
     Enabled = False
@@ -417,6 +406,10 @@ object MainForm: TMainForm
       Caption = 'Load'
       OnClick = btnLoadClick
     end
+    object MenuItem2: TMenuItem
+      Caption = 'Tile (key frame)'
+      OnClick = btnDoKeyFrameTilingClick
+    end
     object miIntra: TMenuItem
       Caption = 'Tile (frame)'
       OnClick = btnFrameTileClick
@@ -425,13 +418,13 @@ object MainForm: TMainForm
       Caption = 'Dither'
       OnClick = btnDitherClick
     end
-    object MenuItem2: TMenuItem
-      Caption = 'Tile (global)'
-      OnClick = btnDoGlobalTilingClick
-    end
     object MenuItem3: TMenuItem
-      Caption = 'Reconstruct'
-      OnClick = btnReconstructClick
+      Caption = 'Make unique'
+      OnClick = btnMakeUniqueClick
+    end
+    object MenuItem7: TMenuItem
+      Caption = 'Fixup tile count'
+      OnClick = btnFixupClick
     end
     object MenuItem4: TMenuItem
       Caption = 'Reindex'
