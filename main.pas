@@ -399,7 +399,7 @@ type
     procedure DitherTile(var ATile: TTile; var Plan: TMixingPlan);
 
     procedure LoadTiles;
-    procedure MirrorTiles(AOnPal: Boolean);
+    procedure MirrorTiles(AOnPal, ASimple: Boolean);
 
     function GetGlobalTileCount: Integer;
     function GetFrameTileCount(AFrame: PFrame; ADelta, AFromTileIdxs: Boolean; ADeltaFrame: PFrame = nil): Integer;
@@ -415,7 +415,7 @@ type
     procedure HMirrorTile(var ATile: TTile);
     procedure VMirrorTile(var ATile: TTile);
     function GetTileZoneSum(const ATile: TTile; AOnPal: Boolean; x, y, w, h: Integer): Integer;
-    function GetTileIndexTMItem(const ATile: TTile; out AFrame: TFrame): PTileMapItem;
+    function GetTileIndexTMItem(ATileIndex: Integer; out AFrame: TFrame): PTileMapItem;
 
     procedure MakeTilesUnique;
     procedure MergeTiles(const TileIndexes: array of Integer; TileCount: Integer; BestIdx: Integer);
@@ -788,7 +788,7 @@ begin
   for iKF := 0 to High(FKeyFrames) do
     eqtc[iKF] := Max(1, round(eqtc[iKF] * rt));
 
-  MirrorTiles(False);
+  MirrorTiles(False, True);
   ProgressRedraw(1);
 
   InitMergeTiles;
@@ -833,7 +833,7 @@ begin
 
   ProgressRedraw(-1, esDither);
 
-  MirrorTiles(False);
+  MirrorTiles(False, False);
   ProgressRedraw(1);
 
   ProcThreadPool.DoParallelLocalProc(@DoPalettize, 0, High(FKeyFrames));
@@ -857,7 +857,7 @@ procedure TMainForm.btnMakeUniqueClick(Sender: TObject);
 begin
   ProgressRedraw(-1, esMakeUnique);
 
-  MirrorTiles(True);
+  MirrorTiles(True, True);
   ProgressRedraw(1);
 
   InitMergeTiles;
@@ -936,7 +936,7 @@ begin
 
   MaxTPF := seMaxTPF.Value;
 
-  MirrorTiles(False);
+  MirrorTiles(False, False);
   ProgressRedraw(1);
 
   Pass(MaxTPF, False);
@@ -3257,7 +3257,7 @@ begin
       end;
 end;
 
-procedure TMainForm.MirrorTiles(AOnPal: Boolean);
+procedure TMainForm.MirrorTiles(AOnPal, ASimple: Boolean);
 
   procedure DoMirror(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
@@ -3265,6 +3265,7 @@ procedure TMainForm.MirrorTiles(AOnPal: Boolean);
     q00, q01, q10, q11: Integer;
     hmir, vmir: Boolean;
     TMI: PTileMapItem;
+    TileFrame: TFrame;
   begin
     if not FTiles[AIndex]^.Active then
       Exit;
@@ -3282,18 +3283,28 @@ procedure TMainForm.MirrorTiles(AOnPal: Boolean);
     if hmir then HMirrorTile(FTiles[AIndex]^);
     if vmir then VMirrorTile(FTiles[AIndex]^);
 
-    for iFrame := 0 to High(FFrames) do
-      for sy := 0 to cTileMapHeight - 1 do
-        for sx := 0 to cTileMapWidth - 1 do
-        begin
-          TMI := @FFrames[iFrame].TileMap[sy, sx];
+    if ASimple then
+    begin
+      TMI := GetTileIndexTMItem(AIndex, TileFrame);
 
-          if TMI^.TileIdx = AIndex then
+      TMI^.HMirror := TMI^.HMirror xor hmir;
+      TMI^.VMirror := TMI^.VMirror xor vmir;
+    end
+    else
+    begin
+      for iFrame := 0 to High(FFrames) do
+        for sy := 0 to cTileMapHeight - 1 do
+          for sx := 0 to cTileMapWidth - 1 do
           begin
-            TMI^.HMirror := TMI^.HMirror xor hmir;
-            TMI^.VMirror := TMI^.VMirror xor vmir;
+            TMI := @FFrames[iFrame].TileMap[sy, sx];
+
+            if TMI^.TileIdx = AIndex then
+            begin
+              TMI^.HMirror := TMI^.HMirror xor hmir;
+              TMI^.VMirror := TMI^.VMirror xor vmir;
+            end;
           end;
-        end;
+    end;
   end;
 
 begin
@@ -3544,17 +3555,17 @@ begin
         Inc(Result, Ord(FFrames[i].TileMap[sy, sx].TileIdx = ATileIndex));
 end;
 
-function TMainForm.GetTileIndexTMItem(const ATile: TTile; out AFrame: TFrame): PTileMapItem;
+function TMainForm.GetTileIndexTMItem(ATileIndex: Integer; out AFrame: TFrame): PTileMapItem;
 var
   frmIdx, int, sy, sx: Integer;
 begin
-  Assert(ATile.TmpIndex >= 0);
-
-  DivMod(ATile.TmpIndex , cTileMapSize, frmIdx, int);
+  DivMod(ATileIndex , cTileMapSize, frmIdx, int);
   DivMod(int, cTileMapWidth, sy, sx);
 
   Result := @FFrames[frmIdx].TileMap[sy, sx];
   AFrame := FFrames[frmIdx];
+
+  Assert(Result^.TileIdx = ATileIndex);
 end;
 
 function TMainForm.WriteTileDatasetLine(const ATile: TTile; var DataLine: array of Byte): Integer;
