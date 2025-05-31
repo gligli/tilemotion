@@ -26,14 +26,6 @@ type
   		ANN_KD_SUGGEST = 5 // the authors' suggestion for best
   );
 
-  PPSmallint = ^PSmallInt;
-  TSmallIntDynArray2 = array of TSmallIntDynArray;
-
-  TANNkdtree = record
-  end;
-
-  PANNkdtree = ^TANNkdtree;
-
   TYakmo = record
   end;
 
@@ -57,10 +49,7 @@ function GenerateSVMLightFile(Dataset: TFloatDynArray2; Header: Boolean): String
 function GetSVMLightLine(index: Integer; lines: TStringList): TFloatDynArray;
 function GetSVMLightClusterCount(lines: TStringList): Integer;
 
-function ann_kdtree_short_create(pa: PPSmallint; n, dd, bs: Integer; split: TANNsplitRule): PANNkdtree; external 'ANN_short.dll' name 'ann_kdtree_create';
-procedure ann_kdtree_short_destroy(akd: PANNkdtree); external 'ANN_short.dll' name 'ann_kdtree_destroy';
-function ann_kdtree_short_search(akd: PANNkdtree; q: PSmallInt; eps: Cardinal; err: PCardinal): Integer; external 'ANN_short.dll' name 'ann_kdtree_search';
-procedure ann_kdtree_short_search_multi(akd: PANNkdtree; idxs: PInteger; errs: PCardinal; cnt: Integer; q: PSmallInt; eps: Cardinal); external 'ANN_short.dll' name 'ann_kdtree_search_multi';
+function NumberOfProcessors: Integer;
 
 function yakmo_create(k: Cardinal; restartCount: Cardinal; maxIter: Integer; initType: Integer; initSeed: Integer; doNormalize: Integer; isVerbose: Integer): PYakmo; stdcall; external 'yakmo.dll';
 procedure yakmo_destroy(ay: PYakmo); stdcall; external 'yakmo.dll';
@@ -83,6 +72,7 @@ implementation
 var
   GTempAutoInc : Integer = 0;
   GInvariantFormatSettings: TFormatSettings;
+  GNumberOfProcessors: Integer = 0;
 
 const
   READ_BYTES = 65536; // not too small to avoid fragmentation when reading large files.
@@ -504,7 +494,16 @@ begin
   Result := GInvariantFormatSettings;
 end;
 
+function NumberOfProcessors: Integer;
+begin
+  Result := GNumberOfProcessors;
+end;
+
+var
+  SystemInfo: SYSTEM_INFO;
 initialization
   GetLocaleFormatSettings(LOCALE_INVARIANT, GInvariantFormatSettings);
+  GetSystemInfo(SystemInfo);
+  GNumberOfProcessors := SystemInfo.dwNumberOfProcessors;
 end.
 

@@ -15,12 +15,13 @@ type
   TEncoderStep = (esNone = -1, esLoad = 0, esKeyFrameTiling, esFrameTiling, esDither, esMakeUnique, esFixupTileCount, esReindex, esSmooth, esSave);
 
 const
-  cEncoderStepLen: array[TEncoderStep] of Integer = (0, 4, 2, 3, 5, 2, 1, 3, 1, 2);
+  cEncoderStepLen: array[TEncoderStep] of Integer = (0, 4, 3, 3, 5, 2, 1, 3, 1, 2);
 
   cPhi = (1 + sqrt(5)) / 2;
   cInvPhi = 1 / cPhi;
 
   // Tweakable params
+  cYakmoMaxIterations = 300;
   cGamma: array[0..1] of TFloat = (1.8, 0.9);
 
 {$if false}
@@ -423,7 +424,7 @@ type
     procedure FinishMergeTiles;
 
     function WriteTileDatasetLine(const ATile: TTile; var DataLine: array of Byte): Integer;
-    procedure DoKeyFrameTiling(AKeyFrame: PKeyFrame; DesiredNbTiles: Integer);
+    procedure DoKeyFrameTiling(AStartFrame, AEndFrame, DesiredNbTiles: Integer);
     procedure DoFrameTiling(AFrame: PFrame; DesiredNbTiles: Integer; Dual: Boolean);
     procedure FixupTileCount(AFrame: PFrame; DesiredNbTiles: Integer; Dual: Boolean);
 
@@ -757,17 +758,12 @@ begin
 end;
 
 procedure TMainForm.btnDoKeyFrameTilingClick(Sender: TObject);
-var
-  eqtc: TIntegerDynArray;
-
-  procedure DoKF(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
-  begin
-    DoKeyFrameTiling(FKeyFrames[AIndex], eqtc[AIndex]);
-  end;
-
+const
+  cKFNumTilesMul = 4;
 var
   iKF, dnt, acc: Integer;
   rt: TFloat;
+  eqtc: TIntegerDynArray;
 begin
   if Length(FFrames) = 0 then
     Exit;
@@ -784,17 +780,23 @@ begin
     acc += eqtc[iKF];
   end;
 
-  rt := dnt / acc;
+  rt := dnt / acc * cKFNumTilesMul;
   for iKF := 0 to High(FKeyFrames) do
-    eqtc[iKF] := Max(1, round(eqtc[iKF] * rt));
+    eqtc[iKF] := EnsureRange(round(eqtc[iKF] * rt), 1, FKeyFrames[iKF]^.FrameCount * cTileMapSize);
 
   MirrorTiles(False, True);
   ProgressRedraw(1);
 
   InitMergeTiles;
-  ProcThreadPool.DoParallelLocalProc(@DoKF, 0, High(FKeyFrames));
+  for iKF := 0 to High(FKeyFrames) do
+    DoKeyFrameTiling(FKeyFrames[iKF]^.StartFrame, FKeyFrames[iKF]^.EndFrame, eqtc[iKF]);
   FinishMergeTiles;
   ProgressRedraw(2);
+
+  InitMergeTiles;
+  DoKeyFrameTiling(0, High(FFrames), dnt);
+  FinishMergeTiles;
+  ProgressRedraw(3);
 
   tbFrameChange(nil);
 end;
@@ -1700,7 +1702,7 @@ begin
   if dsIdx > 1 then
   begin
    yakmo_set_num_threads(1);
-   Yakmo := yakmo_create(2, 1, MaxInt, 1, 0, 0, 0);
+   Yakmo := yakmo_create(2, 1, cYakmoMaxIterations, 1, 0, 0, 0);
    yakmo_load_train_data(Yakmo, dsIdx, cTileDCTSize, PPFloat(@Dataset[0]));
    SetLength(Dataset, 0); // free up some memmory
    yakmo_train_on_data(Yakmo, @Clusters[0]);
@@ -1772,7 +1774,7 @@ var
     SetLength(Centroids, cTilePaletteSize, cColorCpns);
 
     yakmo_set_num_threads(1);
-    Yakmo := yakmo_create(cTilePaletteSize, 1, MaxInt, 1, 0, 0, 0);
+    Yakmo := yakmo_create(cTilePaletteSize, 1, cYakmoMaxIterations, 1, 0, 0, 0);
     yakmo_load_train_data(Yakmo, dsIdx, cColorCpns, PPFloat(@Dataset[0]));
     SetLength(Dataset, 0); // free up some memmory
     yakmo_train_on_data(Yakmo, @Clusters[0]);
@@ -3360,7 +3362,7 @@ begin
   DesiredNbTiles := min(dsLen, DesiredNbTiles);
 
   yakmo_set_num_threads(ProcThreadPool.MaxThreadCount);
-  Yakmo := yakmo_create(DesiredNbTiles, 1, MaxInt, 1, 0, 0, 0);
+  Yakmo := yakmo_create(DesiredNbTiles, 1, cYakmoMaxIterations, 1, 0, 0, 0);
   yakmo_load_train_data(Yakmo, dsLen, cTileDCTSize, PPFloat(@Dataset[0]));
   SetLength(Dataset, 0); // free up some memory
   yakmo_train_on_data(Yakmo, @Clusters[0]);
@@ -3582,8 +3584,9 @@ begin
 
   Assert(Result = cKModesFeatureCount);
 end;
-procedure TMainForm.DoKeyFrameTiling(AKeyFrame: PKeyFrame; DesiredNbTiles: Integer);
+procedure TMainForm.DoKeyFrameTiling(AStartFrame, AEndFrame, DesiredNbTiles: Integer);
 var
+  frameCount: Integer;
   YakmoDataset: TFloatDynArray2;
   TileIndices: TIntegerDynArray;
 
@@ -3604,10 +3607,10 @@ var
     SetLength(LocClusters, DSLen);
     SetLength(LocCentroids, DesiredNbTiles, cTileDCTSize);
 
-    yakmo_set_num_threads(max(1, ProcThreadPool.MaxThreadCount div Length(FKeyFrames)));
-    Yakmo := yakmo_create(DesiredNbTiles, 1, MaxInt, 1, 0, 0, 0);
+    yakmo_set_num_threads(ProcThreadPool.MaxThreadCount);
+    Yakmo := yakmo_create(DesiredNbTiles, 1, cYakmoMaxIterations, 1, 0, 0, 1);
     yakmo_load_train_data(Yakmo, DSLen, cTileDCTSize, PPFloat(@YakmoDataset[0]));
-    SetLength(YakmoDataset, 0); // free up some memmory
+    SetLength(YakmoDataset, 0); // free up some memory
     yakmo_train_on_data(Yakmo, @LocClusters[0]);
     yakmo_get_centroids(Yakmo, PPFloat(@LocCentroids[0]));
     yakmo_destroy(Yakmo);
@@ -3654,28 +3657,33 @@ var
   iTile: Integer;
   di: Integer;
 begin
-  SetLength(YakmoDataset, AKeyFrame^.FrameCount * cTileMapSize, cTileDCTSize);
+  frameCount := AEndFrame - AStartFrame + 1;
+
+  if DesiredNbTiles >= frameCount * cTileMapSize then
+    Exit;
+
+  SetLength(YakmoDataset, frameCount * cTileMapSize, cTileDCTSize);
   SetLength(TileIndices, Length(YakmoDataset));
 
   // prepare KModes KModesDataset, one line per tile, 64 palette indexes per line
   // also choose KModes starting point
 
   di := 0;
-  for iTile := AKeyFrame^.StartFrame * cTileMapSize to (AKeyFrame^.EndFrame + 1) * cTileMapSize - 1 do
-  begin
-    Assert(FTiles[iTile]^.Active and (FTiles[iTile]^.UseCount = 1));
+  for iTile := AStartFrame * cTileMapSize to (AEndFrame + 1) * cTileMapSize - 1 do
+    if FTiles[iTile]^.Active then
+    begin
+      ComputeTilePsyVisFeatures(FTiles[iTile]^, FGlobalTilingMode, False, False, False, False, cColorCpns, nil, @YakmoDataset[di, 0]);
+      TileIndices[di] := iTile;
+      Inc(di);
+    end;
 
-    ComputeTilePsyVisFeatures(FTiles[iTile]^, FGlobalTilingMode, False, False, False, False, cColorCpns, nil, @YakmoDataset[di, 0]);
-    TileIndices[di] := iTile;
-    Inc(di);
-  end;
-
-  Assert(di = Length(YakmoDataset));
+  SetLength(YakmoDataset, di);
+  SetLength(TileIndices, di);
 
   // run the KMeans algorithm, which will group similar tiles until it reaches a fixed amount of groups
   DoYakmo;
 
-  WriteLn('KF: ', AKeyFrame^.StartFrame:6, ' Yakmo end');
+  WriteLn('Frames: ', AStartFrame:6,' - ', AEndFrame:6, ' Yakmo end');
 end;
 
 function CompareTileUseCountRev(Item1, Item2, UserParameter:Pointer):Integer;
@@ -4528,7 +4536,7 @@ begin
   //ProcThreadPool.MaxThreadCount := 1;
   btnDebug.Visible := True;
 {$else}
-  ProcThreadPool.MaxThreadCount := max(1, ProcThreadPool.MaxThreadCount - 2);
+  ProcThreadPool.MaxThreadCount := max(4, NumberOfProcessors - 2);
   SetPriorityClass(GetCurrentProcess(), IDLE_PRIORITY_CLASS);
 {$endif}
 
