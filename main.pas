@@ -3214,26 +3214,26 @@ end;
 
 procedure TMainForm.MergeTiles(const TileIndexes: array of Integer; TileCount: Integer; BestIdx: Integer);
 var
-  j, k: Integer;
+  tIdx, iTileIndexes: Integer;
 begin
   if TileCount <= 0 then
     Exit;
 
-  for k := 0 to TileCount - 1 do
+  for iTileIndexes := 0 to TileCount - 1 do
   begin
-    j := TileIndexes[k];
+    tIdx := TileIndexes[iTileIndexes];
 
-    if j = BestIdx then
+    if tIdx = BestIdx then
       Continue;
 
-    Inc(FTiles[BestIdx]^.UseCount, FTiles[j]^.UseCount);
+    Inc(FTiles[BestIdx]^.UseCount, FTiles[tIdx]^.UseCount);
 
-    FTiles[j]^.Active := False;
-    FTiles[j]^.MergeIndex := BestIdx;
-    FTiles[j]^.UseCount := 0;
+    FTiles[tIdx]^.Active := False;
+    FTiles[tIdx]^.MergeIndex := BestIdx;
+    FTiles[tIdx]^.UseCount := 0;
 
-    FillChar(FTiles[j]^.RGBPixels, SizeOf(FTiles[j]^.RGBPixels), 0);
-    FillChar(FTiles[j]^.PalPixels, SizeOf(FTiles[j]^.PalPixels), 0);
+    FillChar(FTiles[tIdx]^.RGBPixels, SizeOf(FTiles[tIdx]^.RGBPixels), 0);
+    FillChar(FTiles[tIdx]^.PalPixels, SizeOf(FTiles[tIdx]^.PalPixels), 0);
   end;
 end;
 
@@ -3315,9 +3315,10 @@ end;
 
 procedure TMainForm.DoFrameTiling(AFrame: PFrame; DesiredNbTiles: Integer; Dual: Boolean);
 var
-  iTile, iFrm, iUC, iDCT, dsIdx, dsLen, clusterLineCount, lineIdx, tileIdx, clusterIdx, sx, sy: Integer;
+  iTile, iFrm, iDCT, dsIdx, dsLen, clusterLineCount, lineIdx, tileIdx, clusterIdx, sx, sy: Integer;
   Yakmo: PYakmo;
   Dataset, Centroids: TFloatDynArray2;
+  Weights: TCardinalDynArray;
   Clusters, DSToTileIdx: TIntegerDynArray;
   ToMergeIdxs: TIntegerDynArray;
   DCT: array[0 .. cTileDCTSize - 1] of TFloat;
@@ -3330,15 +3331,16 @@ begin
       for sx := 0 to cTileMapWidth - 1 do
       begin
         tileIdx := FFrames[iFrm].TileMap[sy, sx].TileIdx;
-        Inc(FTiles[tileIdx]^.TmpIndex);
+        Inc(FTiles[tileIdx]^.TmpIndex, FTiles[tileIdx]^.UseCount);
       end;
 
   dsLen := 0;
   for iTile := 0 to High(FTiles) do
     if FTiles[iTile]^.TmpIndex > 0 then
-      Inc(dsLen, FTiles[iTile]^.UseCount);
+      Inc(dsLen);
 
   SetLength(Dataset, dsLen, cTileDCTSize);
+  SetLength(Weights, dsLen);
   SetLength(Clusters, dsLen);
   SetLength(Centroids, DesiredNbTiles, cTileDCTSize);
   SetLength(DSToTileIdx, dsLen);
@@ -3349,12 +3351,10 @@ begin
     begin
       ComputeTilePsyVisFeatures(FTiles[iTile]^, FFrameTilingMode, False, False, False, False, cColorCpns, nil, @DCT[0]);
 
-      for iUC := 1 to FTiles[iTile]^.UseCount do
-      begin
-        Move(DCT[0], Dataset[dsIdx, 0], cTileDCTSize * SizeOf(TFloat));
-        DSToTileIdx[dsIdx] := iTile;
-        Inc(dsIdx);
-      end;
+      Weights[dsIdx] := FTiles[iTile]^.UseCount;
+      Move(DCT[0], Dataset[dsIdx, 0], cTileDCTSize * SizeOf(TFloat));
+      DSToTileIdx[dsIdx] := iTile;
+      Inc(dsIdx);
     end;
 
   Assert(dsIdx = dsLen);
@@ -3363,7 +3363,7 @@ begin
 
   yakmo_set_num_threads(ProcThreadPool.MaxThreadCount);
   Yakmo := yakmo_create(DesiredNbTiles, 1, cYakmoMaxIterations, 1, 0, 0, 0);
-  yakmo_load_train_data(Yakmo, dsLen, cTileDCTSize, PPFloat(@Dataset[0]));
+  yakmo_load_train_data_weighted(Yakmo, dsLen, cTileDCTSize, PPFloat(@Dataset[0]), @Weights[0]);
   SetLength(Dataset, 0); // free up some memory
   yakmo_train_on_data(Yakmo, @Clusters[0]);
   yakmo_get_centroids(Yakmo, PPFloat(@Centroids[0]));
@@ -3587,7 +3587,8 @@ end;
 procedure TMainForm.DoKeyFrameTiling(AStartFrame, AEndFrame, DesiredNbTiles: Integer);
 var
   frameCount: Integer;
-  YakmoDataset: TFloatDynArray2;
+  Dataset: TFloatDynArray2;
+  Weights: TCardinalDynArray;
   TileIndices: TIntegerDynArray;
 
   procedure DoYakmo;
@@ -3600,7 +3601,7 @@ var
     DCT: array[0 .. cTileDCTSize - 1] of TFloat;
   begin
 
-    DSLen := Length(YakmoDataset);
+    DSLen := Length(Dataset);
     if DSLen <= DesiredNbTiles then
       Exit;
 
@@ -3609,8 +3610,8 @@ var
 
     yakmo_set_num_threads(ProcThreadPool.MaxThreadCount);
     Yakmo := yakmo_create(DesiredNbTiles, 1, cYakmoMaxIterations, 1, 0, 0, 1);
-    yakmo_load_train_data(Yakmo, DSLen, cTileDCTSize, PPFloat(@YakmoDataset[0]));
-    SetLength(YakmoDataset, 0); // free up some memory
+    yakmo_load_train_data_weighted(Yakmo, DSLen, cTileDCTSize, PPFloat(@Dataset[0]), @Weights[0]);
+    SetLength(Dataset, 0); // free up some memory
     yakmo_train_on_data(Yakmo, @LocClusters[0]);
     yakmo_get_centroids(Yakmo, PPFloat(@LocCentroids[0]));
     yakmo_destroy(Yakmo);
@@ -3662,8 +3663,9 @@ begin
   if DesiredNbTiles >= frameCount * cTileMapSize then
     Exit;
 
-  SetLength(YakmoDataset, frameCount * cTileMapSize, cTileDCTSize);
-  SetLength(TileIndices, Length(YakmoDataset));
+  SetLength(Dataset, frameCount * cTileMapSize, cTileDCTSize);
+  SetLength(Weights, Length(Dataset));
+  SetLength(TileIndices, Length(Dataset));
 
   // prepare KModes KModesDataset, one line per tile, 64 palette indexes per line
   // also choose KModes starting point
@@ -3672,12 +3674,14 @@ begin
   for iTile := AStartFrame * cTileMapSize to (AEndFrame + 1) * cTileMapSize - 1 do
     if FTiles[iTile]^.Active then
     begin
-      ComputeTilePsyVisFeatures(FTiles[iTile]^, FGlobalTilingMode, False, False, False, False, cColorCpns, nil, @YakmoDataset[di, 0]);
+      Weights[di] := FTiles[iTile]^.UseCount;
+      ComputeTilePsyVisFeatures(FTiles[iTile]^, FGlobalTilingMode, False, False, False, False, cColorCpns, nil, @Dataset[di, 0]);
       TileIndices[di] := iTile;
       Inc(di);
     end;
 
-  SetLength(YakmoDataset, di);
+  SetLength(Dataset, di);
+  SetLength(Weights, di);
   SetLength(TileIndices, di);
 
   // run the KMeans algorithm, which will group similar tiles until it reaches a fixed amount of groups
