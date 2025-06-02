@@ -4523,8 +4523,8 @@ procedure TMainForm.FormCreate(Sender: TObject);
 var
   r,g,b,i,mx,mn,col,prim_col,sr: Integer;
 begin
-  FFrameTilingMode := pvsWeightedDCT;
-  FGlobalTilingMode := pvsWeightedDCT;
+  FFrameTilingMode := pvsWavelets;
+  FGlobalTilingMode := pvsWavelets;
 
   IdleTimer.Interval := 20 * cRefreshRateDiv;
   IdleTimer.Enabled := True;
