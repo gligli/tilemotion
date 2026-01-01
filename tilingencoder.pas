@@ -7,7 +7,6 @@ unit tilingencoder;
 
 {$define ASM_DBMP}
 
-
 interface
 
 uses
@@ -5178,7 +5177,6 @@ procedure TTilingEncoder.SaveStream(AStream: TStream);
 const
   CMinBlkSkipCount = 4;
   CMaxBlkSkipCount = 1 shl CGTMCommandBits;
-
 var
   ZStream: TMemoryStream;
 
