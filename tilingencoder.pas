@@ -10,8 +10,8 @@ unit tilingencoder;
 interface
 
 uses
-  windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, zstream, IniFiles, Graphics,
-  IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, MTProcs, extern, tbbmalloc, bufstream, utils, kmodes, powell;
+  windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, zstream, IniFiles, Graphics, cl,
+  IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, MTProcs, extern, tbbmalloc, bufstream, utils, kmodes;
 
 type
   TEncoderStep = (esAll = -1, esLoad = 0, esPredictMotion, esReduce, esPreparePalettes, esDither, esReconstruct, esReindex, esSave);
@@ -455,6 +455,7 @@ type
     procedure TransferTiles(ATileCount: Integer);
 
     procedure DoPalettization;
+    function MinimizeOP(const x: TDoubleDynArray; data: Pointer): Double;
     procedure QuantizeUsingYakmo(APalIdx, AColorCount, APosterize: Integer);
     procedure DoQuantization(APalIdx: Integer);
     procedure OptimizePalettes;
@@ -4244,7 +4245,7 @@ begin
 end;
 
 type
-  TPowellOPData = record
+  TMinimizeOPData = record
     Encoder: TTilingEncoder;
     CurPalIdx: Integer;
     MeanR, MeanG, MeanB: UInt64;
@@ -4261,9 +4262,9 @@ begin
     Result := CompareValue(Item1^.Index, Item2^.Index);
 end;
 
-function PowellOP(const x: TVector; data: Pointer): TScalar;
+function TTilingEncoder.MinimizeOP(const x: TDoubleDynArray; data: Pointer): Double;
 var
-  PData: ^TPowellOPData absolute data;
+  PData: ^TMinimizeOPData absolute data;
   StdDevR, StdDevG, StdDevB: UInt64;
   colIdx, col: Integer;
   r, g, b: Byte;
@@ -4307,14 +4308,14 @@ end;
 
 procedure TTilingEncoder.OptimizePalettes;
 var
-  f: TVector;
+  f: TDoubleDynArray;
   MeanR, MeanG, MeanB: UInt64;
   NewPal: TIntegerDynArray2;
 
   procedure DoPal(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
-    Data: TPowellOPData;
-    x: TVector;
+    Data: TMinimizeOPData;
+    x, simplex: TDoubleDynArray;
     palIdx, colIdx: Integer;
     ci: PCountIndex;
     r, g, b: Byte;
@@ -4323,8 +4324,12 @@ var
       Exit;
 
     SetLength(x, FPaletteSize - 1);
+    SetLength(simplex, FPaletteSize - 1);
     for colIdx := 1 to FPaletteSize - 1 do
+    begin
       x[colIdx - 1] := colIdx;
+      simplex[colIdx - 1] := 1;
+    end;
 
     Data.Encoder := Self;
     Data.CurPalIdx := AIndex;
@@ -4360,11 +4365,11 @@ var
           end;
         end;
 
-      // use Powells's method to try permutations in the current palette
+      // use Nelder Mead method to try permutations in the current palette
 
-      PowellMinimize(@PowellOP, x, 1.0, 1.0, 1.0, MaxInt, @Data);
+      NelderMeadMinimize(@MinimizeOP, x, simplex, 0, @Data);
 
-      f[AIndex] := -PowellOP(x, @Data);
+      f[AIndex] := -MinimizeOP(x, @Data);
 
     finally
       for colIdx := 0 to FPaletteSize - 1 do
