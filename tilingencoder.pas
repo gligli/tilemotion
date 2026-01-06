@@ -10,9 +10,8 @@ unit tilingencoder;
 interface
 
 uses
-  windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, zstream, IniFiles, Graphics, cl,
-  IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, MTProcs, extern, tbbmalloc, bufstream, utils, kmodes;
-
+  windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, zstream, IniFiles, Graphics,
+  IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, MTProcs, extern, tbbmalloc, bufstream, utils, kmodes, DelphiCL;
 type
   TEncoderStep = (esAll = -1, esLoad = 0, esPredictMotion, esReduce, esPreparePalettes, esDither, esReconstruct, esReindex, esSave);
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
@@ -324,6 +323,10 @@ type
     FFrames: TFrameArray;
     FPalettes: TPaletteArray;
 
+    FUseOpenCL: Boolean;
+    FOpenCLDevices: TStringList;
+    FOpenCLDevice: TDCLDevice;
+
     // video properties
 
     FLoadedInputPath: String;
@@ -406,8 +409,10 @@ type
     procedure SetShotTransMaxSecondsPerKF(AValue: Double);
     procedure SetShotTransMinSecondsPerKF(AValue: Double);
     procedure SetStartFrame(AValue: Integer);
+    procedure SetUseOpenCL(AValue: Boolean);
 
     function PearsonCorrelation(const x: TFloatDynArray; const y: TFloatDynArray): TFloat;
+
 
     function GetSettings: String;
     procedure ProgressRedraw(ASubStepIdx: Integer; AReason: String; AProgressStep: TEncoderStep = esAll; AThread: TThread = nil);
@@ -510,6 +515,9 @@ type
     property KeyFrames: TKeyFrameArray read FKeyFrames;
     property Frames: TFrameArray read FFrames;
     property Palettes: TPaletteArray read FPalettes;
+    property UseOpenCL: Boolean read FUseOpenCL write SetUseOpenCL;
+    property OpenCLDevices: TStringList read FOpenCLDevices;
+    property OpenCLDevice: TDCLDevice read FOpenCLDevice write FOpenCLDevice;
 
     // video properties
 
@@ -3015,6 +3023,23 @@ begin
   FStartFrame := Max(0, AValue);
 end;
 
+procedure TTilingEncoder.SetUseOpenCL(AValue: Boolean);
+var
+  iClP, iClD: Integer;
+begin
+  if FUseOpenCL = AValue then Exit;
+
+  if AValue and Assigned(OpenCLPlatforms) and (FOpenCLDevices.Count <= 0) then
+  begin
+    FOpenCLDevices.Clear;
+    for iClP := 0 to OpenCLPlatforms.PlatformCount - 1 do
+      for iClD := 0 to OpenCLPlatforms.Platforms[iClP]^.DeviceCount - 1 do
+        FOpenCLDevices.AddObject(OpenCLPlatforms.Platforms[iClP]^.Devices[iClD]^.Name, OpenCLPlatforms.Platforms[iClP]^.Devices[iClD]^);
+  end;
+
+  FUseOpenCL := AValue;
+end;
+
 procedure TTilingEncoder.SetRenderFrameIndex(AValue: Integer);
 begin
   if FRenderFrameIndex = AValue then Exit;
@@ -3822,6 +3847,7 @@ begin
   FrameCountSetting := 0;
   Scaling := 1.0;
   MaxThreadCount := NumberOfProcessors;
+  UseOpenCL := False;
 
   PaletteSize := 16;
   PaletteCount := 1024;
@@ -5495,6 +5521,8 @@ begin
   SetPriorityClass(GetCurrentProcess(), IDLE_PRIORITY_CLASS);
 {$endif}
 
+  FOpenCLDevices := TStringList.Create;
+
   FGamma[0] := 2.0;
   FGamma[1] := 0.6;
 
@@ -5527,6 +5555,8 @@ begin
   FOutputBitmap.Free;
   FTilesBitmap.Free;
   FPaletteBitmap.Free;
+
+  FOpenCLDevices.Free;
 end;
 
 procedure TTilingEncoder.Run(AStep: TEncoderStep);

@@ -32,17 +32,21 @@
           </Target>
           <SearchPaths>
             <IncludeFiles Value="$(ProjOutDir)"/>
-            <OtherUnitFiles Value="ffmpeg-5.1-binding\headers;ffmpeg-5.1-binding\examples;LZMA;LMath"/>
+            <OtherUnitFiles Value="ffmpeg-5.1-binding\headers;ffmpeg-5.1-binding\examples;LZMA;LMath;OpenCL"/>
             <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)-$(BuildMode)"/>
           </SearchPaths>
           <Parsing>
             <Style Value="1"/>
             <SyntaxOptions>
               <IncludeAssertionCode Value="True"/>
+              <TypedAddress Value="True"/>
             </SyntaxOptions>
           </Parsing>
           <CodeGeneration>
             <SmartLinkUnit Value="True"/>
+            <Checks>
+              <IOChecks Value="True"/>
+            </Checks>
             <StackSize Value="16777216"/>
             <TargetCPU Value="x86_64"/>
             <Optimizations>
@@ -62,7 +66,7 @@
           </Other>
         </CompilerOptions>
       </Item2>
-      <Item3 Name="Release">
+      <Item3 Name="ReleaseWPO Pass 1">
         <CompilerOptions>
           <Version Value="11"/>
           <PathDelim Value="\"/>
@@ -71,13 +75,14 @@
           </Target>
           <SearchPaths>
             <IncludeFiles Value="$(ProjOutDir)"/>
-            <OtherUnitFiles Value="ffmpeg-5.1-binding\headers;ffmpeg-5.1-binding\examples;LZMA;LMath"/>
+            <OtherUnitFiles Value="ffmpeg-5.1-binding\headers;ffmpeg-5.1-binding\examples;LZMA;LMath;OpenCL"/>
             <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)-$(BuildMode)"/>
           </SearchPaths>
           <Parsing>
             <Style Value="1"/>
             <SyntaxOptions>
               <IncludeAssertionCode Value="True"/>
+              <TypedAddress Value="True"/>
             </SyntaxOptions>
           </Parsing>
           <CodeGeneration>
@@ -118,7 +123,7 @@
           </Other>
         </CompilerOptions>
       </Item3>
-      <Item4 Name="ReleaseWPO">
+      <Item4 Name="ReleaseWPO Pass 2">
         <CompilerOptions>
           <Version Value="11"/>
           <PathDelim Value="\"/>
@@ -127,13 +132,14 @@
           </Target>
           <SearchPaths>
             <IncludeFiles Value="$(ProjOutDir)"/>
-            <OtherUnitFiles Value="ffmpeg-5.1-binding\headers;ffmpeg-5.1-binding\examples;LZMA;LMath"/>
+            <OtherUnitFiles Value="ffmpeg-5.1-binding\headers;ffmpeg-5.1-binding\examples;LZMA;LMath;OpenCL"/>
             <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)-$(BuildMode)"/>
           </SearchPaths>
           <Parsing>
             <Style Value="1"/>
             <SyntaxOptions>
               <IncludeAssertionCode Value="True"/>
+              <TypedAddress Value="True"/>
             </SyntaxOptions>
           </Parsing>
           <CodeGeneration>
@@ -199,7 +205,7 @@
         <PackageName Value="LCL"/>
       </Item2>
     </RequiredPackages>
-    <Units Count="7">
+    <Units Count="6">
       <Unit0>
         <Filename Value="tiler.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -227,10 +233,6 @@
         <Filename Value="utils.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit5>
-      <Unit6>
-        <Filename Value="powell.pas"/>
-        <IsPartOfProject Value="True"/>
-      </Unit6>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
@@ -241,13 +243,14 @@
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
-      <OtherUnitFiles Value="ffmpeg-5.1-binding\headers;ffmpeg-5.1-binding\examples;LZMA;LMath"/>
+      <OtherUnitFiles Value="ffmpeg-5.1-binding\headers;ffmpeg-5.1-binding\examples;LZMA;LMath;OpenCL"/>
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)-$(BuildMode)"/>
     </SearchPaths>
     <Parsing>
       <Style Value="1"/>
       <SyntaxOptions>
         <IncludeAssertionCode Value="True"/>
+        <TypedAddress Value="True"/>
       </SyntaxOptions>
     </Parsing>
     <CodeGeneration>

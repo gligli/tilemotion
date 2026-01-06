@@ -7,7 +7,7 @@ interface
 uses
   windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, LazLogger,
   Forms, Controls, Graphics, Dialogs, ExtCtrls, StdCtrls, ComCtrls, Spin, Menus, IntfGraphics, Buttons,
-  FPimage, FPCanvas, FPWritePNG, GraphType, MTProcs, extern, tilingencoder, utils;
+  FPimage, FPCanvas, FPWritePNG, GraphType, MTProcs, extern, tilingencoder, utils, DelphiCL;
 
 type
   { TMainForm }
@@ -22,6 +22,7 @@ type
     btnPM: TButton;
     cbxMPRadius: TComboBox;
     cbxDitheringMode: TComboBox;
+    cbxCompDev: TComboBox;
     chkFTEPU: TCheckBox;
     chkStretch: TCheckBox;
     chkPredicted: TCheckBox;
@@ -50,8 +51,9 @@ type
     Label13: TLabel;
     Label18: TLabel;
     Label15: TLabel;
-    Label16: TLabel;
+    lblMaxCores: TLabel;
     Label17: TLabel;
+    Label19: TLabel;
     Label20: TLabel;
     Label22: TLabel;
     Label4: TLabel;
@@ -612,6 +614,8 @@ begin
 end;
 
 procedure TMainForm.UpdateGUI(Sender: TObject);
+var
+  iCLDev: Integer;
 begin
   if FLockChanges then
     Exit;
@@ -665,6 +669,36 @@ begin
     FTilingEncoder.RenderPage := rpNone;
 
   FTilingEncoder.MaxThreadCount := seMaxCores.Value;
+  FTilingEncoder.UseOpenCL := cbxCompDev.ItemIndex > 0;
+  if FTilingEncoder.UseOpenCL then
+    FTilingEncoder.OpenCLDevice := TDCLDevice(cbxCompDev.Items.Objects[cbxCompDev.ItemIndex]);
+
+  cbxCompDev.Items.BeginUpdate;
+  try
+    while cbxCompDev.Items.Count > 1 do
+      cbxCompDev.Items.Delete(cbxCompDev.Items.Count - 1);
+
+    if FTilingEncoder.UseOpenCL then
+    begin
+      for iCLDev := 0 to FTilingEncoder.OpenCLDevices.Count - 1 do
+      begin
+        cbxCompDev.AddItem(Trim(FTilingEncoder.OpenCLDevices[iCLDev]), FTilingEncoder.OpenCLDevices.Objects[iCLDev]);
+        if FTilingEncoder.OpenCLDevice = FTilingEncoder.OpenCLDevices.Objects[iCLDev] then
+          cbxCompDev.ItemIndex := iCLDev + 1;
+      end;
+
+      if FTilingEncoder.OpenCLDevices.Count > 0 then
+        cbxCompDev.ItemIndex := max(1, cbxCompDev.ItemIndex)
+      else
+        cbxCompDev.ItemIndex := 0;
+    end
+    else
+    begin
+      cbxCompDev.AddItem('OpenCL device', nil);
+    end;
+  finally
+    cbxCompDev.Items.EndUpdate;
+  end;
 
   pnLbl.Caption := FTilingEncoder.RenderTitleText;
   lblCorrel.Caption := FormatFloat('##0.000000', FTilingEncoder.RenderPsychoVisualQuality);
@@ -676,6 +710,9 @@ begin
   sePSNR.Enabled := rbPSNR.Checked;
   seQbTiles.Enabled := rbTileLimit.Checked;
   seMaxTiles.Enabled := rbTileLimit.Checked;
+  seMaxCores.Enabled := not FTilingEncoder.UseOpenCL;
+  lblMaxCores.Enabled := seMaxCores.Enabled;
+;
 end;
 
 procedure TMainForm.TilingEncoderProgress(ASender: TTilingEncoder; APosition, AMax: Integer; AHourGlass: Boolean);
@@ -694,6 +731,8 @@ begin
 end;
 
 procedure TMainForm.LoadGUISettings;
+var
+  iCLDev: Integer;
 begin
   FLockChanges := True;
   try
@@ -722,6 +761,17 @@ begin
 
    seVisGamma.Value := FTilingEncoder.RenderGammaValue;
    seMaxCores.Value := FTilingEncoder.MaxThreadCount;
+
+   if FTilingEncoder.UseOpenCL then
+   begin
+     for iCLDev := 0 to FTilingEncoder.OpenCLDevices.Count - 1 do
+       if FTilingEncoder.OpenCLDevices.Objects[iCLDev] = FTilingEncoder.OpenCLDevice then
+         cbxCompDev.ItemIndex := iCLDev + 1;
+   end
+   else
+   begin
+     cbxCompDev.ItemIndex := 0;
+   end;
 
    seShotTransMinSecondsPerKF.Value := FTilingEncoder.ShotTransMinSecondsPerKF;
    seShotTransMaxSecondsPerKF.Value := FTilingEncoder.ShotTransMaxSecondsPerKF;

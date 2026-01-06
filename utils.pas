@@ -8,7 +8,7 @@ unit utils;
 interface
 
 uses
-  Classes, SysUtils, Windows, math, fgl, utypes, usimplex, extern, Types;
+  Classes, SysUtils, Windows, math, fgl, utypes, usimplex, DelphiCL, extern, Types;
 
 const
   // tweakable constants
@@ -175,7 +175,15 @@ function EuclideanToPSNR(AEuclidean: Cardinal): Single;
 
 function NelderMeadMinimize(Func: TEvalFunc; var X: TDoubleDynArray; SimplexExtents: array of Double; Epsilon: Double = 1e-9; Data: Pointer = nil): Double;
 
+function OpenCLPlatforms: TDCLPlatforms;
+
 implementation
+
+uses
+  PasOpenCL;
+
+var
+  GclPlatforms: TDCLPlatforms;
 
 procedure SpinEnter(Lock: PSpinLock); assembler;
 label spin_lock;
@@ -1110,5 +1118,15 @@ begin
   end;
 end;
 
+function OpenCLPlatforms: TDCLPlatforms;
+begin
+  if not Assigned(GclPlatforms) and InitOpenCL then
+    GclPlatforms := TDCLPlatforms.Create;
+  Result := GclPlatforms;
+end;
+
+finalization
+  if Assigned(GclPlatforms) then
+    GclPlatforms.Free;
 end.
 

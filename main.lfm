@@ -18,35 +18,36 @@ object MainForm: TMainForm
   ClientWidth = 1024
   DoubleBuffered = True
   KeyPreview = True
+  ParentDoubleBuffered = False
+  PopupMenu = pmProcesses
+  Position = poScreenCenter
+  LCLVersion = '4.4.0.0'
   OnCreate = FormCreate
   OnDestroy = FormDestroy
   OnKeyDown = FormKeyDown
   OnKeyUp = FormKeyUp
-  ParentDoubleBuffered = False
-  PopupMenu = pmProcesses
-  Position = poScreenCenter
-  LCLVersion = '3.6.0.0'
   object tbFrame: TTrackBar
     Left = 0
     Height = 27
     Top = 586
     Width = 1026
     Max = 0
-    OnChange = UpdateVideo
     PageSize = 1
     Position = 0
     ShowSelRange = False
     TickStyle = tsManual
+    OnChange = UpdateVideo
     Anchors = [akLeft, akRight, akBottom]
+    Color = 3487029
     ParentColor = False
     ParentFont = False
     TabOrder = 6
   end
   object chkPlay: TCheckBox
     Left = 8
-    Height = 19
-    Top = 615
-    Width = 69
+    Height = 20
+    Top = 614
+    Width = 67
     Anchors = [akLeft, akBottom]
     Caption = 'Play (F11)'
     TabOrder = 7
@@ -54,8 +55,8 @@ object MainForm: TMainForm
   end
   object chkMirrored: TCheckBox
     Left = 96
-    Height = 19
-    Top = 615
+    Height = 20
+    Top = 614
     Width = 64
     Anchors = [akLeft, akBottom]
     Caption = 'Mirrored'
@@ -88,8 +89,8 @@ object MainForm: TMainForm
   end
   object Label5: TLabel
     Left = 785
-    Height = 15
-    Top = 617
+    Height = 16
+    Top = 616
     Width = 157
     Anchors = [akRight, akBottom]
     Caption = 'PSNR-HVS (objective quality):'
@@ -103,14 +104,14 @@ object MainForm: TMainForm
     Anchors = [akLeft, akBottom]
     AutoSize = False
     MinValue = -1
-    OnChange = UpdateVideo
     TabOrder = 11
     Value = -1
+    OnChange = UpdateVideo
   end
   object Label8: TLabel
     Left = 360
-    Height = 15
-    Top = 617
+    Height = 16
+    Top = 616
     Width = 36
     Anchors = [akLeft, akBottom]
     Caption = 'Palette'
@@ -121,20 +122,20 @@ object MainForm: TMainForm
     Height = 548
     Top = 40
     Width = 1028
-    ActivePage = tsTilesPal
+    ActivePage = tsSettings
     Anchors = [akTop, akLeft, akRight, akBottom]
-    TabIndex = 3
+    TabIndex = 0
     TabOrder = 5
     OnChange = UpdateVideo
     object tsSettings: TTabSheet
       Caption = 'Settings'
-      ClientHeight = 520
+      ClientHeight = 519
       ClientWidth = 1020
       ParentBiDiMode = False
       PopupMenu = pmProcesses
       object edOutput: TEdit
         Left = 328
-        Height = 23
+        Height = 24
         Top = 32
         Width = 456
         TabOrder = 2
@@ -142,14 +143,14 @@ object MainForm: TMainForm
       end
       object seMaxTiles: TSpinEdit
         Left = 328
-        Height = 23
+        Height = 24
         Top = 160
         Width = 129
         Increment = 1000
         MaxValue = 1000000000
+        TabOrder = 9
         OnChange = UpdateGUI
         OnEditingDone = seMaxTilesEditingDone
-        TabOrder = 9
       end
       object btnInput: TButton
         Left = 784
@@ -162,19 +163,19 @@ object MainForm: TMainForm
       end
       object seStartFrame: TSpinEdit
         Left = 328
-        Height = 23
+        Height = 24
         Top = 64
         Width = 64
         MaxValue = 2000000000
-        OnChange = UpdateGUI
         TabOrder = 4
+        OnChange = UpdateGUI
       end
       object cbxYilMix: TComboBox
         Left = 328
-        Height = 23
+        Height = 24
         Top = 342
         Width = 64
-        ItemHeight = 15
+        ItemHeight = 16
         Items.Strings = (
           '1'
           '2'
@@ -187,12 +188,12 @@ object MainForm: TMainForm
       end
       object seFrameCount: TSpinEdit
         Left = 393
-        Height = 23
+        Height = 24
         Top = 64
         Width = 64
         MaxValue = 2000000000
-        OnChange = UpdateGUI
         TabOrder = 5
+        OnChange = UpdateGUI
       end
       object chkUseTK: TCheckBox
         Left = 8
@@ -207,23 +208,23 @@ object MainForm: TMainForm
       end
       object Label13: TLabel
         Left = 8
-        Height = 15
+        Height = 16
         Top = 67
-        Width = 166
+        Width = 164
         Caption = 'Start frame; Frame count (0: all)'
         ParentColor = False
       end
       object Label11: TLabel
         Left = 8
-        Height = 15
+        Height = 16
         Top = 343
-        Width = 161
+        Width = 159
         Caption = 'Yliluoma 2 mixed colors count'
         ParentColor = False
       end
       object Label1: TLabel
         Left = 8
-        Height = 15
+        Height = 16
         Top = 37
         Width = 93
         Caption = 'Output (GTM file)'
@@ -231,15 +232,15 @@ object MainForm: TMainForm
       end
       object Label4: TLabel
         Left = 8
-        Height = 15
+        Height = 16
         Top = 12
-        Width = 189
+        Width = 188
         Caption = 'Input (any FFMPEG-compatible file)'
         ParentColor = False
       end
       object edInput: TEdit
         Left = 328
-        Height = 23
+        Height = 24
         Top = 8
         Width = 456
         TabOrder = 0
@@ -247,36 +248,36 @@ object MainForm: TMainForm
       end
       object Label10: TLabel
         Left = 8
-        Height = 15
+        Height = 16
         Top = 410
-        Width = 118
+        Width = 116
         Caption = 'Gamma (visualization)'
         ParentColor = False
       end
       object seVisGamma: TFloatSpinEdit
         Left = 328
-        Height = 23
+        Height = 24
         Top = 407
         Width = 64
         Increment = 0.1
         MaxValue = 10
         MinValue = 0.1
-        OnChange = UpdateVideo
         TabOrder = 22
         Value = 1
+        OnChange = UpdateVideo
       end
       object seQbTiles: TFloatSpinEdit
         Left = 458
-        Height = 23
+        Height = 24
         Top = 160
         Width = 64
         Increment = 0.1
         MaxValue = 1000
         MinValue = 0.1
-        OnChange = UpdateGUI
-        OnEditingDone = seQbTilesEditingDone
         TabOrder = 10
         Value = 2
+        OnChange = UpdateGUI
+        OnEditingDone = seQbTilesEditingDone
       end
       object btnGTM: TButton
         Left = 784
@@ -289,19 +290,19 @@ object MainForm: TMainForm
       end
       object Label12: TLabel
         Left = 8
-        Height = 15
+        Height = 16
         Top = 187
-        Width = 271
+        Width = 270
         Caption = 'Palettes layout (higher -> more colors) (count; size)'
         ParentColor = False
       end
       object cbxPalSize: TComboBox
         Left = 458
-        Height = 23
+        Height = 24
         Top = 184
         Width = 64
         DropDownCount = 20
-        ItemHeight = 15
+        ItemHeight = 16
         Items.Strings = (
           '2'
           '4'
@@ -315,11 +316,11 @@ object MainForm: TMainForm
       end
       object cbxPalCount: TComboBox
         Left = 328
-        Height = 23
+        Height = 24
         Top = 184
         Width = 129
         DropDownCount = 20
-        ItemHeight = 15
+        ItemHeight = 16
         Items.Strings = (
           '1'
           '2'
@@ -344,11 +345,11 @@ object MainForm: TMainForm
       end
       object cbxScaling: TComboBox
         Left = 328
-        Height = 23
+        Height = 24
         Top = 88
         Width = 129
         DropDownCount = 20
-        ItemHeight = 15
+        ItemHeight = 16
         Items.Strings = (
           '0.25'
           '0.333333'
@@ -366,82 +367,82 @@ object MainForm: TMainForm
       end
       object Label15: TLabel
         Left = 8
-        Height = 15
+        Height = 16
         Top = 93
         Width = 65
         Caption = 'Scaling ratio'
         ParentColor = False
       end
-      object Label16: TLabel
+      object lblMaxCores: TLabel
         Left = 8
-        Height = 15
-        Top = 451
-        Width = 240
+        Height = 16
+        Top = 476
+        Width = 236
         Caption = 'Maximum CPU cores used for multithreading'
         ParentColor = False
       end
       object Label20: TLabel
         Left = 8
-        Height = 15
+        Height = 16
         Top = 231
-        Width = 207
+        Width = 204
         Caption = 'Keyframes length (seconds) (min; max)'
         ParentColor = False
       end
       object seShotTransMaxSecondsPerKF: TFloatSpinEdit
         Left = 393
-        Height = 23
+        Height = 24
         Top = 228
         Width = 64
         Increment = 0.1
         MaxValue = 100
-        OnChange = UpdateGUI
         TabOrder = 16
+        OnChange = UpdateGUI
       end
       object seShotTransMinSecondsPerKF: TFloatSpinEdit
         Left = 328
-        Height = 23
+        Height = 24
         Top = 228
         Width = 64
         Increment = 0.05
         MaxValue = 100
-        OnChange = UpdateGUI
         TabOrder = 15
+        OnChange = UpdateGUI
       end
       object Label22: TLabel
         Left = 8
-        Height = 15
+        Height = 16
         Top = 255
-        Width = 176
+        Width = 175
         Caption = 'Keyframes threshold (correlation)'
         ParentColor = False
       end
       object seShotTransCorrelLoThres: TFloatSpinEdit
         Left = 328
-        Height = 23
+        Height = 24
         Top = 252
         Width = 64
         Increment = 0.05
         MaxValue = 1
         MinValue = -1
-        OnChange = UpdateGUI
         TabOrder = 17
+        OnChange = UpdateGUI
       end
       object Label17: TLabel
         Left = 8
-        Height = 15
+        Height = 16
         Top = 291
-        Width = 202
+        Width = 201
         Caption = 'Psychovisual modes (prepare palettes)'
         ParentColor = False
       end
       object cbxDitheringMode: TComboBox
         Left = 328
-        Height = 23
+        Height = 24
         Top = 287
         Width = 129
         DropDownCount = 20
-        ItemHeight = 15
+        ItemHeight = 16
         Items.Strings = (
           'DCT'
           'Weighted DCT'
@@ -455,7 +456,7 @@ object MainForm: TMainForm
       end
       object Label18: TLabel
         Left = 8
-        Height = 15
+        Height = 16
         Top = 139
         Width = 229
         Caption = 'Motion prediction radius (higher -> slower)'
@@ -463,11 +464,11 @@ object MainForm: TMainForm
       end
       object cbxMPRadius: TComboBox
         Left = 328
-        Height = 23
+        Height = 24
         Top = 136
         Width = 64
         DropDownCount = 20
-        ItemHeight = 15
+        ItemHeight = 16
         Items.Strings = (
           '1'
           '2'
@@ -504,14 +505,14 @@ object MainForm: TMainForm
       end
       object seMaxCores: TSpinEdit
         Left = 328
-        Height = 23
-        Top = 448
+        Height = 24
+        Top = 472
         Width = 64
         MaxValue = 1000000
         MinValue = 1
-        OnChange = UpdateGUI
         TabOrder = 23
         Value = 1
+        OnChange = UpdateGUI
       end
       object chkFTEPU: TCheckBox
         Left = 8
@@ -526,16 +527,16 @@ object MainForm: TMainForm
       end
       object rbTileLimit: TRadioButton
         Left = 8
-        Height = 19
+        Height = 20
         Top = 161
-        Width = 260
+        Width = 259
         Caption = 'Tile limit (higher -> bigger) (all; quality based)'
         TabOrder = 8
         OnChange = UpdateGUI
       end
       object rbPSNR: TRadioButton
         Left = 536
-        Height = 19
+        Height = 20
         Top = 161
         Width = 206
         Caption = 'PSNR-HVS target (higher -> bigger)'
@@ -544,69 +545,93 @@ object MainForm: TMainForm
       end
       object sePSNR: TFloatSpinEdit
         Left = 744
-        Height = 23
+        Height = 24
         Top = 160
         Width = 64
         MaxValue = 100
-        OnChange = UpdateGUI
-        OnEditingDone = seQbTilesEditingDone
         TabOrder = 12
         Value = 2
+        OnChange = UpdateGUI
+        OnEditingDone = seQbTilesEditingDone
+      end
+      object Label19: TLabel
+        Left = 8
+        Height = 16
+        Top = 452
+        Width = 96
+        Caption = 'Computing device'
+        ParentColor = False
+      end
+      object cbxCompDev: TComboBox
+        Left = 328
+        Height = 24
+        Top = 448
+        Width = 280
+        DropDownCount = 20
+        ItemHeight = 16
+        ItemIndex = 0
+        Items.Strings = (
+          'CPU fallback'
+        )
+        Style = csDropDownList
+        TabOrder = 24
+        Text = 'CPU fallback'
+        OnChange = UpdateGUI
       end
     end
     object tsInput: TTabSheet
       Caption = 'Input'
-      ClientHeight = 520
+      ClientHeight = 519
       ClientWidth = 1020
       object imgSource: TImage
         Left = 0
-        Height = 520
+        Height = 519
         Top = 0
         Width = 1020
         AntialiasingMode = amOff
         Align = alClient
         Center = True
-        OnContextPopup = imgContextPopup
-        OnPaintBackground = imgPaintBackground
         PopupMenu = pmProcesses
         Proportional = True
+        OnContextPopup = imgContextPopup
+        OnPaintBackground = imgPaintBackground
       end
     end
     object tsOutput: TTabSheet
       Caption = 'Output (F12)'
-      ClientHeight = 520
+      ClientHeight = 519
       ClientWidth = 1020
       object imgDest: TImage
         Left = 0
-        Height = 520
+        Height = 519
         Top = 0
         Width = 1020
         AntialiasingMode = amOff
         Align = alClient
         AutoSize = True
         Center = True
-        OnContextPopup = imgContextPopup
-        OnPaintBackground = imgPaintBackground
         PopupMenu = pmProcesses
         Proportional = True
+        OnContextPopup = imgContextPopup
+        OnPaintBackground = imgPaintBackground
       end
     end
     object tsTilesPal: TTabSheet
       Caption = 'Palettes / Tiles'
-      ClientHeight = 520
+      ClientHeight = 519
       ClientWidth = 1020
       object sePage: TSpinEdit
         Left = 136
-        Height = 23
+        Height = 24
         Top = 32
         Width = 128
         MaxValue = 10000
-        OnChange = UpdateVideo
         TabOrder = 0
+        OnChange = UpdateVideo
       end
       object Label6: TLabel
         Left = 4
-        Height = 15
+        Height = 16
         Top = 36
         Width = 47
         Caption = 'Tile page'
@@ -623,30 +648,30 @@ object MainForm: TMainForm
       end
       object imgTiles: TImage
         Left = 272
-        Height = 505
+        Height = 504
         Top = 8
         Width = 739
         AntialiasingMode = amOff
         Anchors = [akTop, akLeft, akRight, akBottom]
+        PopupMenu = pmProcesses
+        Stretch = True
         OnMouseMove = imgTilesMouseMove
         OnMouseWheelDown = imgTilesMouseWheelDown
         OnMouseWheelUp = imgTilesMouseWheelUp
         OnPaintBackground = imgPaintBackground
-        PopupMenu = pmProcesses
-        Stretch = True
       end
       object sbPalette: TScrollBox
         Left = 4
-        Height = 449
+        Height = 448
         Top = 64
         Width = 260
         HorzScrollBar.Page = 1
         HorzScrollBar.Visible = False
         VertScrollBar.Increment = 256
-        VertScrollBar.Page = 445
+        VertScrollBar.Page = 444
         VertScrollBar.Tracking = True
         Anchors = [akTop, akLeft, akBottom]
-        ClientHeight = 445
+        ClientHeight = 444
         ClientWidth = 239
         TabOrder = 1
         object imgPalette: TImage
@@ -656,23 +681,23 @@ object MainForm: TMainForm
           Top = 0
           Width = 256
           AntialiasingMode = amOff
+          PopupMenu = pmProcesses
+          Stretch = True
           OnClick = imgPaletteClick
           OnContextPopup = imgPaletteContextPopup
           OnMouseMove = imgPaletteMouseMove
           OnPaintBackground = imgPaintBackground
-          PopupMenu = pmProcesses
-          Stretch = True
         end
       end
     end
   end
   object cbxEndStep: TComboBox
     Left = 288
-    Height = 23
+    Height = 24
     Top = 8
     Width = 96
     DropDownCount = 20
-    ItemHeight = 15
+    ItemHeight = 16
     Style = csDropDownList
     TabOrder = 3
   end
@@ -688,25 +713,25 @@ object MainForm: TMainForm
   end
   object From: TLabel
     Left = 112
-    Height = 15
+    Height = 16
     Top = 12
-    Width = 28
+    Width = 27
     Caption = 'From'
     ParentColor = False
   end
   object cbxStartStep: TComboBox
     Left = 152
-    Height = 23
+    Height = 24
     Top = 8
     Width = 96
     DropDownCount = 20
-    ItemHeight = 15
+    ItemHeight = 16
     Style = csDropDownList
     TabOrder = 2
   end
   object To1: TLabel
     Left = 264
-    Height = 15
+    Height = 16
     Top = 12
     Width = 12
     Caption = 'To'
@@ -756,8 +781,8 @@ object MainForm: TMainForm
   end
   object chkDitheredO: TCheckBox
     Left = 272
-    Height = 19
-    Top = 615
+    Height = 20
+    Top = 614
     Width = 63
     Anchors = [akLeft, akBottom]
     Caption = 'Dithered'
@@ -768,8 +793,8 @@ object MainForm: TMainForm
   end
   object chkPredicted: TCheckBox
     Left = 184
-    Height = 19
-    Top = 615
+    Height = 20
+    Top = 614
     Width = 68
     Anchors = [akLeft, akBottom]
     Caption = 'Predicted'
@@ -780,8 +805,8 @@ object MainForm: TMainForm
   end
   object chkStretch: TCheckBox
     Left = 560
-    Height = 19
-    Top = 615
+    Height = 20
+    Top = 614
     Width = 68
     AllowGrayed = True
     Anchors = [akLeft, akBottom]
@@ -792,12 +817,12 @@ object MainForm: TMainForm
   object IdleTimer: TIdleTimer
     Interval = 42
     OnTimer = IdleTimerTimer
-    Left = 824
-    Top = 480
+    Left = 976
+    Top = 528
   end
   object pmProcesses: TPopupMenu
-    Left = 744
-    Top = 480
+    Left = 896
+    Top = 528
     object miLoad: TMenuItem
       Caption = 'Load'
       OnClick = btnGlobalLoadClick
@@ -875,35 +900,35 @@ object MainForm: TMainForm
   end
   object odFFInput: TOpenDialog
     Title = 'Open FFMPEG-compatible file'
-    Left = 744
-    Top = 372
+    Left = 896
+    Top = 420
   end
   object sdGTM: TSaveDialog
     DefaultExt = '.gtm'
     Filter = 'GliGli''s TileMotion|*.gtm'
-    Left = 744
-    Top = 424
+    Left = 896
+    Top = 472
   end
   object odSettings: TOpenDialog
     Title = 'Open settings'
     DefaultExt = '.gtm_settings'
     Filter = 'GTM Settings|*.gtm_settings'
-    Left = 744
-    Top = 320
+    Left = 896
+    Top = 368
   end
   object sdSettings: TSaveDialog
     Title = 'Save settings as'
     DefaultExt = '.gtm_settings'
     Filter = 'GTM Settings|*.gtm_settings'
     Options = [ofOverwritePrompt, ofEnableSizing, ofViewDetail]
-    Left = 824
-    Top = 320
+    Left = 976
+    Top = 368
   end
   object odGTM: TOpenDialog
     Title = 'Open GTM file'
     DefaultExt = '.gtm'
     Filter = 'GliGli''s TileMotion|*.gtm'
-    Left = 824
-    Top = 424
+    Left = 976
+    Top = 472
   end
 end
