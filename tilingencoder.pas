@@ -4274,18 +4274,16 @@ type
   TMinimizeOPData = record
     Encoder: TTilingEncoder;
     CurPalIdx: Integer;
-    MeanR, MeanG, MeanB: UInt64;
-    PalR, PalG, PalB: array[0 .. Sqr(cTileWidth) - 1] of UInt64;
-    InnerPerm: TCountIndexList;
+    MeanR, MeanG, MeanB: Int64;
+    PalR, PalG, PalB: array[0 .. Sqr(cTileWidth) - 1] of Int64;
+    InnerPerm: TIndexWeightList;
     NewPal: TIntegerDynArray2;
   end;
 
 
-function ComparePerms(const Item1,Item2:PCountIndex):Integer;
+function ComparePerms(const Item1,Item2:PIndexWeight):Integer;
 begin
-  Result := CompareValue(Item1^.Count, Item2^.Count);
-  if Result = 0 then
-    Result := CompareValue(Item1^.Index, Item2^.Index);
+  Result := CompareValue(Item1^.Weight * 1000.0 + Item1^.Index, Item2^.Weight * 1000.0 + Item2^.Index);
 end;
 
 function TTilingEncoder.MinimizeOP(const x: TDoubleDynArray; data: Pointer): Double;
@@ -4298,11 +4296,11 @@ begin
   // from rank to palette
 
   PData^.InnerPerm[0]^.Index := 0;
-  PData^.InnerPerm[0]^.Count := 0;
+  PData^.InnerPerm[0]^.Weight := 0.0;
   for colIdx := 1 to PData^.Encoder.FPaletteSize - 1 do
   begin
     PData^.InnerPerm[colIdx]^.Index := colIdx;
-    PData^.InnerPerm[colIdx]^.Count := round(x[colIdx - 1] * 1000);
+    PData^.InnerPerm[colIdx]^.Weight := x[colIdx - 1];
   end;
 
   PData^.InnerPerm.Sort(@ComparePerms);
@@ -4343,7 +4341,7 @@ var
     Data: TMinimizeOPData;
     x, simplex: TDoubleDynArray;
     palIdx, colIdx: Integer;
-    ci: PCountIndex;
+    iw: PIndexWeight;
     r, g, b: Byte;
   begin
     if not InRange(AIndex, 0, FPaletteCount - 1) then
@@ -4354,7 +4352,7 @@ var
     for colIdx := 1 to FPaletteSize - 1 do
     begin
       x[colIdx - 1] := colIdx;
-      simplex[colIdx - 1] := 1;
+      simplex[colIdx - 1] := FPaletteSize * cPhi;
     end;
 
     Data.Encoder := Self;
@@ -4364,11 +4362,11 @@ var
     Data.MeanB := MeanB;
     Data.NewPal := NewPal;
 
-    Data.InnerPerm := TCountIndexList.Create;
+    Data.InnerPerm := TIndexWeightList.Create;
     for colIdx := 0 to FPaletteSize - 1 do
     begin
-      New(ci);
-      Data.InnerPerm.Add(ci);
+      New(iw);
+      Data.InnerPerm.Add(iw);
     end;
     try
 
@@ -4393,7 +4391,7 @@ var
 
       // use Nelder Mead method to try permutations in the current palette
 
-      NelderMeadMinimize(@MinimizeOP, x, simplex, 0, @Data);
+      NelderMeadMinimize(@MinimizeOP, x, simplex, 1e-9, @Data);
 
       f[AIndex] := -MinimizeOP(x, @Data);
 

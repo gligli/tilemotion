@@ -124,6 +124,16 @@ type
   PCountIndex = ^TCountIndex;
   TCountIndexList = specialize TFPGList<PCountIndex>;
 
+  { TIndexWeight }
+
+  TIndexWeight = record
+    Index: Integer;
+    Weight: Double;
+  end;
+
+  PIndexWeight = ^TIndexWeight;
+  TIndexWeightList = specialize TFPGList<PIndexWeight>;
+
   TEvalFunc = function(const arg: TDoubleDynArray; data: Pointer): Double of object;
   TGRSEvalFunc = function(x: Double; Data: Pointer): Double of object;
 
