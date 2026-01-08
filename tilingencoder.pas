@@ -413,7 +413,6 @@ type
 
     function PearsonCorrelation(const x: TFloatDynArray; const y: TFloatDynArray): TFloat;
 
-
     function GetSettings: String;
     procedure ProgressRedraw(ASubStepIdx: Integer; AReason: String; AProgressStep: TEncoderStep = esAll; AThread: TThread = nil);
     procedure SyncProgress;
@@ -4129,19 +4128,13 @@ begin
 end;
 
 procedure TTilingEncoder.DoPalettization;
-const
-  cFeatureCount = cTileDCTSize;
 var
-  BICO: PBICO;
-  ANN: PANNkdtree;
-  ANNClusters: TIntegerDynArray;
+  YakmoDataset: TDoubleDynArray2;
+  YakmoWeights: TCardinalDynArray;
 
-  procedure DoANN(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  procedure DoDCT(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
     Tile: PTile;
-    ANNError: Double;
-
-    DCT: array[0 .. cTileDCTSize - 1] of Double;
   begin
     if not InRange(AIndex, 0, High(FTiles)) then
       Exit;
@@ -4149,84 +4142,40 @@ var
     Tile := FTiles[AIndex];
     Assert(Tile^.Active);
 
-    ComputeTilePsyVisFeatures(Tile^, DitheringMode, False, True, False, False, cColorCpns, nil, DCT);
-
-    ANNClusters[AIndex] := ann_kdtree_search(ANN, DCT, 0.0, @ANNError)
+    ComputeTilePsyVisFeatures(Tile^, DitheringMode, False, True, False, False, cColorCpns, nil, @YakmoDataset[AIndex, 0]);
+    YakmoWeights[AIndex] := Tile^.UseCount;
   end;
 
 var
-  DSLen, tIdx, di, palIdx, BICOClusterCount: Integer;
+  DSLen, tIdx, di, palIdx: Integer;
 
   Tile: PTile;
 
   Yakmo: PYakmo;
 
-  BICOCentroids, BICOWeights: TDoubleDynArray;
-
-  ANNDataset: array of PDouble;
   YakmoClusters: TIntegerDynArray;
   PalIdxLUT: TIntegerDynArray;
-
-  DCT: array[0 .. cTileDCTSize - 1] of Double;
 begin
-  // build dataset
-
   DSLen := Length(FTiles);
-  BICOClusterCount := FPaletteCount shl 3;
-
-  BICO := bico_create(cFeatureCount, DSLen, BICOClusterCount, 32, BICOClusterCount, CRandomSeed);
-  try
-    bico_set_num_threads(MaxThreadCount);
-
-    for tIdx := 0 to High(FTiles) do
-    begin
-      Tile := FTiles[tIdx];
-      Assert(Tile^.Active);
-
-      ComputeTilePsyVisFeatures(Tile^, DitheringMode, False, True, False, False, cColorCpns, nil, DCT);
-
-      bico_insert_line(BICO, DCT, Tile^.UseCount);
-    end;
-
-    SetLength(BICOCentroids, BICOClusterCount * cFeatureCount);
-    SetLength(BICOWeights, BICOClusterCount);
-
-    BICOClusterCount := bico_get_results(BICO, @BICOCentroids[0], @BICOWeights[0]);
-
-    WriteLn('BICOClusterCount: ', BICOClusterCount:6);
-  finally
-    bico_destroy(BICO);
-  end;
-
-  // use ANN to compute cluster indexes
-
-  SetLength(ANNDataset, BICOClusterCount);
-  for di := 0 to High(ANNDataset) do
-    ANNDataset[di] := @BICOCentroids[di * cFeatureCount];
-
-  SetLength(ANNClusters, DSLen);
-
-  ANN := ann_kdtree_create(@ANNDataset[0], BICOClusterCount, cFeatureCount, 32, ANN_KD_STD);
-  try
-    ProcThreadPool.DoParallelLocalProc(@DoANN, 0, High(FTiles));
-  finally
-    ann_kdtree_destroy(ANN);
-  end;
 
   // cluster by palette index
 
-  if BICOClusterCount > FPaletteCount then
+  if DSLen > FPaletteCount then
   begin
     if FPaletteCount > 1 then
     begin
-      SetLength(YakmoClusters, BICOClusterCount);
+      SetLength(YakmoDataset, DSLen, cTileDCTSize);
+      SetLength(YakmoWeights, DSLen);
+      SetLength(YakmoClusters, DSLen);
 
-      Yakmo := yakmo_create(FPaletteCount, 1, cYakmoMaxIterations, 1, 0, 0, 0);
+      ProcThreadPool.DoParallelLocalProc(@DoDCT, 0, High(FTiles));
+
+      Yakmo := yakmo_create(FPaletteCount, 1, cYakmoMaxIterations, 1, 0, 0, 1);
       try
         yakmo_set_num_threads(MaxThreadCount);
 
-        yakmo_load_train_data(Yakmo, Length(ANNDataset), cFeatureCount, PPDouble(@ANNDataset[0]));
-        SetLength(ANNDataset, 0); // free up some memmory
+        yakmo_load_train_data_weighted(Yakmo, Length(YakmoDataset), cTileDCTSize, PPDouble(@YakmoDataset[0]), PCardinal(@YakmoWeights[0]));
+        SetLength(YakmoDataset, 0); // free up some memmory
         yakmo_train_on_data(Yakmo, @YakmoClusters[0]);
       finally
         yakmo_destroy(Yakmo);
@@ -4234,17 +4183,17 @@ begin
     end
     else
     begin
-      SetLength(YakmoClusters, BICOClusterCount);
+      SetLength(YakmoClusters, DSLen);
     end;
   end
   else
   begin
-    SetLength(YakmoClusters, BICOClusterCount);
+    SetLength(YakmoClusters, DSLen);
     for di := 0 to High(YakmoClusters) do
       YakmoClusters[di] := di;
   end;
 
-  // sort entire FPalettes by use count
+  // sort entire palettes by use count
 
   SetLength(FPalettes, FPaletteCount);
   SetLength(PalIdxLUT, FPaletteCount);
@@ -4252,8 +4201,8 @@ begin
   for palIdx := 0 to FPaletteCount - 1 do
     FPalettes[palIdx].PalIdx_Initial := palIdx;
 
-  for di := 0 to High(ANNClusters) do
-    Inc(FPalettes[YakmoClusters[ANNClusters[di]]].UseCount);
+  for di := 0 to High(YakmoClusters) do
+    Inc(FPalettes[YakmoClusters[di]].UseCount);
 
   QuickSort(FPalettes[0], 0, FPaletteCount - 1, SizeOf(FPalettes[0]), @ComparePaletteUseCount, Self);
   for palIdx := 0 to FPaletteCount - 1 do
@@ -4266,7 +4215,7 @@ begin
     Tile := FTiles[tIdx];
     Assert(Tile^.Active);
 
-    Tile^.PalIdx_Initial := PalIdxLUT[YakmoClusters[ANNClusters[tIdx]]];;
+    Tile^.PalIdx_Initial := PalIdxLUT[YakmoClusters[tIdx]];
   end;
 end;
 

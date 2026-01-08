@@ -157,6 +157,7 @@
             <Debugging>
               <GenerateDebugInfo Value="False"/>
               <RunWithoutDebug Value="True"/>
+              <DebugInfoType Value="dsDwarf3"/>
             </Debugging>
             <LinkSmart Value="True"/>
           </Linking>

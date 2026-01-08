@@ -184,67 +184,16 @@ procedure ann_kdtree_short_destroy(akd: PANNkdtree); external 'ANN_short.dll' na
 function ann_kdtree_short_search(akd: PANNkdtree; q: PSmallInt; eps: Cardinal; err: PCardinal): Integer; external 'ANN_short.dll' name 'ann_kdtree_search';
 procedure ann_kdtree_short_search_multi(akd: PANNkdtree; idxs: PInteger; errs: PCardinal; cnt: Integer; q: PSmallInt; eps: Cardinal); external 'ANN_short.dll' name 'ann_kdtree_search_multi';
 
-procedure DEFAULT_FLANN_PARAMETERS; cdecl; external 'flann.dll';
-function flann_build_index(dataset: PSingle; rows, cols: Integer; speedup: PSingle; flann_params: PFLANNParameters): flann_index_t; cdecl; external 'flann.dll';
-function flann_free_index(index_id: flann_index_t; flann_params: PFLANNParameters): Integer; cdecl; external 'flann.dll';
-function flann_find_nearest_neighbors_index(index_id: flann_index_t; testset: PSingle; trows: Integer; indices: PInteger; dists: PSingle; nn: Integer; flann_params: PFLANNParameters): Integer; cdecl; external 'flann.dll';
-function flann_build_index_double(dataset: PDouble; rows, cols: Integer; speedup: PDouble; flann_params: PFLANNParameters): flann_index_t; cdecl; external 'flann.dll';
-function flann_free_index_double(index_id: flann_index_t; flann_params: PFLANNParameters): Integer; cdecl; external 'flann.dll';
-function flann_find_nearest_neighbors_index_double(index_id: flann_index_t; testset: PDouble; trows: Integer; indices: PInteger; dists: PDouble; nn: Integer; flann_params: PFLANNParameters): Integer; cdecl; external 'flann.dll';
-
-function dl1quant(inbuf: PByte; width, height, quant_to, lookup_bpc: Integer; userpal: PDLUserPal): Integer; stdcall; external 'dlquant_dll.dll';
-function dl3quant(inbuf: PByte; width, height, quant_to, lookup_bpc: Integer; userpal: PDLUserPal): Integer; stdcall; external 'dlquant_dll.dll';
-
 function yakmo_create(k: Cardinal; restartCount: Cardinal; maxIter: Integer; initType: Integer; initSeed: Integer; doNormalize: Integer; isVerbose: Integer): PYakmo; stdcall; external 'yakmo.dll';
 procedure yakmo_destroy(ay: PYakmo); stdcall; external 'yakmo.dll';
 procedure yakmo_set_num_threads(num_threads: Integer); stdcall; external 'yakmo.dll';
 procedure yakmo_load_train_data(ay: PYakmo; rowCount: Cardinal; colCount: Cardinal; dataset: PPDouble); stdcall; external 'yakmo.dll';
+procedure yakmo_load_train_data_weighted(ay: PYakmo; rowCount: Cardinal; colCount: Cardinal; dataset: PPDouble; weights: PCardinal); stdcall; external 'yakmo.dll';
 procedure yakmo_train_on_data(ay: PYakmo; pointToCluster: PInteger); stdcall; external 'yakmo.dll';
 procedure yakmo_get_centroids(ay: PYakmo; centroids: PPDouble); stdcall; external 'yakmo.dll';
 
-function yakmo_single_create(k: Cardinal; restartCount: Cardinal; maxIter: Integer; initType: Integer; initSeed: Integer; doNormalize: Integer; isVerbose: Integer): PYakmoSingle; stdcall; external 'yakmo_single.dll' name 'yakmo_create';
-procedure yakmo_single_destroy(ay: PYakmoSingle); stdcall; external 'yakmo_single.dll' name 'yakmo_destroy';
-procedure yakmo_single_load_train_data(ay: PYakmoSingle; rowCount: Cardinal; colCount: Cardinal; dataset: PPSingle); stdcall; external 'yakmo_single.dll' name 'yakmo_load_train_data';
-procedure yakmo_single_train_on_data(ay: PYakmoSingle; pointToCluster: PInteger); stdcall; external 'yakmo_single.dll' name 'yakmo_train_on_data';
-procedure yakmo_single_get_centroids(ay: PYakmoSingle; centroids: PPSingle); stdcall; external 'yakmo_single.dll' name 'yakmo_get_centroids';
-
-function birch_create(dist_threshold: TFloat; k_limit: UInt64; rebuild_interval: Cardinal): PBIRCH; stdcall; external 'BIRCH.dll';
-procedure birch_destroy(birch: PBIRCH); stdcall; external 'BIRCH.dll';
-procedure birch_insert_line(birch: PBIRCH; line: PDouble); stdcall; external 'BIRCH.dll';
-function birch_compute(birch: PBIRCH; extend, cluster: LongBool): Cardinal; stdcall; external 'BIRCH.dll';
-procedure birch_get_centroids(birch: PBIRCH; centroids: PDouble); stdcall; external 'BIRCH.dll';
-procedure birch_get_clusters(birch: PBIRCH; dataset: PDouble; rows: Cardinal; pointToCluster: PInteger); stdcall; external 'BIRCH.dll';
-
-function bico_create(dimension, npoints, k, nrandproj, coresetsize: Int64; randomSeed: Integer): PBICO; stdcall; external 'BICO.dll';
-procedure bico_destroy(bico: PBICO); stdcall; external 'BICO.dll';
-procedure bico_set_num_threads(num_threads: Integer); stdcall; external 'BICO.dll';
-procedure bico_set_rebuild_properties(bico: PBICO; interval: Cardinal; initial: Double; grow: Double); stdcall; external 'BICO.dll';
-procedure bico_insert_line(bico: PBICO; line: PDouble; weight: Double); stdcall; external 'BICO.dll';
-function bico_get_results(bico: PBICO; centroids: PDouble; weights: PDouble): Int64; stdcall; external 'BICO.dll';
-
 const
   CRandomSeed = $42381337;
-
-  CDefaultFLANNParameters: TFLANNParameters = (
-      algorithm: FLANN_INDEX_KDTREE;
-      checks: 32; eps: 0.0;
-      sorted: 1; max_neighbors: -1; cores: 1;
-      trees: 1; leaf_max_size: 32;
-      branching: 32; iterations: 11; centers_init: FLANN_CENTERS_RANDOM; cb_index: 0.2;
-      target_precision: 0.9; build_weight: 0.01; memory_weight: 0; sample_fraction: 0.1;
-      table_number_: 0; key_size_: 0; multi_probe_level_: 0;
-      log_level: FLANN_LOG_NONE; random_seed: CRandomSeed
-  );
-
-  //struct FLANNParameters DEFAULT_FLANN_PARAMETERS = {
-  //    FLANN_INDEX_KDTREE,
-  //    32, 0.0f,
-  //    0, -1, 0,
-  //    4, 4,
-  //    32, 11, FLANN_CENTERS_RANDOM, 0.2f,
-  //    0.9f, 0.01f, 0, 0.1f,
-  //    FLANN_LOG_NONE, 0
-  //};
 
 implementation
 
