@@ -5157,6 +5157,8 @@ const
   CMaxBlkSkipCount = 1 shl CGTMCommandBits;
 var
   ZStream: TMemoryStream;
+  perKfTiles: TIntegerDynArray2;
+  globalTiles: TIntegerDynArray;
 
   procedure DoDWord(v: Cardinal);
   begin
@@ -5183,7 +5185,7 @@ var
 
   procedure DoTMI(const TMI: TTileMapItem);
   var
-    tileIdx: Cardinal;
+    tileIdx, finalTileIdx: Cardinal;
     palIdx, attrs: Word;
     isIntra, isLongTile, isLongPal, isLongOffsets: Boolean;
   begin
@@ -5208,9 +5210,10 @@ var
     begin
       tileIdx := Max(0, TMI.TileIdx);
       palIdx := Max(0, TMI.PalIdx);
+      finalTileIdx := Max(0, Tiles[tileIdx]^.TmpIndex);
 
       isIntra := InRange(tileIdx, 0, High(FTiles)) and (FTiles[tileIdx]^.UseCount <= 1);
-      isLongTile := tileIdx > High(Word);
+      isLongTile := finalTileIdx > High(Word);
       isLongPal := palIdx >= (1 shl (CGTMCommandBits - 2));
 
       attrs := (Ord(TMI.VMirror) shl 1) or Ord(TMI.HMirror);
@@ -5226,18 +5229,18 @@ var
         if not isLongTile and not isLongPal then
         begin
           DoCmd(gtShortTileIdxShortPalIdx, attrs or (palIdx shl 2));
-          DoWord(tileIdx);
+          DoWord(finalTileIdx);
         end
         else if not isLongPal then
         begin
           DoCmd(gtLongTileIdxShortPalIdx, attrs or (palIdx shl 2));
-          DoDWord(tileIdx);
+          DoDWord(finalTileIdx);
         end
         else
         begin
           DoCmd(gtLongTileIdxLongPalIdx, attrs);
           DoWord(palIdx);
-          DoDWord(tileIdx);
+          DoDWord(finalTileIdx);
         end;
       end;
     end;
@@ -5265,37 +5268,28 @@ var
     end;
   end;
 
-  procedure WriteTiles;
+  procedure WriteTiles(const AList: TIntegerDynArray; AStart: Integer = 0);
   var
-    tIdx, reusedTileCount: Integer;
+    tlIdx: Integer;
   begin
-    reusedTileCount := 0;
-    for tIdx := 0 to High(Tiles) do
-    begin
-      Assert(Tiles[tIdx]^.Active);
-      if Tiles[tIdx]^.UseCount = 1 then
-      begin
-        reusedTileCount := tIdx;
-        Break;
-      end;
-    end;
-
-    if reusedTileCount > 0 then
+    if Length(AList) > 0 then
     begin
       DoCmd(gtTileSet, FPaletteSize);
-      DoDWord(0); // start tile
-      DoDWord(reusedTileCount - 1); // end tile
+      DoDWord(AStart); // start tile
+      DoDWord(AStart + High(AList)); // end tile
 
-      for tIdx := 0 to reusedTileCount - 1 do
-        ZStream.Write(Tiles[tIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
+      for tlIdx := 0 to High(AList) do
+        ZStream.Write(Tiles[AList[tlIdx]]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
     end;
   end;
 
   procedure WriteDimensions;
   var
-    maxTileCount: Integer;
+    kfIdx, maxTileCount: Integer;
   begin
-    maxTileCount := Length(Tiles);
+    maxTileCount := 0;
+    for kfIdx := 0 to High(perKfTiles) do
+      maxTileCount := max(maxTileCount, Length(globalTiles) + Length(perKfTiles[kfIdx]));
 
     DoCmd(gtSetDimensions, 0);
     DoWord(FTileMapWidth); // frame tilemap width
@@ -5308,6 +5302,99 @@ var
   begin
     DoCmd(gtExtendedCommand, 0);
     ZStream.WriteAnsiString(GetSettings);
+  end;
+
+  procedure MapTiles;
+  var
+    tIdx, frmIdx, sy, sx, kfIdx: Integer;
+    perKFPos: TIntegerDynArray;
+    globalPos: Integer;
+    tmi: PTileMapItem;
+    tile: PTile;
+  begin
+    // init
+
+    for tIdx := 0 to High(FTiles) do
+      FTiles[tIdx]^.TmpIndex := -1;
+
+    // tag tiles with unique KF index
+
+    for frmIdx := 0 to High(FFrames) do
+      for sy := 0 to FTileMapHeight - 1 do
+        for sx := 0 to FTileMapWidth - 1 do
+        begin
+          tmi := @FFrames[frmIdx].TileMap[sy, sx];
+
+          tIdx := tmi^.TileIdx;
+          if tIdx < 0 then
+            Continue;
+
+          tile := FTiles[tIdx];
+          if tile^.UseCount <= 1 then
+            Continue;
+
+          kfIdx := FFrames[frmIdx].PKeyFrame.Index;
+
+          if tile^.TmpIndex < 0 then
+            tile^.TmpIndex := kfIdx
+          else if tile^.TmpIndex <> kfIdx then
+            tile^.TmpIndex := High(Integer);
+        end;
+
+    // count tiles
+
+    SetLength(perKFPos, Length(FKeyFrames));
+    globalPos := 0;
+    for tIdx := 0 to High(FTiles) do
+    begin
+      tile := FTiles[tIdx];
+      kfIdx := tile^.TmpIndex;
+
+      if kfIdx >= 0 then
+      begin
+        if kfIdx < High(Integer) then
+          Inc(perKFPos[kfIdx])
+        else
+          Inc(globalPos);
+      end;
+    end;
+
+    // dim arrays
+
+    SetLength(perKfTiles, Length(FKeyFrames));
+    for kfIdx := 0 to High(perKfTiles) do
+    begin
+      SetLength(perKfTiles[kfIdx], perKFPos[kfIdx]);
+      perKFPos[kfIdx] := 0;
+    end;
+    SetLength(globalTiles, globalPos);
+    globalPos := 0;
+
+    // fill arrays with tile indexes
+
+    for tIdx := 0 to High(FTiles) do
+    begin
+      tile := FTiles[tIdx];
+      kfIdx := tile^.TmpIndex;
+
+      if kfIdx >= 0 then
+      begin
+        if kfIdx < High(Integer) then
+        begin
+          tile^.TmpIndex := Length(globalTiles) + perKFPos[kfIdx];
+
+          perKfTiles[kfIdx, perKFPos[kfIdx]] := tIdx;
+          Inc(perKFPos[kfIdx]);
+        end
+        else
+        begin
+          tile^.TmpIndex := globalPos;
+
+          globalTiles[globalPos] := tIdx;
+          Inc(globalPos);
+        end;
+      end;
+    end;
   end;
 
 var
@@ -5351,15 +5438,22 @@ begin
 
   ZStream := TMemoryStream.Create;
   try
+    MapTiles;
+
     WriteSettings;
     WriteDimensions;
-    WriteTiles;
-    WritePalettes;
+    WriteTiles(globalTiles);
 
     LastKF := 0;
     for kfIdx := 0 to High(FKeyFrames) do
     begin
       KeyFrame := FKeyFrames[kfIdx];
+
+      WriteTiles(perKfTiles[kfIdx], Length(globalTiles));
+
+      // palletes must always be written after at least one tileset
+      if kfIdx = 0 then
+        WritePalettes;
 
       for frmIdx := KeyFrame.StartFrame to KeyFrame.EndFrame do
       begin
