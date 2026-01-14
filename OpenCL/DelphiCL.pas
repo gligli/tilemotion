@@ -112,15 +112,19 @@ type
   end;
 
   PDCLCommandQueue = ^TDCLCommandQueue;
+
+  { TDCLCommandQueue }
+
   TDCLCommandQueue = class
   private
     FCommandQueue: PCL_command_queue;
+    FAutoFinish: Boolean;
     FStatus: TCL_int;
     FProperties: TDCLCommandQueuePropertiesSet;
     {$IFDEF PROFILING}
     FExecuteTime: TCL_ulong;
     {$ENDIF}
-    constructor Create(const Device_Id: PCL_device_id; const Context: PCL_context; const Properties: TDCLCommandQueuePropertiesSet = []);
+    constructor Create(const Device_Id: PCL_device_id; const Context: PCL_context; const Properties: TDCLCommandQueuePropertiesSet = []; AAutoFinish: Boolean = True);
   public
     procedure ReadBuffer(const Buffer: TDCLBuffer; const Size: TSize_t; const Data: Pointer);
     procedure WriteBuffer(const Buffer: TDCLBuffer; const Size: TSize_t; const Data: Pointer);
@@ -129,13 +133,17 @@ type
     procedure Execute(const Kernel: TDCLKernel; const Size: TSize_t); overload;
     procedure Execute(const Kernel: TDCLKernel; //const Device: PCL_device_id;
                       const Size: array of TSize_t);overload;
-
+    procedure Execute(const Kernel: TDCLKernel; //const Device: PCL_device_id;
+                      const Offset: array of TSize_t;
+                      const Size: array of TSize_t);overload;
+    procedure Finish;
 
     procedure AcquireGLObject(const Buffer: TDCLBuffer);overload;
     procedure AcquireGLObject(const Image2D: TDCLImage2D);overload;
     procedure ReleaseGLObject(const Buffer: TDCLBuffer);overload;
     procedure ReleaseGLObject(const Image2D: TDCLImage2D);overload;
 
+    property AutoFinish: Boolean read FAutoFinish write FAutoFinish;
     property Status: TCL_int read FStatus;
     property Properties: TDCLCommandQueuePropertiesSet read FProperties;
     {$IFDEF PROFILING}
@@ -207,6 +215,9 @@ type
                             {$ENDIF});
 
   PDCLDevice = ^TDCLDevice;
+
+  { TDCLDevice }
+
   TDCLDevice = class
   //private
     FDevice_id: PCL_device_id;
@@ -369,8 +380,8 @@ type
     property Context: TDCLContext read FContext;
     function CreateContext(): TDCLContext;
     function CreateContextGL(): TDCLContext;
-    function CreateCommandQueue(const properties: TDCLCommandQueuePropertiesSet = []): TDCLCommandQueue;overload;
-    function CreateCommandQueue(const context: TDCLContext; const properties: TDCLCommandQueuePropertiesSet = []): TDCLCommandQueue;overload;
+    function CreateCommandQueue(const properties: TDCLCommandQueuePropertiesSet = []; AAutoFinish: Boolean = True): TDCLCommandQueue;overload;
+    function CreateCommandQueue(const AContext: TDCLContext; const properties: TDCLCommandQueuePropertiesSet = []; AAutoFinish: Boolean = True): TDCLCommandQueue;overload;
     function CreateBuffer(const Size: TSize_t; const Data: Pointer = nil; const flags: TDCLMemFlagsSet = [mfReadWrite]): TDCLBuffer;
 
     function CreateFromGLBuffer(const Data: Pointer = nil; const flags: TDCLMemFlagsSet = [mfWriteOnly]): TDCLBuffer;
@@ -2049,18 +2060,6 @@ begin
   Result := TDCLBuffer.Create(Context.FContext, flags, Size, Data);
 end;
 
-function TDCLDevice.CreateCommandQueue(
-  const properties: TDCLCommandQueuePropertiesSet): TDCLCommandQueue;
-begin
-  Result := TDCLCommandQueue.Create(Device_id, Context.FContext, properties);
-end;
-
-function TDCLDevice.CreateCommandQueue(const Context: TDCLContext;
-  const properties: TDCLCommandQueuePropertiesSet): TDCLCommandQueue;
-begin
-  Result := TDCLCommandQueue.Create(Device_id, Context.FContext, properties);
-end;
-
 function TDCLDevice.CreateContext: TDCLContext;
 begin
   Result := TDCLContext.Create(FDevice_id);
@@ -2069,6 +2068,18 @@ end;
 function TDCLDevice.CreateContextGL: TDCLContext;
 begin
   Result := TDCLContext.CreateGL(FDevice_id);
+end;
+
+function TDCLDevice.CreateCommandQueue(const properties: TDCLCommandQueuePropertiesSet; AAutoFinish: Boolean
+  ): TDCLCommandQueue;
+begin
+  Result := TDCLCommandQueue.Create(Device_id, Context.FContext, properties, AAutoFinish);
+end;
+
+function TDCLDevice.CreateCommandQueue(const AContext: TDCLContext; const properties: TDCLCommandQueuePropertiesSet;
+  AAutoFinish: Boolean): TDCLCommandQueue;
+begin
+  Result := TDCLCommandQueue.Create(Device_id, AContext.FContext, properties, AAutoFinish);
 end;
 
 function TDCLDevice.CreateProgram(const Source: PPAnsiChar;
@@ -2095,6 +2106,7 @@ var
   F: TextFile;
   Source: AnsiString;
   buf: AnsiString;
+  pp: array[0 .. 1] of PAnsiChar;
 begin
   AssignFile(F, FileName);
   Reset(F);
@@ -2105,7 +2117,11 @@ begin
     Source := Source + buf + #10 + #13;
   end;
   CloseFile(F);
-  Result := CreateProgram(Source, Options);
+
+  pp[0] := @Source[1];
+  pp[1] := nil;
+
+  Result := CreateProgram(@pp[0], Options);
 end;
 
 destructor TDCLDevice.Destroy;
@@ -2229,10 +2245,11 @@ end;
 { TDCLQueue }
 
 constructor TDCLCommandQueue.Create(const Device_Id: PCL_device_id; const Context: PCL_context;
-  const properties: TDCLCommandQueuePropertiesSet);
+  const Properties: TDCLCommandQueuePropertiesSet; AAutoFinish: Boolean);
 var
   props: TCL_command_queue_properties;
 begin
+  FAutoFinish := AAutoFinish;
   props := 0;
   if cqpOutOfOrderExecModeEnable in properties then
     props := props or CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE;
@@ -2307,10 +2324,13 @@ begin
   {$IFDEF LOGGING}
     WriteLog('clEnqueueNDRangeKernel: ' + GetString(FStatus) + ';');
   {$ENDIF}
-  FStatus := clFinish(FCommandQueue);
-  {$IFDEF LOGGING}
-    WriteLog('clFinish: ' + GetString(FStatus) + ';');
-  {$ENDIF}
+  if FAutoFinish then
+  begin
+    FStatus := clFinish(FCommandQueue);
+    {$IFDEF LOGGING}
+      WriteLog('clFinish: ' + GetString(FStatus) + ';');
+    {$ENDIF}
+  end;
   {$IFDEF PROFILING}
     FStatus := clGetEventProfilingInfo(TimingEvent, CL_PROFILING_COMMAND_START, SizeOf(StartTime), @StartTime, nil);
     {$IFDEF LOGGING}
@@ -2343,10 +2363,13 @@ begin
   {$IFDEF LOGGING}
     WriteLog('clEnqueueNDRangeKernel: ' + GetString(FStatus) + ';');
   {$ENDIF}
-  FStatus := clFinish(FCommandQueue);
-  {$IFDEF LOGGING}
-    WriteLog('clFinish: ' + GetString(FStatus) + ';');
-  {$ENDIF}
+  if FAutoFinish then
+  begin
+    FStatus := clFinish(FCommandQueue);
+    {$IFDEF LOGGING}
+      WriteLog('clFinish: ' + GetString(FStatus) + ';');
+    {$ENDIF}
+  end;
   {$IFDEF PROFILING}
     FStatus := clGetEventProfilingInfo(TimingEvent, CL_PROFILING_COMMAND_START, SizeOf(StartTime), @StartTime, nil);
     {$IFDEF LOGGING}
@@ -2360,6 +2383,53 @@ begin
     {$IFDEF LOGGING}
       WriteLog('EnqueueNDRangeKernel time: ' + IntToStr(FExecuteTime) + ' ns;');
     {$ENDIF}
+  {$ENDIF}
+end;
+
+procedure TDCLCommandQueue.Execute(const Kernel: TDCLKernel; const Offset: array of TSize_t;
+  const Size: array of TSize_t);
+{$IFDEF PROFILING}
+var
+  TimingEvent: PCL_event;
+  StartTime,
+  EndTime: TCL_ulong;
+{$ENDIF}
+begin
+  {$IFDEF LOGGING}
+    WriteLog('clGetKernelWorkGroupInfo: ' + GetString(FStatus) + ';');
+  {$ENDIF}
+  FStatus := clEnqueueNDRangeKernel(FCommandQueue, Kernel.FKernel, Length(Size), @Offset[0], @Size[0], nil, 0, nil, {$IFDEF PROFILING}@TimingEvent{$ELSE}nil{$ENDIF});
+  {$IFDEF LOGGING}
+    WriteLog('clEnqueueNDRangeKernel: ' + GetString(FStatus) + ';');
+  {$ENDIF}
+  if FAutoFinish then
+  begin
+    FStatus := clFinish(FCommandQueue);
+    {$IFDEF LOGGING}
+      WriteLog('clFinish: ' + GetString(FStatus) + ';');
+    {$ENDIF}
+  end;
+  {$IFDEF PROFILING}
+    FStatus := clGetEventProfilingInfo(TimingEvent, CL_PROFILING_COMMAND_START, SizeOf(StartTime), @StartTime, nil);
+    {$IFDEF LOGGING}
+      WriteLog('clGetEventProfilingInfo: ' + GetString(FStatus) + ';');
+    {$ENDIF}
+    FStatus := clGetEventProfilingInfo(TimingEvent, CL_PROFILING_COMMAND_END, SizeOf(EndTime), @EndTime, nil);
+    {$IFDEF LOGGING}
+      WriteLog('clGetEventProfilingInfo: ' + GetString(FStatus) + ';');
+    {$ENDIF}
+    FExecuteTime := EndTime-StartTime;
+    {$IFDEF LOGGING}
+      WriteLog('EnqueueNDRangeKernel time: ' + IntToStr(FExecuteTime) + ' ns;');
+    {$ENDIF}
+  {$ENDIF}
+end;
+
+procedure TDCLCommandQueue.Finish;
+begin
+  FStatus := clFinish(FCommandQueue);
+  {$IFDEF LOGGING}
+    WriteLog('clFinish: ' + GetString(FStatus) + ';');
   {$ENDIF}
 end;
 
@@ -2424,9 +2494,9 @@ begin
   {$IFDEF LOGGING}
     WriteLog('clGetProgramInfo: ' + GetString(FStatus) + ';');
   {$ENDIF}
-  {$IFDEF LOGGING}
-    WriteLog('CL_PROGRAM_BINARIES: ' + AnsiString(FBinaries[0]) + ';');
-  {$ENDIF}
+  //{$IFDEF LOGGING}
+  //  WriteLog('CL_PROGRAM_BINARIES: ' + AnsiString(FBinaries[0]) + ';');
+  //{$ENDIF}
 end;
 
 function TDCLProgram.CreateKernel(const KernelName: PAnsiChar): TDCLKernel;
@@ -2545,10 +2615,13 @@ begin
   {$IFDEF LOGGING}
     WriteLog('clEnqueueReadBuffer: ' + GetString(FStatus) + ';');
   {$ENDIF}
-  clFinish(FCommandQueue);
-  {$IFDEF LOGGING}
-    WriteLog('clFinish: ' + GetString(FStatus) + ';');
-  {$ENDIF}
+  if FAutoFinish then
+  begin
+    clFinish(FCommandQueue);
+    {$IFDEF LOGGING}
+      WriteLog('clFinish: ' + GetString(FStatus) + ';');
+    {$ENDIF}
+  end;
   {$IFDEF PROFILING}
     FStatus := clGetEventProfilingInfo(TimingEvent, CL_PROFILING_COMMAND_START, SizeOf(StartTime), @StartTime, nil);
     {$IFDEF LOGGING}
@@ -2582,10 +2655,13 @@ begin
   {$IFDEF LOGGING}
     WriteLog('clEnqueueReadImage: ' + GetString(FStatus) + ';');
   {$ENDIF}
-  FStatus := clFinish(FCommandQueue);
-  {$IFDEF LOGGING}
-    WriteLog('clFinish: ' + GetString(FStatus) + ';');
-  {$ENDIF}
+  if FAutoFinish then
+  begin
+    FStatus := clFinish(FCommandQueue);
+    {$IFDEF LOGGING}
+      WriteLog('clFinish: ' + GetString(FStatus) + ';');
+    {$ENDIF}
+  end;
   {$IFDEF PROFILING}
     FStatus := clGetEventProfilingInfo(TimingEvent, CL_PROFILING_COMMAND_START, SizeOf(StartTime), @StartTime, nil);
     {$IFDEF LOGGING}
@@ -2600,7 +2676,6 @@ begin
       WriteLog('clEnqueueReadImage time: ' + IntToStr(FExecuteTime) + ' ns;');
     {$ENDIF}
   {$ENDIF}
-
 end;
 
 procedure TDCLCommandQueue.WriteImage2D(const Image: TDCLImage2D;
@@ -2621,10 +2696,13 @@ begin
   {$IFDEF LOGGING}
     WriteLog('clEnqueueWriteImage: ' + GetString(FStatus) + ';');
   {$ENDIF}
-  FStatus := clFinish(FCommandQueue);
-  {$IFDEF LOGGING}
-    WriteLog('clFinish: ' + GetString(FStatus) + ';');
-  {$ENDIF}
+  if FAutoFinish then
+  begin
+    FStatus := clFinish(FCommandQueue);
+    {$IFDEF LOGGING}
+      WriteLog('clFinish: ' + GetString(FStatus) + ';');
+    {$ENDIF}
+  end;
   {$IFDEF PROFILING}
     FStatus := clGetEventProfilingInfo(TimingEvent, CL_PROFILING_COMMAND_START, SizeOf(StartTime), @StartTime, nil);
     {$IFDEF LOGGING}
@@ -2654,10 +2732,13 @@ begin
   {$IFDEF LOGGING}
     WriteLog('clEnqueueWriteBuffer: ' + GetString(FStatus) + ';');
   {$ENDIF}
-  FStatus := clFinish(FCommandQueue);
-  {$IFDEF LOGGING}
-    WriteLog('clFinish: ' + GetString(FStatus) + ';');
-  {$ENDIF}
+  if FAutoFinish then
+  begin
+    FStatus := clFinish(FCommandQueue);
+    {$IFDEF LOGGING}
+      WriteLog('clFinish: ' + GetString(FStatus) + ';');
+    {$ENDIF}
+  end;
   {$IFDEF PROFILING}
     FStatus := clGetEventProfilingInfo(TimingEvent, CL_PROFILING_COMMAND_START, SizeOf(StartTime), @StartTime, nil);
     {$IFDEF LOGGING}
