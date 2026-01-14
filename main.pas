@@ -688,9 +688,14 @@ begin
       end;
 
       if FTilingEncoder.OpenCLDevices.Count > 0 then
-        cbxCompDev.ItemIndex := max(1, cbxCompDev.ItemIndex)
+      begin
+        cbxCompDev.ItemIndex := max(1, cbxCompDev.ItemIndex);
+        FTilingEncoder.OpenCLDevice := TDCLDevice(cbxCompDev.Items.Objects[cbxCompDev.ItemIndex]);
+      end
       else
+      begin
         cbxCompDev.ItemIndex := 0;
+      end;
     end
     else
     begin
@@ -710,9 +715,6 @@ begin
   sePSNR.Enabled := rbPSNR.Checked;
   seQbTiles.Enabled := rbTileLimit.Checked;
   seMaxTiles.Enabled := rbTileLimit.Checked;
-  seMaxCores.Enabled := not FTilingEncoder.UseOpenCL;
-  lblMaxCores.Enabled := seMaxCores.Enabled;
-;
 end;
 
 procedure TMainForm.TilingEncoderProgress(ASender: TTilingEncoder; APosition, AMax: Integer; AHourGlass: Boolean);
