@@ -206,7 +206,7 @@
         <PackageName Value="LCL"/>
       </Item2>
     </RequiredPackages>
-    <Units Count="6">
+    <Units Count="7">
       <Unit0>
         <Filename Value="tiler.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -234,6 +234,10 @@
         <Filename Value="utils.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit5>
+      <Unit6>
+        <Filename Value="MotionPredict.cl"/>
+        <IsPartOfProject Value="True"/>
+      </Unit6>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
@@ -278,7 +282,8 @@
         <IgnoredMessages idx7122="True" idx7121="True" idx6058="True" idx5044="True" idx5024="True"/>
       </CompilerMessages>
       <CustomOptions Value="-Si-
--dDEBUG"/>
+-dDEBUG
+-dLOGGING"/>
     </Other>
   </CompilerOptions>
   <Debugging>

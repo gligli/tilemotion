@@ -11,7 +11,7 @@ interface
 
 uses
   windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, zstream, IniFiles, Graphics,
-  IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, MTProcs, extern, tbbmalloc, bufstream, utils, kmodes, DelphiCL;
+  IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, MTProcs, extern, tbbmalloc, bufstream, utils, kmodes, DelphiCL, PasOpenCL;
 type
   TEncoderStep = (esAll = -1, esLoad = 0, esPredictMotion, esReduce, esPreparePalettes, esDither, esReconstruct, esReindex, esSave);
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
@@ -108,6 +108,12 @@ type
   TPCpnPixelsDynArray = array of PCpnPixels;
 
   ETilingEncoderGTMReloadError = class(Exception);
+  ETilingEncoderOpenCLError = class(Exception);
+
+  TNamedCLProgram = record
+    Name: String;
+    CLProgram: TDCLProgram;
+  end;
 
   { TTile }
 
@@ -326,6 +332,7 @@ type
     FUseOpenCL: Boolean;
     FOpenCLDevices: TStringList;
     FOpenCLDevice: TDCLDevice;
+    FOpenCLProgram_MotionPredict: TNamedCLProgram;
 
     // video properties
 
@@ -410,6 +417,8 @@ type
     procedure SetShotTransMinSecondsPerKF(AValue: Double);
     procedure SetStartFrame(AValue: Integer);
     procedure SetUseOpenCL(AValue: Boolean);
+
+    function CreateCLKernel(const AProgram: TNamedCLProgram): TDCLKernel;
 
     function PearsonCorrelation(const x: TFloatDynArray; const y: TFloatDynArray): TFloat;
 
@@ -1160,6 +1169,10 @@ end;
 
 procedure TFrame.PredictMotion(ARadius: Integer; AOnlyBuffer: Boolean; var AFrontBuffer,
   ABackBuffer: TIntegerDynArray2; var ADCTs: TDCTDynArray);
+const
+  CMaxRadius = 128;
+var
+  CLPrevDCTsBuf: TDCLBuffer;
 
   procedure DoDCTs(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
@@ -1190,86 +1203,147 @@ procedure TFrame.PredictMotion(ARadius: Integer; AOnlyBuffer: Boolean; var AFron
 
   procedure DoXY(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
-    dx, dy, sy, sx, oy, ox, oymn, oymx, oxmn, oxmx, ty, bestX, bestY, yx: Integer;
+    dx, dy, sy, sx, oy, ox, oymn, oymx, oxmn, oxmx, ty, yx: Integer;
     TMI: PTileMapItem;
     FrameTile: PTile;
     PrevDCTPtr: PDCTScalar;
-    err, bestErr: Cardinal;
+    err: Cardinal;
     CurDCT: TDCT;
     CurCpnPixels: TCpnPixels;
+
+    bestErrs: array[0 .. Sqr(CMaxRadius shl 1) - 1] of Cardinal;
+    bestErr: Cardinal;
+    bestXY: TPoint;
+    pBestErrs: PCardinal;
+
+    CLCmdQueue: TDCLCommandQueue;
+    CLKernel: TDCLKernel;
+    CLCurDCTBuf: TDCLBuffer;
+    CLErrBuf: TDCLBuffer;
   begin
-    if not InRange(AIndex, 0, Encoder.FTileMapSize - 1) then
+    if not InRange(AIndex, 0, Encoder.FTileMapHeight - 1) then
       Exit;
 
-    DivMod(AIndex, Encoder.FTileMapWidth, sy, sx);
-
-    dx := sx shl cTileWidthBits;
-    dy := sy shl cTileWidthBits;
+    sy := AIndex;
 
     FrameTile := TTile.New(True, False);
+    if Encoder.UseOpenCL then
+    begin
+      CLCmdQueue := Encoder.OpenCLDevice.CreateCommandQueue([], False);
+      CLCurDCTBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(TDCT), @CurDCT[0], [mfReadOnly, mfUseHostPtr]);
+      CLErrBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(Cardinal) * Sqr((ARadius + 1) shl 1), nil, [mfWriteOnly]);
+      CLKernel := Encoder.CreateCLKernel(Encoder.FOpenCLProgram_MotionPredict);
+    end;
     try
-      TMI := @TileMap[sy, sx];
-      FrameTile^.CopyFrom(FrameTiles[AIndex]^);
-      if FrameTile^.HMirror_Initial then Encoder.HMirrorTile(FrameTile^);
-      if FrameTile^.VMirror_Initial then Encoder.VMirrorTile(FrameTile^);
+      dy := sy shl cTileWidthBits;
+      oymn := Max(0, dy - ARadius - 1);
+      oymx := Min(Encoder.FScreenHeight - cTileWidth, dy + ARadius);
 
-      if not AOnlyBuffer then
+      if Encoder.UseOpenCL then
       begin
-        Encoder.ConvertToCpnPixels(FrameTile^, False, False, False, False, nil, CurCpnPixels);
-        Encoder.ComputeCpnPixelsPsyVisFeatures(CurCpnPixels, pvsWeightedDCT, cColorCpns, CurDCT);
+        CLKernel.SetArg(0, SizeOf(Encoder.FScreenWidth), @Encoder.FScreenWidth);
+        CLKernel.SetArg(2, SizeOf(dy), @dy);
+        CLKernel.SetArg(4, SizeOf(oymn), @oymn);
+        CLKernel.SetArg(5, CLPrevDCTsBuf);
+        CLKernel.SetArg(6, CLCurDCTBuf);
+        CLKernel.SetArg(7, CLErrBuf);
+      end;
 
-        bestX := MaxInt;
-        bestY := MaxInt;
-        bestErr := High(Cardinal);
-
-        oymn := Max(0, dy - ARadius - 1);
-        oymx := Min(Encoder.FScreenHeight - cTileWidth, dy + ARadius);
+      for sx := 0 to Encoder.TileMapWidth - 1 do
+      begin
+        dx := sx shl cTileWidthBits;
         oxmn := Max(0, dx - ARadius - 1);
         oxmx := Min(Encoder.FScreenWidth - cTileWidth, dx + ARadius);
 
-        for oy := oymn to oymx do
+        TMI := @TileMap[sy, sx];
+        FrameTile^.CopyFrom(FrameTiles[sy * Encoder.FTileMapWidth + sx]^);
+        if FrameTile^.HMirror_Initial then Encoder.HMirrorTile(FrameTile^);
+        if FrameTile^.VMirror_Initial then Encoder.VMirrorTile(FrameTile^);
+
+        if not AOnlyBuffer then
         begin
-          yx := oy * (Encoder.FScreenWidth - cTileWidth + 1) + oxmn;
-          for ox := oxmn to oxmx do
+          Encoder.ConvertToCpnPixels(FrameTile^, False, False, False, False, nil, CurCpnPixels);
+          Encoder.ComputeCpnPixelsPsyVisFeatures(CurCpnPixels, pvsWeightedDCT, cColorCpns, CurDCT);
+
+          bestXY.X := MaxInt;
+          bestXY.Y := MaxInt;
+          bestErr := High(Cardinal);
+
+          if Encoder.UseOpenCL then
           begin
-            PrevDCTPtr := ADCTs[yx];
+            pBestErrs := @bestErrs[0];
 
-            if QuickTestEuclideanDCTPtr_asm(CurDCT, PrevDCTPtr, bestErr) then
-            begin
-              err := CompareEuclideanDCTPtr_asm(CurDCT, PrevDCTPtr);
+            CLKernel.SetArg(1, SizeOf(dx), @dx);
+            CLKernel.SetArg(3, SizeOf(oxmn), @oxmn);
 
-              // apply a penalty of the manhattan distance to the center
-              // rationale: slightly favoring the center in case of ties improves compressibility
-              err += Abs(ox - dx) + Abs(oy - dy);
+            CLCmdQueue.Execute(CLKernel, [oxmn, oymn], [oxmx - oxmn + 1, oymx - oymn + 1]);
+            CLCmdQueue.ReadBuffer(CLErrBuf, CLErrBuf.Size, pBestErrs);
+            CLCmdQueue.Finish;
 
-              if err < bestErr then
+            for oy := oymn to oymx do
+              for ox := oxmn to oxmx do
               begin
-                bestErr := err;
-                bestX := ox;
-                bestY := oy;
+                err := pBestErrs^;
+                Inc(pBestErrs);
+
+                if err < bestErr then
+                begin
+                  bestErr := err;
+                  bestXY.X := ox;
+                  bestXY.Y := oy;
+                end;
+              end;
+          end
+          else
+          begin
+            for oy := oymn to oymx do
+            begin
+              yx := oy * (Encoder.FScreenWidth - cTileWidth + 1) + oxmn;
+              for ox := oxmn to oxmx do
+              begin
+                PrevDCTPtr := ADCTs[yx];
+
+                if QuickTestEuclideanDCTPtr_asm(CurDCT, PrevDCTPtr, bestErr) then
+                begin
+                  err := CompareEuclideanDCTPtr_asm(CurDCT, PrevDCTPtr);
+
+                  // apply a penalty of the manhattan distance to the center
+                  // rationale: slightly favoring the center in case of ties improves compressibility
+                  err += Abs(ox - dx) + Abs(oy - dy);
+
+                  if err < bestErr then
+                  begin
+                    bestErr := err;
+                    bestXY.X := ox;
+                    bestXY.Y := oy;
+                  end;
+                end;
+
+                Inc(yx);
               end;
             end;
-
-            Inc(yx);
           end;
+
+          TMI^.PSNR := EuclideanToPSNR(bestErr);
+          TMI^.PredictedX := bestXY.X - dx;
+          TMI^.PredictedY := bestXY.Y - dy;
         end;
 
-        TMI^.PSNR := EuclideanToPSNR(bestErr);
-        TMI^.PredictedX := bestX - dx;
-        TMI^.PredictedY := bestY - dy;
-      end;
-
-      // draw fb
-      for ty := 0 to cTileWidth - 1 do
-      begin
-        Move(FrameTile^.GetRGBPixelsPtr^[ty, 0], AFrontBuffer[dy, dx], cTileWidth * SizeOf(Integer));
-        Inc(dy);
+        // draw fb
+        for ty := 0 to cTileWidth - 1 do
+          Move(FrameTile^.GetRGBPixelsPtr^[ty, 0], AFrontBuffer[dy + ty, dx], cTileWidth * SizeOf(Integer));
       end;
     finally
       TTile.Dispose(FrameTile);
+      if Encoder.UseOpenCL then
+      begin
+        CLKernel.Free;
+        CLErrBuf.Free;
+        CLCurDCTBuf.Free;
+        CLCmdQueue.Free;
+      end;
     end;
   end;
-
 
 begin
   if ARadius <= 0 then
@@ -1278,13 +1352,21 @@ begin
   Dec(ARadius);
 
   if not AOnlyBuffer then
+  begin
     ProcThreadPool.DoParallelLocalProc(@DoDCTs, 0, Encoder.FScreenHeight - cTileWidth);
+
+    if Encoder.UseOpenCL then
+      CLPrevDCTsBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(TDCT) * Length(ADCTs), @ADCTs[0, 0], [mfReadOnly, mfUseHostPtr]);
+  end;
 
   AcquireFrameTiles;
   try
-    ProcThreadPool.DoParallelLocalProc(@DoXY, 0, Encoder.FTileMapSize - 1);
+    ProcThreadPool.DoParallelLocalProc(@DoXY, 0, Encoder.FTileMapHeight - 1);
   finally
     ReleaseFrameTiles;
+
+    if (not AOnlyBuffer) and Encoder.UseOpenCL then
+      CLPrevDCTsBuf.Free;
   end;
 end;
 
@@ -1746,6 +1828,19 @@ begin
 end;
 
 procedure TTilingEncoder.Load;
+
+  procedure CreateCLProgram(AName: string; var AProgram: TNamedCLProgram);
+  begin
+    AProgram.Name := AName;
+    AProgram.CLProgram := nil;
+    if FUseOpenCL then
+    begin
+      AProgram.CLProgram := FOpenCLDevice.CreateProgram(ExtractFilePath(ParamStr(0)) + AName + '.cl');
+      if AProgram.CLProgram.BinarySizes <= 0 then
+        raise ETilingEncoderOpenCLError.Create(AProgram.CLProgram.Log);
+    end;
+  end;
+
 var
   frmIdx, frmCnt, eqtc, startFrmIdx: Integer;
   fn: String;
@@ -1767,6 +1862,10 @@ begin
   // init Gamma LUTs
 
   InitLuts;
+
+  // init CL kernels
+
+  CreateCLProgram('MotionPredict', FOpenCLProgram_MotionPredict);
 
   // load video
 
@@ -2203,6 +2302,11 @@ begin
     Render;
     fs.Free;
   end;
+end;
+
+function TTilingEncoder.CreateCLKernel(const AProgram: TNamedCLProgram): TDCLKernel;
+begin
+  Result := AProgram.CLProgram.CreateKernel(PAnsiChar(AProgram.Name));
 end;
 
 function TTilingEncoder.PearsonCorrelation(const x: TFloatDynArray; const y: TFloatDynArray): TFloat;
@@ -5597,6 +5701,7 @@ begin
   FTilesBitmap.Free;
   FPaletteBitmap.Free;
 
+  FOpenCLProgram_MotionPredict.CLProgram.Free;
   FOpenCLDevices.Free;
 end;
 
