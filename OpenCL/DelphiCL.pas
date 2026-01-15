@@ -89,7 +89,7 @@ type
     property Status: TCL_int read FStatus;
   end;
 
-  TDCLCommandQueueProperties = (cqpOutOfOrderExecModeEnable);
+  TDCLCommandQueueProperties = (cqpOutOfOrderExecModeEnable, cqpDisableAutoFinish);
   TDCLCommandQueuePropertiesSet = set of TDCLCommandQueueProperties;
 
   PDCLKernel = ^TDCLKernel;
@@ -118,13 +118,12 @@ type
   TDCLCommandQueue = class
   private
     FCommandQueue: PCL_command_queue;
-    FAutoFinish: Boolean;
     FStatus: TCL_int;
     FProperties: TDCLCommandQueuePropertiesSet;
     {$IFDEF PROFILING}
     FExecuteTime: TCL_ulong;
     {$ENDIF}
-    constructor Create(const Device_Id: PCL_device_id; const Context: PCL_context; const Properties: TDCLCommandQueuePropertiesSet = []; AAutoFinish: Boolean = True);
+    constructor Create(const Device_Id: PCL_device_id; const Context: PCL_context; const Properties: TDCLCommandQueuePropertiesSet = []);
   public
     procedure ReadBuffer(const Buffer: TDCLBuffer; const Size: TSize_t; const Data: Pointer);
     procedure WriteBuffer(const Buffer: TDCLBuffer; const Size: TSize_t; const Data: Pointer);
@@ -143,7 +142,6 @@ type
     procedure ReleaseGLObject(const Buffer: TDCLBuffer);overload;
     procedure ReleaseGLObject(const Image2D: TDCLImage2D);overload;
 
-    property AutoFinish: Boolean read FAutoFinish write FAutoFinish;
     property Status: TCL_int read FStatus;
     property Properties: TDCLCommandQueuePropertiesSet read FProperties;
     {$IFDEF PROFILING}
@@ -380,8 +378,8 @@ type
     property Context: TDCLContext read FContext;
     function CreateContext(): TDCLContext;
     function CreateContextGL(): TDCLContext;
-    function CreateCommandQueue(const properties: TDCLCommandQueuePropertiesSet = []; AAutoFinish: Boolean = True): TDCLCommandQueue;overload;
-    function CreateCommandQueue(const AContext: TDCLContext; const properties: TDCLCommandQueuePropertiesSet = []; AAutoFinish: Boolean = True): TDCLCommandQueue;overload;
+    function CreateCommandQueue(const properties: TDCLCommandQueuePropertiesSet = []): TDCLCommandQueue;overload;
+    function CreateCommandQueue(const AContext: TDCLContext; const properties: TDCLCommandQueuePropertiesSet = []): TDCLCommandQueue;overload;
     function CreateBuffer(const Size: TSize_t; const Data: Pointer = nil; const flags: TDCLMemFlagsSet = [mfReadWrite]): TDCLBuffer;
 
     function CreateFromGLBuffer(const Data: Pointer = nil; const flags: TDCLMemFlagsSet = [mfWriteOnly]): TDCLBuffer;
@@ -2070,16 +2068,14 @@ begin
   Result := TDCLContext.CreateGL(FDevice_id);
 end;
 
-function TDCLDevice.CreateCommandQueue(const properties: TDCLCommandQueuePropertiesSet; AAutoFinish: Boolean
-  ): TDCLCommandQueue;
+function TDCLDevice.CreateCommandQueue(const properties: TDCLCommandQueuePropertiesSet): TDCLCommandQueue;
 begin
-  Result := TDCLCommandQueue.Create(Device_id, Context.FContext, properties, AAutoFinish);
+  Result := TDCLCommandQueue.Create(Device_id, Context.FContext, properties);
 end;
 
-function TDCLDevice.CreateCommandQueue(const AContext: TDCLContext; const properties: TDCLCommandQueuePropertiesSet;
-  AAutoFinish: Boolean): TDCLCommandQueue;
+function TDCLDevice.CreateCommandQueue(const AContext: TDCLContext; const properties: TDCLCommandQueuePropertiesSet): TDCLCommandQueue;
 begin
-  Result := TDCLCommandQueue.Create(Device_id, AContext.FContext, properties, AAutoFinish);
+  Result := TDCLCommandQueue.Create(Device_id, AContext.FContext, properties);
 end;
 
 function TDCLDevice.CreateProgram(const Source: PPAnsiChar;
@@ -2244,12 +2240,10 @@ end;
 
 { TDCLQueue }
 
-constructor TDCLCommandQueue.Create(const Device_Id: PCL_device_id; const Context: PCL_context;
-  const Properties: TDCLCommandQueuePropertiesSet; AAutoFinish: Boolean);
+constructor TDCLCommandQueue.Create(const Device_Id: PCL_device_id; const Context: PCL_context; const Properties: TDCLCommandQueuePropertiesSet);
 var
   props: TCL_command_queue_properties;
 begin
-  FAutoFinish := AAutoFinish;
   props := 0;
   if cqpOutOfOrderExecModeEnable in properties then
     props := props or CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE;
@@ -2324,7 +2318,7 @@ begin
   {$IFDEF LOGGING}
     WriteLog('clEnqueueNDRangeKernel: ' + GetString(FStatus) + ';');
   {$ENDIF}
-  if FAutoFinish then
+  if not (cqpDisableAutoFinish in FProperties) then
   begin
     FStatus := clFinish(FCommandQueue);
     {$IFDEF LOGGING}
@@ -2363,7 +2357,7 @@ begin
   {$IFDEF LOGGING}
     WriteLog('clEnqueueNDRangeKernel: ' + GetString(FStatus) + ';');
   {$ENDIF}
-  if FAutoFinish then
+  if not (cqpDisableAutoFinish in FProperties) then
   begin
     FStatus := clFinish(FCommandQueue);
     {$IFDEF LOGGING}
@@ -2402,7 +2396,7 @@ begin
   {$IFDEF LOGGING}
     WriteLog('clEnqueueNDRangeKernel: ' + GetString(FStatus) + ';');
   {$ENDIF}
-  if FAutoFinish then
+  if not (cqpDisableAutoFinish in FProperties) then
   begin
     FStatus := clFinish(FCommandQueue);
     {$IFDEF LOGGING}
@@ -2510,7 +2504,7 @@ begin
   {$IFDEF LOGGING}
     WriteLog('clReleaseProgram: ' + GetString(FStatus) + ';');
   {$ENDIF}
-  FSource := '';
+  Freememory(FSource);
   FBinarySizes := 0;
   SetLength(FBinaries, 0, 0);
   inherited;
@@ -2615,7 +2609,7 @@ begin
   {$IFDEF LOGGING}
     WriteLog('clEnqueueReadBuffer: ' + GetString(FStatus) + ';');
   {$ENDIF}
-  if FAutoFinish then
+  if not (cqpDisableAutoFinish in FProperties) then
   begin
     clFinish(FCommandQueue);
     {$IFDEF LOGGING}
@@ -2655,7 +2649,7 @@ begin
   {$IFDEF LOGGING}
     WriteLog('clEnqueueReadImage: ' + GetString(FStatus) + ';');
   {$ENDIF}
-  if FAutoFinish then
+  if not (cqpDisableAutoFinish in FProperties) then
   begin
     FStatus := clFinish(FCommandQueue);
     {$IFDEF LOGGING}
@@ -2696,7 +2690,7 @@ begin
   {$IFDEF LOGGING}
     WriteLog('clEnqueueWriteImage: ' + GetString(FStatus) + ';');
   {$ENDIF}
-  if FAutoFinish then
+  if not (cqpDisableAutoFinish in FProperties) then
   begin
     FStatus := clFinish(FCommandQueue);
     {$IFDEF LOGGING}
@@ -2732,7 +2726,7 @@ begin
   {$IFDEF LOGGING}
     WriteLog('clEnqueueWriteBuffer: ' + GetString(FStatus) + ';');
   {$ENDIF}
-  if FAutoFinish then
+  if not (cqpDisableAutoFinish in FProperties) then
   begin
     FStatus := clFinish(FCommandQueue);
     {$IFDEF LOGGING}

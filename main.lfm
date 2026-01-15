@@ -376,7 +376,7 @@ object MainForm: TMainForm
       object lblMaxCores: TLabel
         Left = 8
         Height = 16
-        Top = 476
+        Top = 452
         Width = 236
         Caption = 'Maximum CPU cores used for multithreading'
         ParentColor = False
@@ -506,7 +506,7 @@ object MainForm: TMainForm
       object seMaxCores: TSpinEdit
         Left = 328
         Height = 24
-        Top = 472
+        Top = 448
         Width = 64
         MaxValue = 1000000
         MinValue = 1
@@ -557,7 +557,7 @@ object MainForm: TMainForm
       object Label19: TLabel
         Left = 8
         Height = 16
-        Top = 452
+        Top = 476
         Width = 96
         Caption = 'Computing device'
         ParentColor = False
@@ -565,7 +565,7 @@ object MainForm: TMainForm
       object cbxCompDev: TComboBox
         Left = 328
         Height = 24
-        Top = 448
+        Top = 472
         Width = 280
         DropDownCount = 20
         ItemHeight = 16

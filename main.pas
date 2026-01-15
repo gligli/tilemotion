@@ -481,7 +481,7 @@ procedure TMainForm.btnDebug2Click(Sender: TObject);
 begin
   edInput.Text := ExtractFilePath(Application.ExeName) + '..\tiler_misc\sunflower_1080p25.y4m';
   edOutput.Text :=  ExtractFilePath(Application.ExeName) + 'debug.gtm';
-  seFrameCount.Value := IfThen(seFrameCount.Value >= 12, IfThen(seFrameCount.Value = 12, 24, 1), 12);
+  seFrameCount.Value := IfThen(seFrameCount.Value >= 12, IfThen(seFrameCount.Value = 12, 24, 2), 12);
   cbxScaling.ItemIndex := 2;
   cbxPalCount.Text := '256';
 
@@ -502,6 +502,14 @@ begin
     VK_F10: btnRunAllClick(nil);
     VK_F11: chkPlay.Checked := not chkPlay.Checked;
     VK_F12:
+    begin
+      if ssShift in Shift then
+      begin
+        cbxCompDev.ItemIndex := 1;
+        UpdateGUI(nil);
+        cbxCompDev.ItemIndex := cbxCompDev.Items.Count - 1;
+      end;
+
       if ssCtrl in Shift then
       begin
         btnDebugClick(nil);
@@ -528,6 +536,7 @@ begin
         end;
         UpdateVideo(nil);
       end;
+    end;
     VK_PRIOR, VK_NEXT:
       for i := 0 to FTilingEncoder.KeyFrameCount - 1 do
         if InRange(tbFrame.Position, FTilingEncoder.KeyFrames[i].StartFrame, FTilingEncoder.KeyFrames[i].EndFrame) then
@@ -616,105 +625,112 @@ end;
 procedure TMainForm.UpdateGUI(Sender: TObject);
 var
   iCLDev: Integer;
+  prevCursor: TCursor;
 begin
   if FLockChanges then
     Exit;
 
-  tbFrame.Min := 0;
-  tbFrame.Max := FTilingEncoder.FrameCount - 1;
-  IdleTimer.Interval := round(1000 / FTilingEncoder.FramesPerSecond);
-  FLastIOTabSheet := pcPages.ActivePage;
-
-  FTilingEncoder.InputFileName := edInput.Text;
-  FTilingEncoder.OutputFileName := edOutput.Text;
-  FTilingEncoder.StartFrame := seStartFrame.Value;
-  FTilingEncoder.FrameCountSetting := seFrameCount.Value;
-  FTilingEncoder.PaletteCount := StrToIntDef(cbxPalCount.Text, 1);
-  FTilingEncoder.PaletteSize := StrToIntDef(cbxPalSize.Text, 2);
-  FTilingEncoder.Scaling := StrToFloatDef(cbxScaling.Text, 1.0, InvariantFormatSettings);
-
-  FTilingEncoder.RenderPlaying := chkPlay.Checked;
-  FTilingEncoder.RenderFrameIndex := Max(0, tbFrame.Position);
-  FTilingEncoder.RenderPredicted := chkPredicted.Checked;
-  FTilingEncoder.RenderMirrored := chkMirrored.Checked;
-  FTilingEncoder.RenderOutputDithered := chkDitheredO.Checked;
-  FTilingEncoder.RenderUseGamma := chkGamma.Checked;
-  FTilingEncoder.RenderPaletteIndex := sedPalIdx.Value;
-  FTilingEncoder.RenderTilePage := sePage.Value;
-  FTilingEncoder.RenderGammaValue := seVisGamma.Value;
-
-  FTilingEncoder.MotionPredictRadius := StrToIntDef(cbxMPRadius.Text, 0);
-
-  FTilingEncoder.GlobalTilingUseTargetPSNR := rbPSNR.Checked;
-  FTilingEncoder.GlobalTilingTargetPSNR := sePSNR.Value;
-  FTilingEncoder.GlobalTilingQualityBasedTileCount := seQbTiles.Value;
-
-  FTilingEncoder.DitheringMode := TPsyVisMode(cbxDitheringMode.ItemIndex);
-  FTilingEncoder.DitheringYliluoma2MixedColors := StrToIntDef(cbxYilMix.Text, 1);
-  FTilingEncoder.DitheringUseThomasKnoll := chkUseTK.Checked;
-
-  FTilingEncoder.FrameTilingExtendedPaletteUsage := chkFTEPU.Checked;
-
-  FTilingEncoder.ShotTransMinSecondsPerKF := seShotTransMinSecondsPerKF.Value;
-  FTilingEncoder.ShotTransMaxSecondsPerKF := seShotTransMaxSecondsPerKF.Value;
-  FTilingEncoder.ShotTransCorrelLoThres := seShotTransCorrelLoThres.Value;
-
-  if pcPages.ActivePage = tsInput then
-    FTilingEncoder.RenderPage := rpInput
-  else if pcPages.ActivePage = tsOutput then
-    FTilingEncoder.RenderPage := rpOutput
-  else if pcPages.ActivePage = tsTilesPal then
-    FTilingEncoder.RenderPage := rpTilesPalette
-  else
-    FTilingEncoder.RenderPage := rpNone;
-
-  FTilingEncoder.MaxThreadCount := seMaxCores.Value;
-  FTilingEncoder.UseOpenCL := cbxCompDev.ItemIndex > 0;
-  if FTilingEncoder.UseOpenCL then
-    FTilingEncoder.OpenCLDevice := TDCLDevice(cbxCompDev.Items.Objects[cbxCompDev.ItemIndex]);
-
-  cbxCompDev.Items.BeginUpdate;
+  prevCursor := Screen.Cursor;
+  Screen.Cursor := crHourGlass;
   try
-    while cbxCompDev.Items.Count > 1 do
-      cbxCompDev.Items.Delete(cbxCompDev.Items.Count - 1);
+    tbFrame.Min := 0;
+    tbFrame.Max := FTilingEncoder.FrameCount - 1;
+    IdleTimer.Interval := round(1000 / FTilingEncoder.FramesPerSecond);
+    FLastIOTabSheet := pcPages.ActivePage;
 
+    FTilingEncoder.InputFileName := edInput.Text;
+    FTilingEncoder.OutputFileName := edOutput.Text;
+    FTilingEncoder.StartFrame := seStartFrame.Value;
+    FTilingEncoder.FrameCountSetting := seFrameCount.Value;
+    FTilingEncoder.PaletteCount := StrToIntDef(cbxPalCount.Text, 1);
+    FTilingEncoder.PaletteSize := StrToIntDef(cbxPalSize.Text, 2);
+    FTilingEncoder.Scaling := StrToFloatDef(cbxScaling.Text, 1.0, InvariantFormatSettings);
+
+    FTilingEncoder.RenderPlaying := chkPlay.Checked;
+    FTilingEncoder.RenderFrameIndex := Max(0, tbFrame.Position);
+    FTilingEncoder.RenderPredicted := chkPredicted.Checked;
+    FTilingEncoder.RenderMirrored := chkMirrored.Checked;
+    FTilingEncoder.RenderOutputDithered := chkDitheredO.Checked;
+    FTilingEncoder.RenderUseGamma := chkGamma.Checked;
+    FTilingEncoder.RenderPaletteIndex := sedPalIdx.Value;
+    FTilingEncoder.RenderTilePage := sePage.Value;
+    FTilingEncoder.RenderGammaValue := seVisGamma.Value;
+
+    FTilingEncoder.MotionPredictRadius := StrToIntDef(cbxMPRadius.Text, 0);
+
+    FTilingEncoder.GlobalTilingUseTargetPSNR := rbPSNR.Checked;
+    FTilingEncoder.GlobalTilingTargetPSNR := sePSNR.Value;
+    FTilingEncoder.GlobalTilingQualityBasedTileCount := seQbTiles.Value;
+
+    FTilingEncoder.DitheringMode := TPsyVisMode(cbxDitheringMode.ItemIndex);
+    FTilingEncoder.DitheringYliluoma2MixedColors := StrToIntDef(cbxYilMix.Text, 1);
+    FTilingEncoder.DitheringUseThomasKnoll := chkUseTK.Checked;
+
+    FTilingEncoder.FrameTilingExtendedPaletteUsage := chkFTEPU.Checked;
+
+    FTilingEncoder.ShotTransMinSecondsPerKF := seShotTransMinSecondsPerKF.Value;
+    FTilingEncoder.ShotTransMaxSecondsPerKF := seShotTransMaxSecondsPerKF.Value;
+    FTilingEncoder.ShotTransCorrelLoThres := seShotTransCorrelLoThres.Value;
+
+    if pcPages.ActivePage = tsInput then
+      FTilingEncoder.RenderPage := rpInput
+    else if pcPages.ActivePage = tsOutput then
+      FTilingEncoder.RenderPage := rpOutput
+    else if pcPages.ActivePage = tsTilesPal then
+      FTilingEncoder.RenderPage := rpTilesPalette
+    else
+      FTilingEncoder.RenderPage := rpNone;
+
+    FTilingEncoder.MaxThreadCount := seMaxCores.Value;
+    FTilingEncoder.UseOpenCL := cbxCompDev.ItemIndex > 0;
     if FTilingEncoder.UseOpenCL then
-    begin
-      for iCLDev := 0 to FTilingEncoder.OpenCLDevices.Count - 1 do
-      begin
-        cbxCompDev.AddItem(Trim(FTilingEncoder.OpenCLDevices[iCLDev]), FTilingEncoder.OpenCLDevices.Objects[iCLDev]);
-        if FTilingEncoder.OpenCLDevice = FTilingEncoder.OpenCLDevices.Objects[iCLDev] then
-          cbxCompDev.ItemIndex := iCLDev + 1;
-      end;
+      FTilingEncoder.OpenCLDevice := TDCLDevice(cbxCompDev.Items.Objects[cbxCompDev.ItemIndex]);
 
-      if FTilingEncoder.OpenCLDevices.Count > 0 then
+    cbxCompDev.Items.BeginUpdate;
+    try
+      while cbxCompDev.Items.Count > 1 do
+        cbxCompDev.Items.Delete(cbxCompDev.Items.Count - 1);
+
+      if FTilingEncoder.UseOpenCL then
       begin
-        cbxCompDev.ItemIndex := max(1, cbxCompDev.ItemIndex);
-        FTilingEncoder.OpenCLDevice := TDCLDevice(cbxCompDev.Items.Objects[cbxCompDev.ItemIndex]);
+        for iCLDev := 0 to FTilingEncoder.OpenCLDevices.Count - 1 do
+        begin
+          cbxCompDev.AddItem(Trim(FTilingEncoder.OpenCLDevices[iCLDev]), FTilingEncoder.OpenCLDevices.Objects[iCLDev]);
+          if FTilingEncoder.OpenCLDevice = FTilingEncoder.OpenCLDevices.Objects[iCLDev] then
+            cbxCompDev.ItemIndex := iCLDev + 1;
+        end;
+
+        if FTilingEncoder.OpenCLDevices.Count > 0 then
+        begin
+          cbxCompDev.ItemIndex := max(1, cbxCompDev.ItemIndex);
+          FTilingEncoder.OpenCLDevice := TDCLDevice(cbxCompDev.Items.Objects[cbxCompDev.ItemIndex]);
+        end
+        else
+        begin
+          cbxCompDev.ItemIndex := 0;
+        end;
       end
       else
       begin
-        cbxCompDev.ItemIndex := 0;
+        cbxCompDev.AddItem('Any OpenCL device (populate devices...)', nil);
       end;
-    end
-    else
-    begin
-      cbxCompDev.AddItem('OpenCL device', nil);
+    finally
+      cbxCompDev.Items.EndUpdate;
     end;
-  finally
-    cbxCompDev.Items.EndUpdate;
-  end;
 
-  pnLbl.Caption := FTilingEncoder.RenderTitleText;
-  lblCorrel.Caption := FormatFloat('##0.000000', FTilingEncoder.RenderPsychoVisualQuality);
-  sedPalIdx.MaxValue := FTilingEncoder.PaletteCount - 1;
-  imgSource.Stretch := chkStretch.State in [cbGrayed, cbChecked];
-  imgDest.Stretch := imgSource.Stretch;
-  imgSource.Proportional := chkStretch.State = cbGrayed;
-  imgDest.Proportional := imgSource.Proportional;
-  sePSNR.Enabled := rbPSNR.Checked;
-  seQbTiles.Enabled := rbTileLimit.Checked;
-  seMaxTiles.Enabled := rbTileLimit.Checked;
+    pnLbl.Caption := FTilingEncoder.RenderTitleText;
+    lblCorrel.Caption := FormatFloat('##0.000000', FTilingEncoder.RenderPsychoVisualQuality);
+    sedPalIdx.MaxValue := FTilingEncoder.PaletteCount - 1;
+    imgSource.Stretch := chkStretch.State in [cbGrayed, cbChecked];
+    imgDest.Stretch := imgSource.Stretch;
+    imgSource.Proportional := chkStretch.State = cbGrayed;
+    imgDest.Proportional := imgSource.Proportional;
+    sePSNR.Enabled := rbPSNR.Checked;
+    seQbTiles.Enabled := rbTileLimit.Checked;
+    seMaxTiles.Enabled := rbTileLimit.Checked;
+  finally
+    Screen.Cursor := prevCursor;
+  end;
 end;
 
 procedure TMainForm.TilingEncoderProgress(ASender: TTilingEncoder; APosition, AMax: Integer; AHourGlass: Boolean);

@@ -140,7 +140,7 @@ type
   TDCTScalar = SmallInt;
   PDCTScalar = ^TDCTScalar;
   TDCT = array[0 .. cTileDCTSize - 1] of TDCTScalar;
-  TDCTDynArray = array of TDCT;
+  TDCTScalarDynArray = array of TDCTScalar;
 
 procedure SpinEnter(Lock: PSpinLock); assembler;
 procedure SpinLeave(Lock: PSpinLock); assembler;

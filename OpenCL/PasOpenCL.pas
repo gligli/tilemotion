@@ -80,7 +80,7 @@ var
 
 {$IFNDEF DEFINE_REGION_NOT_IMPLEMENTED}{$REGION 'types'}{$ENDIF}
 type
-  TSize_t = SizeInt;
+  TSize_t = SizeUInt;
   PSize_t = ^TSize_t;
 
   PIntPtr_t = ^TIntPtr_t;
