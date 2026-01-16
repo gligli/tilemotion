@@ -12,7 +12,7 @@ struct xyErr_s
   unsigned int dummy;
 };
 
-unsigned int sqr(short x)
+inline unsigned int sqr(short x)
 {
 	return x * x;
 }
@@ -46,11 +46,14 @@ unsigned int compareEuclideanDCT(__global short * pa, __global short * pb)
 	return res;
 }
 
-__kernel void MotionPredict(__global struct xyErr_s * outErrs, __global short * prevDCTs, __global short * lineDCTs, int radius, int screenWidth, int screenHeight, int sy)
+__kernel void MotionPredict(__global struct xyErr_s * outErrs, __global short * prevDCTs, __global short * plainDCTs, int radius, int screenWidth, int screenHeight)
 {
 	int sx = get_global_id(0);
+	int sy = get_global_id(1);
 	int tmWidth = get_global_size(0);
+	int tmHeight = get_global_size(1);
 
+  int sxy = sy * tmWidth + sx;
   int dx = sx << cTileWidthBits;
   int dy = sy << cTileWidthBits;
 
@@ -63,7 +66,7 @@ __kernel void MotionPredict(__global struct xyErr_s * outErrs, __global short * 
   int bestX = -1;
   int bestY = -1;
 
-  __global short * curPtr = &lineDCTs[sx * cTileDCTSize];
+  __global short * curPtr = &plainDCTs[sxy * cTileDCTSize];
 
   for (int oy = oymn; oy <= oymx; ++oy)
   {
@@ -78,7 +81,7 @@ __kernel void MotionPredict(__global struct xyErr_s * outErrs, __global short * 
 
 	      // apply a penalty of the manhattan distance to the center
 	      // rationale: slightly favoring the center in case of ties improves compressibility
-	      err += abs_diff(ox, dx) + abs_diff(oy, dy);
+	      err += abs(ox - dx) + abs(oy - dy);
 
         if (err < bestErr)
         {
@@ -92,7 +95,7 @@ __kernel void MotionPredict(__global struct xyErr_s * outErrs, __global short * 
     }
   }
 
-  outErrs[sx].err = bestErr;
-  outErrs[sx].x = bestX - dx;
-  outErrs[sx].y = bestY - dy;
+  outErrs[sxy].err = bestErr;
+  outErrs[sxy].x = bestX - dx;
+  outErrs[sxy].y = bestY - dy;
 }

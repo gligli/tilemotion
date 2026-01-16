@@ -1177,7 +1177,24 @@ type
   end;
 
 var
-  CLPrevDCTsBuf: TDCLBuffer;
+  PlainDCTs: TDCTScalarDynArray;
+  PlainTiles: PTileDynArray;
+
+  procedure DrawFBTileLine(ASY, ASX: Integer);
+  var
+    ty, dy, dx: Integer;
+    frameTile: PTile;
+  begin
+    dx := ASX shl cTileWidthBits;
+    dy := ASY shl cTileWidthBits;
+
+    frameTile := PlainTiles[ASY * Encoder.FTileMapWidth + ASX];
+    for ty := 0 to cTileWidth - 1 do
+    begin
+      Move(frameTile^.GetRGBPixelsPtr^[ty, 0], AFrontBuffer[dy, dx], SizeOf(Integer) * cTileWidth);
+      Inc(dy);
+    end;
+  end;
 
   procedure DoDCTs(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
@@ -1206,159 +1223,152 @@ var
     end;
   end;
 
-  procedure DoXY(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  procedure DoPlainTiles(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
-    dx, dy, sy, sx, oy, ox, oymn, oymx, oxmn, oxmx, ty, yx: Integer;
-    TMI: PTileMapItem;
-    frameTile: PTile;
-    LineFrameTiles: PTileDynArray;
-    LineDCTs: TDCTScalarDynArray;
-    CurDCTPtr, PrevDCTPtr: PDCTScalar;
+    sy, sx, sxy: Integer;
+    plainTile: PTile;
     CurCpnPixels: TCpnPixels;
-
-    errs: array of TXYErr;
-    pErrs: ^TXYErr;
-    best: TXYErr;
-    err: Cardinal;
-
-    CLCmdQueue: TDCLCommandQueue;
-    CLKernel: TDCLKernel;
-    CLLineDCTsBuf: TDCLBuffer;
-    CLErrBuf: TDCLBuffer;
   begin
     if not InRange(AIndex, 0, Encoder.FTileMapHeight - 1) then
       Exit;
 
     sy := AIndex;
+    sxy := sy * Encoder.FTileMapWidth;
 
-    LineFrameTiles := TTile.Array1DNew(Encoder.FTileMapWidth, True, False);
-    SetLength(LineDCTs, Encoder.FTileMapWidth * cTileDCTSize);
-    SetLength(errs, Encoder.FTileMapWidth);
+    for sx := 0 to Encoder.FTileMapWidth - 1 do
+    begin
+      plainTile := PlainTiles[sxy];
 
-    try
-      // prepare frame tiles in plaintext mirrors and corresponding DCT for current line
-      CurDCTPtr := @LineDCTs[0];
-      for sx := 0 to Encoder.FTileMapWidth - 1 do
-      begin
-        frameTile := LineFrameTiles[sx];
+      plainTile^.CopyFrom(FrameTiles[sxy]^);
+      if plainTile^.HMirror_Initial then Encoder.HMirrorTile(plainTile^);
+      if plainTile^.VMirror_Initial then Encoder.VMirrorTile(plainTile^);
 
-        frameTile^.CopyFrom(FrameTiles[sy * Encoder.FTileMapWidth + sx]^);
-        if frameTile^.HMirror_Initial then Encoder.HMirrorTile(frameTile^);
-        if frameTile^.VMirror_Initial then Encoder.VMirrorTile(frameTile^);
+      Encoder.ConvertToCpnPixels(plainTile^, False, False, False, False, nil, CurCpnPixels);
+      Encoder.ComputeCpnPixelsPsyVisFeatures(CurCpnPixels, pvsWeightedDCT, cColorCpns, @PlainDCTs[sxy * cTileDCTSize]);
 
-        Encoder.ConvertToCpnPixels(frameTile^, False, False, False, False, nil, CurCpnPixels);
-        Encoder.ComputeCpnPixelsPsyVisFeatures(CurCpnPixels, pvsWeightedDCT, cColorCpns, CurDCTPtr);
+      Inc(sxy);
+    end;
+  end;
 
-        Inc(CurDCTPtr, cTileDCTSize);
-      end;
+  procedure DoXY(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  var
+    dx, dy, sy, sx, oy, ox, oymn, oymx, oxmn, oxmx, ty, yx: Integer;
+    TMI: PTileMapItem;
+    PrevDCTPtr, CurDCTPtr: PDCTScalar;
 
-      dy := sy shl cTileWidthBits;
+    best: TXYErr;
+    err: Cardinal;
+  begin
+    if not InRange(AIndex, 0, Encoder.FTileMapSize - 1) then
+      Exit;
+
+    DivMod(AIndex, Encoder.FTileMapWidth, sy, sx);
+
+    CurDCTPtr := @PlainDCTs[AIndex * cTileDCTSize];
+
+    dy := sy shl cTileWidthBits;
+    dx := sx shl cTileWidthBits;
+
+    if not AOnlyBuffer then
+    begin
+      FillChar(best, SizeOf(best), $ff);
+
       oymn := Max(0, dy - ARadius - 1);
       oymx := Min(Encoder.FScreenHeight - cTileWidth, dy + ARadius);
 
-      if not AOnlyBuffer then
+      oxmn := Max(0, dx - ARadius - 1);
+      oxmx := Min(Encoder.FScreenWidth - cTileWidth, dx + ARadius);
+
+      for oy := oymn to oymx do
       begin
-        if Encoder.UseOpenCL then
+        yx := oy * (Encoder.FScreenWidth - cTileWidth + 1) + oxmn;
+        PrevDCTPtr := @ADCTs[yx * cTileDCTSize];
+
+        for ox := oxmn to oxmx do
         begin
-          CLCmdQueue := Encoder.OpenCLDevice.CreateCommandQueue([cqpDisableAutoFinish]);
-          CLLineDCTsBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(LineDCTs[0]) * Length(LineDCTs), @LineDCTs[0], [mfReadOnly, mfUseHostPtr]);
-          CLErrBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(errs[0]) * Length(errs), nil, [mfWriteOnly]);
-          CLKernel := Encoder.CreateCLKernel(Encoder.FOpenCLProgram_MotionPredict);
-
-          CLKernel.SetArg(0, CLErrBuf);
-          CLKernel.SetArg(1, CLPrevDCTsBuf);
-          CLKernel.SetArg(2, CLLineDCTsBuf);
-          CLKernel.SetArg(3, SizeOf(ARadius), @ARadius);
-          CLKernel.SetArg(4, SizeOf(Encoder.FScreenWidth), @Encoder.FScreenWidth);
-          CLKernel.SetArg(5, SizeOf(Encoder.FScreenHeight), @Encoder.FScreenHeight);
-          CLKernel.SetArg(6, SizeOf(sy), @sy);
-
-          CLCmdQueue.Execute(CLKernel, [Encoder.FTileMapWidth]);
-          CLCmdQueue.ReadBuffer(CLErrBuf, CLErrBuf.Size, @errs[0]);
-          CLCmdQueue.Finish;
-
-          pErrs := @errs[0];
-          for sx := 0 to Encoder.FTileMapWidth - 1 do
+          if QuickTestEuclideanDCTPtr_asm(CurDCTPtr, PrevDCTPtr, best.Err) then
           begin
-            dx := sx shl cTileWidthBits;
+            err := CompareEuclideanDCTPtr_asm(CurDCTPtr, PrevDCTPtr);
 
-            TMI := @TileMap[sy, sx];
+            // apply a penalty of the manhattan distance to the center
+            // rationale: slightly favoring the center in case of ties improves compressibility
+            err += Abs(ox - dx) + Abs(oy - dy);
 
-            TMI^.PSNR := EuclideanToPSNR(pErrs^.Err);
-            TMI^.PredictedX := pErrs^.X;
-            TMI^.PredictedY := pErrs^.Y;
-
-            Inc(pErrs);
-          end;
-        end
-        else
-        begin
-          CurDCTPtr := @LineDCTs[0];
-          for sx := 0 to Encoder.FTileMapWidth - 1 do
-          begin
-            FillChar(best, SizeOf(best), $ff);
-
-            dx := sx shl cTileWidthBits;
-            oxmn := Max(0, dx - ARadius - 1);
-            oxmx := Min(Encoder.FScreenWidth - cTileWidth, dx + ARadius);
-
-            for oy := oymn to oymx do
+            if err < best.Err then
             begin
-              yx := oy * (Encoder.FScreenWidth - cTileWidth + 1) + oxmn;
-              PrevDCTPtr := @ADCTs[yx * cTileDCTSize];
-
-              for ox := oxmn to oxmx do
-              begin
-                if QuickTestEuclideanDCTPtr_asm(CurDCTPtr, PrevDCTPtr, best.Err) then
-                begin
-                  err := CompareEuclideanDCTPtr_asm(CurDCTPtr, PrevDCTPtr);
-
-                  // apply a penalty of the manhattan distance to the center
-                  // rationale: slightly favoring the center in case of ties improves compressibility
-                  err += Abs(ox - dx) + Abs(oy - dy);
-
-                  if err < best.Err then
-                  begin
-                    best.Err := err;
-                    best.X := ox - dx;
-                    best.Y := oy - dy;
-                  end;
-                end;
-
-                Inc(PrevDCTPtr, cTileDCTSize);
-              end;
+              best.Err := err;
+              best.X := ox - dx;
+              best.Y := oy - dy;
             end;
-
-            TMI := @TileMap[sy, sx];
-            TMI^.PSNR := EuclideanToPSNR(best.Err);
-            TMI^.PredictedX := best.X;
-            TMI^.PredictedY := best.Y;
-
-            Inc(CurDCTPtr, cTileDCTSize);
           end;
+
+          Inc(PrevDCTPtr, cTileDCTSize);
         end;
       end;
 
-      // draw tile line in frame buffer
-      for sx := 0 to Encoder.FTileMapWidth - 1 do
-      begin
-        dx := sx shl cTileWidthBits;
+      TMI := @TileMap[sy, sx];
+      TMI^.PSNR := EuclideanToPSNR(best.Err);
+      TMI^.PredictedX := best.X;
+      TMI^.PredictedY := best.Y;
 
-        frameTile := LineFrameTiles[sx];
-        for ty := 0 to cTileWidth - 1 do
-          Move(frameTile^.GetRGBPixelsPtr^[ty, 0], AFrontBuffer[dy + ty, dx], SizeOf(Integer) * cTileWidth);
-      end;
+      Inc(CurDCTPtr, cTileDCTSize);
+    end;
 
+    DrawFBTileLine(sy, sx);
+  end;
+
+
+  procedure DoXY_OpenCL;
+  var
+    TMI: PTileMapItem;
+    sy, sx: Integer;
+    errs: array of TXYErr;
+    pErrs: ^TXYErr;
+
+    CLPrevDCTsBuf: TDCLBuffer;
+    CLCmdQueue: TDCLCommandQueue;
+    CLKernel: TDCLKernel;
+    CLPlainDCTsBuf: TDCLBuffer;
+    CLErrBuf: TDCLBuffer;
+  begin
+    CLCmdQueue := Encoder.OpenCLDevice.CreateCommandQueue;
+    CLPrevDCTsBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(TDCTScalar) * Length(ADCTs), @ADCTs[0], [mfReadOnly, mfUseHostPtr]);
+    CLPlainDCTsBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(PlainDCTs[0]) * Length(PlainDCTs), @PlainDCTs[0], [mfReadOnly, mfUseHostPtr]);
+    CLErrBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(TXYErr) * Encoder.FTileMapSize, nil, [mfWriteOnly]);
+    CLKernel := Encoder.CreateCLKernel(Encoder.FOpenCLProgram_MotionPredict);
+    try
+      SetLength(errs, Encoder.FTileMapSize);
+
+      CLKernel.SetArg(0, CLErrBuf);
+      CLKernel.SetArg(1, CLPrevDCTsBuf);
+      CLKernel.SetArg(2, CLPlainDCTsBuf);
+      CLKernel.SetArg(3, SizeOf(ARadius), @ARadius);
+      CLKernel.SetArg(4, SizeOf(Encoder.FScreenWidth), @Encoder.FScreenWidth);
+      CLKernel.SetArg(5, SizeOf(Encoder.FScreenHeight), @Encoder.FScreenHeight);
+
+      CLCmdQueue.Execute(CLKernel, [Encoder.FTileMapWidth, Encoder.FTileMapHeight]);
+      CLCmdQueue.ReadBuffer(CLErrBuf, CLErrBuf.Size, @errs[0]);
+
+      pErrs := @errs[0];
+      for sy := 0 to Encoder.FTileMapHeight - 1 do
+        for sx := 0 to Encoder.FTileMapWidth - 1 do
+        begin
+          TMI := @TileMap[sy, sx];
+
+          TMI^.PSNR := EuclideanToPSNR(pErrs^.Err);
+          TMI^.PredictedX := pErrs^.X;
+          TMI^.PredictedY := pErrs^.Y;
+
+          Inc(pErrs);
+
+          DrawFBTileLine(sy, sx);
+        end;
     finally
-      if not AOnlyBuffer and Encoder.UseOpenCL then
-      begin
-        CLKernel.Free;
-        CLErrBuf.Free;
-        CLLineDCTsBuf.Free;
-        CLCmdQueue.Free;
-      end;
-
-      TTile.Array1DDispose(LineFrameTiles);
+      CLKernel.Free;
+      CLErrBuf.Free;
+      CLPlainDCTsBuf.Free;
+      CLPrevDCTsBuf.Free;
+      CLCmdQueue.Free;
     end;
   end;
 
@@ -1369,21 +1379,21 @@ begin
   Dec(ARadius);
 
   if not AOnlyBuffer then
-  begin
     ProcThreadPool.DoParallelLocalProc(@DoDCTs, 0, Encoder.FScreenHeight - cTileWidth);
 
-    if Encoder.UseOpenCL then
-      CLPrevDCTsBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(TDCTScalar) * Length(ADCTs), @ADCTs[0], [mfReadOnly, mfUseHostPtr]);
-  end;
-
   AcquireFrameTiles;
+  PlainTiles := TTile.Array1DNew(Encoder.FTileMapSize, True, False);
   try
-    ProcThreadPool.DoParallelLocalProc(@DoXY, 0, Encoder.FTileMapHeight - 1);
-  finally
-    ReleaseFrameTiles;
+    SetLength(PlainDCTs, Encoder.FTileMapSize * cTileDCTSize);
+    ProcThreadPool.DoParallelLocalProc(@DoPlainTiles, 0, Encoder.FTileMapHeight - 1);
 
-    if (not AOnlyBuffer) and Encoder.UseOpenCL then
-      CLPrevDCTsBuf.Free;
+    if Encoder.UseOpenCL then
+      DoXY_OpenCL
+    else
+      ProcThreadPool.DoParallelLocalProc(@DoXY, 0, Encoder.FTileMapSize - 1);
+  finally
+    TTile.Array1DDispose(PlainTiles);
+    ReleaseFrameTiles;
   end;
 end;
 
@@ -3079,6 +3089,7 @@ procedure TTilingEncoder.SetMaxThreadCount(AValue: Integer);
 begin
  if ProcThreadPool.MaxThreadCount = AValue then Exit;
  ProcThreadPool.MaxThreadCount := max(1, AValue);
+ SetEnvironmentVariableA('SYCL_CPU_NUM_CUS', PChar(IntToStr(ProcThreadPool.MaxThreadCount)));
 end;
 
 procedure TTilingEncoder.SetPaletteCount(AValue: Integer);
