@@ -11,7 +11,7 @@ interface
 
 uses
   windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, zstream, IniFiles, Graphics,
-  IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, MTProcs, extern, tbbmalloc, bufstream, utils, kmodes, DelphiCL, PasOpenCL;
+  IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, MTProcs, extern, tbbmalloc, bufstream, utils, kmodes, powell, DelphiCL, PasOpenCL;
 type
   TEncoderStep = (esAll = -1, esLoad = 0, esPredictMotion, esReduce, esPreparePalettes, esDither, esReconstruct, esReindex, esSave);
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
@@ -4427,7 +4427,7 @@ var
   procedure DoPal(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
     Data: TMinimizeOPData;
-    x, simplex: TDoubleDynArray;
+    x: TDoubleDynArray;
     palIdx, colIdx: Integer;
     iw: PIndexWeight;
     r, g, b: Byte;
@@ -4436,12 +4436,8 @@ var
       Exit;
 
     SetLength(x, FPaletteSize - 1);
-    SetLength(simplex, FPaletteSize - 1);
     for colIdx := 1 to FPaletteSize - 1 do
-    begin
       x[colIdx - 1] := colIdx;
-      simplex[colIdx - 1] := FPaletteSize * cPhi;
-    end;
 
     Data.Encoder := Self;
     Data.CurPalIdx := AIndex;
@@ -4477,9 +4473,9 @@ var
           end;
         end;
 
-      // use Nelder Mead method to try permutations in the current palette
+      // use Powell's method to try permutations in the current palette
 
-      NelderMeadMinimize(@MinimizeOP, x, simplex, 1e-9, @Data);
+      PowellMinimize(@MinimizeOP, x, FPaletteSize * cInvPhi, 0.0, 0.0, MaxInt, @Data);
 
       f[AIndex] := -MinimizeOP(x, @Data);
 

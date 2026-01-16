@@ -8,7 +8,7 @@ unit utils;
 interface
 
 uses
-  Classes, SysUtils, Windows, math, fgl, utypes, usimplex, DelphiCL, extern, Types;
+  Classes, SysUtils, Windows, math, fgl, DelphiCL, extern, Types;
 
 const
   // tweakable constants
@@ -182,8 +182,6 @@ function EqualQualityTileCount(tileCount: TFloat): Integer;
 function GoldenRatioSearch(Func: TGRSEvalFunc; MinX, MaxX: Double; ObjectiveY: Double;
   EpsilonX, EpsilonY: Double; Data: Pointer): Double;
 function EuclideanToPSNR(AEuclidean: Cardinal): Single;
-
-function NelderMeadMinimize(Func: TEvalFunc; var X: TDoubleDynArray; SimplexExtents: array of Double; Epsilon: Double = 1e-9; Data: Pointer = nil): Double;
 
 function OpenCLPlatforms: TDCLPlatforms;
 
@@ -1096,36 +1094,6 @@ function EuclideanToPSNR(AEuclidean: Cardinal): Single;
 begin
   Result := AEuclidean * (1 / cTileDCTSize);
   Result := 10 * Log10(255 * 255 / Max(0.5, Result));
-end;
-
-threadvar
-  GNMData: Pointer;
-  GNMFunc: TEvalFunc;
-
-  function NMX(X : TVector) : Float;
-  begin
-    Result := GNMFunc(X, GNMData);
-  end;
-
-function NelderMeadMinimize(Func: TEvalFunc; var X: TDoubleDynArray; SimplexExtents: array of Double; Epsilon: Double; Data: Pointer): Double;
-var
-  iX: Integer;
-  InitSimplex: TDoubleDynArray;
-begin
-  Assert((Length(X) = Length(SimplexExtents)) or (Length(SimplexExtents) = 0));
-
-  GNMData := Data;
-  GNMFunc := Func;
-  try
-    SetLength(InitSimplex, Length(SimplexExtents));
-    for iX := 0 to High(InitSimplex) do
-      InitSimplex[iX] := X[iX] + SimplexExtents[iX];
-
-    Simplex(@NMX, X, 0, High(X), 10000, Epsilon, Result, InitSimplex);
-  finally
-    GNMData := nil;
-    GNMFunc := nil;
-  end;
 end;
 
 function OpenCLPlatforms: TDCLPlatforms;
