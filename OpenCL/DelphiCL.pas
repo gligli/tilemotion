@@ -2489,7 +2489,7 @@ begin
     WriteLog('clGetProgramInfo: ' + GetString(FStatus) + ';');
   {$ENDIF}
   //{$IFDEF LOGGING}
-  //  WriteLog('CL_PROGRAM_BINARIES: ' + AnsiString(FBinaries[0]) + ';');
+  //  WriteLog('CL_PROGRAM_BINARIES: ' + AnsiString(ansi FBinaries[0]) + ';');
   //{$ENDIF}
 end;
 
@@ -2517,7 +2517,7 @@ begin
   try
     AssignFile(F, FileName);
     Rewrite(F, 1);
-    BlockWrite(F, FBinaries[0], FBinarySizes);
+    BlockWrite(F, FBinaries[0, 0], FBinarySizes);
   finally
     CloseFile(F);
   end;
