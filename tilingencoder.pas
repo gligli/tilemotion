@@ -1343,8 +1343,6 @@ var
     CLErrBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(errs[0]) * Encoder.FTileMapSize, nil, [mfWriteOnly]);
     CLKernel := Encoder.CreateCLKernel(Encoder.FOpenCLProgram_MotionPredict);
 
-    t2 := GetTickCount64;
-
     try
       CLKernel.SetArg(0, CLErrBuf);
       CLKernel.SetArg(1, CLPrevDCTsBuf);
@@ -1353,10 +1351,13 @@ var
       CLKernel.SetArg(4, SizeOf(Encoder.FScreenWidth), @Encoder.FScreenWidth);
       CLKernel.SetArg(5, SizeOf(Encoder.FScreenHeight), @Encoder.FScreenHeight);
 
+      t2 := GetTickCount64;
+
       CLCmdQueue.Execute(CLKernel, [Encoder.FTileMapWidth, Encoder.FTileMapHeight]);
-      CLCmdQueue.ReadBuffer(CLErrBuf, CLErrBuf.Size, @errs[0]);
 
       t3 := GetTickCount64;
+
+      CLCmdQueue.ReadBuffer(CLErrBuf, CLErrBuf.Size, @errs[0]);
 
       pErrs := @errs[0];
       for sy := 0 to Encoder.FTileMapHeight - 1 do
@@ -1382,7 +1383,7 @@ var
 
     t4 := GetTickCount64;
 
-    WriteLn(t2-t:8, t3-t2:8, t4-t3:8);
+    WriteLn(t2-t:8, t3-t2:8, t4-t3:8, t4-t:8);
   end;
 
 begin
@@ -4002,12 +4003,12 @@ begin
   FrameCountSetting := 0;
   Scaling := 1.0;
 
-  {$ifdef DEBUG}
-    MaxThreadCount := 1;
-  {$else}
-    SetPriorityClass(GetCurrentProcess(), IDLE_PRIORITY_CLASS);
-    MaxThreadCount := NumberOfProcessors;
-  {$endif}
+{$ifdef DEBUG}
+  MaxThreadCount := 1;
+{$else}
+  SetPriorityClass(GetCurrentProcess(), IDLE_PRIORITY_CLASS);
+  MaxThreadCount := NumberOfProcessors;
+{$endif}
 
   UseOpenCL := False;
 
@@ -4018,7 +4019,7 @@ begin
 
   GlobalTilingUseTargetPSNR := False;
   GlobalTilingTargetPSNR := 20.0;
-  GlobalTilingQualityBasedTileCount := 7.0;
+  GlobalTilingQualityBasedTileCount := 3.0;
   GlobalTilingTileCount := 0; // after GlobalTilingQualityBasedTileCount because has priority
 
   DitheringMode := pvsWeightedSpeDCT;

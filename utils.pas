@@ -14,7 +14,7 @@ const
   // tweakable constants
 
   cPsyVEpsilon = 1e-6;
-  cYakmoMaxIterations = 300;
+  cYakmoMaxIterations = 1000;
 
   {$if 0}
     cRedMul = 2126;
