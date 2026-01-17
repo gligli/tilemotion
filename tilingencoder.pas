@@ -4454,30 +4454,30 @@ var
     end;
     try
 
-      // accumulate the whole palette except the one that will be permutated
+    // accumulate the whole palette except the one that will be permutated
 
-      FillQWord(Data.PalR[0], FPaletteSize, 0);
-      FillQWord(Data.PalG[0], FPaletteSize, 0);
-      FillQWord(Data.PalB[0], FPaletteSize, 0);
+    FillQWord(Data.PalR[0], FPaletteSize, 0);
+    FillQWord(Data.PalG[0], FPaletteSize, 0);
+    FillQWord(Data.PalB[0], FPaletteSize, 0);
 
-      for palIdx := 0 to FPaletteCount - 1 do
-        if palIdx <> AIndex then
+    for palIdx := 0 to FPaletteCount - 1 do
+      if palIdx <> AIndex then
+      begin
+        for colIdx := 0 to FPaletteSize - 1 do
         begin
-          for colIdx := 0 to FPaletteSize - 1 do
-          begin
-            FromRGB(FPalettes[palIdx].PaletteRGB[colIdx], r, g, b);
+          FromRGB(FPalettes[palIdx].PaletteRGB[colIdx], r, g, b);
 
-            Data.PalR[colIdx] += r;
-            Data.PalG[colIdx] += g;
-            Data.PalB[colIdx] += b;
-          end;
+          Data.PalR[colIdx] += r;
+          Data.PalG[colIdx] += g;
+          Data.PalB[colIdx] += b;
         end;
+      end;
 
-      // use Powell's method to try permutations in the current palette
+    // use Powell's method to try permutations in the current palette
 
-      PowellMinimize(@MinimizeOP, x, FPaletteSize * cInvPhi, 0.0, 0.0, MaxInt, @Data);
+    PowellMinimize(@MinimizeOP, x, FPaletteSize * cInvPhi, 0.0, 0.0, MaxInt, @Data);
 
-      f[AIndex] := -MinimizeOP(x, @Data);
+    f[AIndex] := -MinimizeOP(x, @Data);
 
     finally
       for colIdx := 0 to FPaletteSize - 1 do
