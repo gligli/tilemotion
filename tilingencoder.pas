@@ -20,7 +20,7 @@ type
   TClusteringMethod = (cmBIRCH, cmBICO, cmTransferTiles);
 
 const
-  cEncoderStepLen: array[TEncoderStep] of Integer = (0, 3, 1, 2, 3, 2, 2, 3, 1);
+  cEncoderStepLen: array[TEncoderStep] of Integer = (0, 5, 1, 2, 3, 2, 2, 3, 1);
 
 type
   // GliGli's TileMotion header structs and commands
@@ -1264,14 +1264,14 @@ var
 
     DivMod(AIndex, Encoder.FTileMapWidth, sy, sx);
 
-    CurDCTPtr := @PlainDCTs[AIndex * cTileDCTSize];
-
-    dy := sy shl cTileWidthBits;
-    dx := sx shl cTileWidthBits;
-
     if not AOnlyBuffer then
     begin
       FillChar(best, SizeOf(best), $ff);
+
+      CurDCTPtr := @PlainDCTs[AIndex * cTileDCTSize];
+
+      dy := sy shl cTileWidthBits;
+      dx := sx shl cTileWidthBits;
 
       oymn := Max(0, dy - ARadius - 1);
       oymx := Min(Encoder.FScreenHeight - cTileWidth, dy + ARadius);
@@ -1330,15 +1330,22 @@ var
     CLKernel: TDCLKernel;
     CLPlainDCTsBuf: TDCLBuffer;
     CLErrBuf: TDCLBuffer;
-  begin
-    CLCmdQueue := Encoder.OpenCLDevice.CreateCommandQueue;
-    CLPrevDCTsBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(TDCTScalar) * Length(ADCTs), @ADCTs[0], [mfReadOnly, mfUseHostPtr]);
-    CLPlainDCTsBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(PlainDCTs[0]) * Length(PlainDCTs), @PlainDCTs[0], [mfReadOnly, mfUseHostPtr]);
-    CLErrBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(TXYErr) * Encoder.FTileMapSize, nil, [mfWriteOnly]);
-    CLKernel := Encoder.CreateCLKernel(Encoder.FOpenCLProgram_MotionPredict);
-    try
-      SetLength(errs, Encoder.FTileMapSize);
 
+    t, t2, t3, t4: QWord;
+  begin
+    t := GetTickCount64;
+
+    SetLength(errs, Encoder.FTileMapSize);
+
+    CLCmdQueue := Encoder.OpenCLDevice.CreateCommandQueue;
+    CLPrevDCTsBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(ADCTs[0]) * Length(ADCTs), @ADCTs[0], [mfReadOnly, mfUseHostPtr]);
+    CLPlainDCTsBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(PlainDCTs[0]) * Length(PlainDCTs), @PlainDCTs[0], [mfReadOnly, mfUseHostPtr]);
+    CLErrBuf := Encoder.OpenCLDevice.CreateBuffer(SizeOf(errs[0]) * Encoder.FTileMapSize, nil, [mfWriteOnly]);
+    CLKernel := Encoder.CreateCLKernel(Encoder.FOpenCLProgram_MotionPredict);
+
+    t2 := GetTickCount64;
+
+    try
       CLKernel.SetArg(0, CLErrBuf);
       CLKernel.SetArg(1, CLPrevDCTsBuf);
       CLKernel.SetArg(2, CLPlainDCTsBuf);
@@ -1348,6 +1355,8 @@ var
 
       CLCmdQueue.Execute(CLKernel, [Encoder.FTileMapWidth, Encoder.FTileMapHeight]);
       CLCmdQueue.ReadBuffer(CLErrBuf, CLErrBuf.Size, @errs[0]);
+
+      t3 := GetTickCount64;
 
       pErrs := @errs[0];
       for sy := 0 to Encoder.FTileMapHeight - 1 do
@@ -1370,6 +1379,10 @@ var
       CLPrevDCTsBuf.Free;
       CLCmdQueue.Free;
     end;
+
+    t4 := GetTickCount64;
+
+    WriteLn(t2-t:8, t3-t2:8, t4-t3:8);
   end;
 
 begin
@@ -1387,7 +1400,7 @@ begin
     SetLength(PlainDCTs, Encoder.FTileMapSize * cTileDCTSize);
     ProcThreadPool.DoParallelLocalProc(@DoPlainTiles, 0, Encoder.FTileMapHeight - 1);
 
-    if Encoder.UseOpenCL then
+    if Encoder.UseOpenCL and not AOnlyBuffer then
       DoXY_OpenCL
     else
       ProcThreadPool.DoParallelLocalProc(@DoXY, 0, Encoder.FTileMapSize - 1);
@@ -1865,6 +1878,12 @@ procedure TTilingEncoder.Load;
       AProgram.CLProgram := FOpenCLDevice.CreateProgram(ExtractFilePath(ParamStr(0)) + AName + '.cl');
       if AProgram.CLProgram.BinarySizes <= 0 then
         raise ETilingEncoderOpenCLError.Create(AProgram.CLProgram.Log);
+
+{$ifdef DEBUG}
+      AProgram.CLProgram.SaveToFile(ExtractFilePath(ParamStr(0)) + AName + '.cl.compiled');
+{$endif}
+
+      WriteLn('OpenCL ', AName, ':', AProgram.CLProgram.BinarySizes:8, ' bytes');
     end;
   end;
 
@@ -1893,6 +1912,8 @@ begin
   // init CL kernels
 
   CreateCLProgram('MotionPredict', FOpenCLProgram_MotionPredict);
+
+  ProgressRedraw(1, 'Init');
 
   // load video
 
@@ -1950,16 +1971,14 @@ begin
     end;
   end;
 
-  ProgressRedraw(1, 'ProbeInputVideo');
+  ProgressRedraw(2, 'ProbeInputVideo');
 
   InitFrames(frmCnt);
   LoadInputVideo;
 
-  ProgressRedraw(2, 'LoadInputVideo');
+  ProgressRedraw(3, 'LoadInputVideo');
 
   FindKeyFrames(manualKeyFrames);
-
-  ProgressRedraw(3, 'FindKeyFrames');
 
   if wasAutoQ or (FGlobalTilingTileCount <= 0) then
   begin
@@ -1968,9 +1987,11 @@ begin
     SetGlobalTilingQualityBasedTileCount(qbTC);
   end;
 
-  // print settings
+  ProgressRedraw(4, 'FindKeyFrames');
 
   WriteLn(GetSettings);
+
+  ProgressRedraw(5, 'PrintSettings');
 end;
 
 procedure TTilingEncoder.PreparePalettes;
@@ -3087,9 +3108,12 @@ end;
 
 procedure TTilingEncoder.SetMaxThreadCount(AValue: Integer);
 begin
- if ProcThreadPool.MaxThreadCount = AValue then Exit;
- ProcThreadPool.MaxThreadCount := max(1, AValue);
- SetEnvironmentVariableA('SYCL_CPU_NUM_CUS', PChar(IntToStr(ProcThreadPool.MaxThreadCount)));
+  if ProcThreadPool.MaxThreadCount = AValue then Exit;
+  ProcThreadPool.MaxThreadCount := max(1, AValue);
+  SetEnvironmentVariableA('SYCL_CPU_NUM_CUS', PChar(IntToStr(ProcThreadPool.MaxThreadCount)));
+{$ifdef DEBUG}
+  SetEnvironmentVariableA('CL_CONFIG_DUMP_DISASSEMBLY', '1');
+{$endif}
 end;
 
 procedure TTilingEncoder.SetPaletteCount(AValue: Integer);

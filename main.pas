@@ -471,6 +471,7 @@ begin
   seFrameCount.Value := IfThen(seFrameCount.Value >= 12, IfThen(seFrameCount.Value = 12, 48, 2), 12);
   cbxScaling.ItemIndex := 4;
   cbxPalCount.Text := '256';
+  cbxMPRadius.Text := '128';
 
   FTilingEncoder.Test;
 
@@ -484,6 +485,7 @@ begin
   seFrameCount.Value := IfThen(seFrameCount.Value >= 12, IfThen(seFrameCount.Value = 12, 24, 2), 12);
   cbxScaling.ItemIndex := 2;
   cbxPalCount.Text := '256';
+  cbxMPRadius.Text := '128';
 
   FTilingEncoder.Test;
 
@@ -504,11 +506,7 @@ begin
     VK_F12:
     begin
       if ssShift in Shift then
-      begin
         cbxCompDev.ItemIndex := 1;
-        UpdateGUI(nil);
-        cbxCompDev.ItemIndex := cbxCompDev.Items.Count - 1;
-      end;
 
       if ssCtrl in Shift then
       begin
