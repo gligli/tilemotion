@@ -8,7 +8,7 @@ unit utils;
 interface
 
 uses
-  Classes, SysUtils, Windows, math, fgl, DelphiCL, extern, Types;
+  Classes, SysUtils, Windows, math, fgl, extern, Types;
 
 const
   // tweakable constants
@@ -140,7 +140,7 @@ type
   TDCTScalar = SmallInt;
   PDCTScalar = ^TDCTScalar;
   TDCT = array[0 .. cTileDCTSize - 1] of TDCTScalar;
-  TDCTScalarDynArray = array of TDCTScalar;
+  TDCTDynArray = array of TDCT;
 
 procedure SpinEnter(Lock: PSpinLock); assembler;
 procedure SpinLeave(Lock: PSpinLock); assembler;
@@ -184,15 +184,7 @@ function GoldenRatioSearch(Func: TGRSEvalFunc; MinX, MaxX: Double; ObjectiveY: D
   EpsilonX, EpsilonY: Double; Data: Pointer): Double;
 function EuclideanToPSNR(AEuclidean: Cardinal): Single;
 
-function OpenCLPlatforms: TDCLPlatforms;
-
 implementation
-
-uses
-  PasOpenCL;
-
-var
-  GclPlatforms: TDCLPlatforms;
 
 procedure SpinEnter(Lock: PSpinLock); assembler;
 label spin_lock;
@@ -1094,15 +1086,5 @@ begin
   Result := 10 * Log10(255 * 255 / Max(0.5, Result));
 end;
 
-function OpenCLPlatforms: TDCLPlatforms;
-begin
-  if not Assigned(GclPlatforms) and InitOpenCL then
-    GclPlatforms := TDCLPlatforms.Create;
-  Result := GclPlatforms;
-end;
-
-finalization
-  if Assigned(GclPlatforms) then
-    GclPlatforms.Free;
 end.
 
