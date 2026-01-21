@@ -22,7 +22,6 @@ type
     btnPM: TButton;
     cbxMPRadius: TComboBox;
     cbxDitheringMode: TComboBox;
-    cbxCompDev: TComboBox;
     chkFTEPU: TCheckBox;
     chkStretch: TCheckBox;
     chkPredicted: TCheckBox;
@@ -53,7 +52,6 @@ type
     Label15: TLabel;
     lblMaxCores: TLabel;
     Label17: TLabel;
-    Label19: TLabel;
     Label20: TLabel;
     Label22: TLabel;
     Label4: TLabel;
@@ -505,9 +503,6 @@ begin
     VK_F11: chkPlay.Checked := not chkPlay.Checked;
     VK_F12:
     begin
-      if ssShift in Shift then
-        cbxCompDev.ItemIndex := 1;
-
       if ssCtrl in Shift then
       begin
         btnDebugClick(nil);
