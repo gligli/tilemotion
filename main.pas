@@ -7,7 +7,7 @@ interface
 uses
   windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, LazLogger,
   Forms, Controls, Graphics, Dialogs, ExtCtrls, StdCtrls, ComCtrls, Spin, Menus, IntfGraphics, Buttons,
-  FPimage, FPCanvas, FPWritePNG, GraphType, MTProcs, extern, tilingencoder, utils;
+  FPimage, FPCanvas, FPWritePNG, GraphType, MTProcs, FileInfo, extern, tilingencoder, utils;
 
 type
   { TMainForm }
@@ -746,7 +746,16 @@ end;
 procedure TMainForm.FormCreate(Sender: TObject);
 var
   es: TEncoderStep;
+  ver: TFileVersionInfo;
 begin
+  ver := TFileVersionInfo.Create(nil);
+  try
+    ver.ReadFileInfo;
+    Caption := Caption + ' ' + ver.VersionStrings.Values['FileVersion'] + ' (' + StringReplace({$I %DATE%}, '/', '', [rfReplaceAll]) + ')';
+  finally
+    ver.Free;
+  end;
+
   FormatSettings := InvariantFormatSettings;
   FTilingEncoder := TTilingEncoder.Create;
   FTilingEncoder.OnProgress := @TilingEncoderProgress;

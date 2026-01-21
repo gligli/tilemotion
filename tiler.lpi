@@ -21,6 +21,12 @@
     <i18n>
       <EnableI18N LFM="False"/>
     </i18n>
+    <VersionInfo>
+      <UseVersionInfo Value="True"/>
+      <MajorVersionNr Value="1"/>
+      <MinorVersionNr Value="1"/>
+      <StringTable CompanyName="GliGli" FileDescription="Tilemotion video encoder" LegalCopyright="GNU GPL v3" ProductName="tilemotion"/>
+    </VersionInfo>
     <BuildModes Count="4">
       <Item1 Name="Debug" Default="True"/>
       <Item2 Name="Test">
