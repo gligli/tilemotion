@@ -10,7 +10,7 @@ Upon bitstream format maturity I will probably write a DirectShow plugin or some
 
 Online demo here: <https://gligli.github.io/tilemotion/demo/>
 
-The project is in **Release candidate stage** and located at: <https://github.com/gligli/tilemotion> (go to the 'releases' section for binary downloads).
+The project is in **Release stage** and located at: <https://github.com/gligli/tilemotion> (go to the 'releases' section for binary downloads).
 
 _Author: GliGli_
 _License: GNU GPL v3_
