@@ -1230,9 +1230,7 @@ procedure TFrame.PredictMotion(ARadius: Integer; AOnlyBuffer: Boolean; var AFron
             begin
               err := CompareEuclideanDCTPtr_asm(CurDCT, PrevDCTPtr);
 
-              // apply a penalty of the manhattan distance to the center
-              // rationale: slightly favoring the center in case of ties improves compressibility
-              err += Abs(ox - dx) + Abs(oy - dy);
+              err += ApplyMotionPredictionPenalty(ox, oy, dx, dy);
 
               if err < bestErr then
               begin
@@ -1513,9 +1511,7 @@ var
           begin
             err := CompareEuclideanDCTPtr_asm(CurDCT, PrevDCTPtr);
 
-            // apply a penalty of the manhattan distance to the center
-            // rationale: slightly favoring the center in case of ties improves compressibility
-            err += Abs(ox - dx) + Abs(oy - dy);
+            err += ApplyMotionPredictionPenalty(ox, oy, dx, dy);
 
             if err < mpErr then
             begin
