@@ -3507,7 +3507,7 @@ procedure TTilingEncoder.Render;
 
   procedure DrawTile(var ABuffer: TIntegerDynArray2; const APal: TIntegerDynArray; ATilePtr: PTile; ASY, ASX: Integer; AHmirror, AVmirror, AForceActive: Boolean); inline;
   var
-    r, g, b, tx, ty, txm, tym: Integer;
+    col, r, g, b, tx, ty, txm, tym: Integer;
     psl: PInteger;
   begin
     for ty := 0 to cTileWidth - 1 do
@@ -3522,29 +3522,31 @@ procedure TTilingEncoder.Render;
         txm := tx;
         if AHmirror then txm := cTileWidth - 1 - txm;
 
-        r := 255; g := 0; b := 255;
+        col := $ff00ff;
         if ATilePtr^.Active or AForceActive then
         begin
           if Assigned(APal) then
           begin
             if ATilePtr^.HasPalPixels then
-              FromRGB(APal[ATilePtr^.PalPixels[tym, txm]], r, g, b)
+              col := APal[ATilePtr^.PalPixels[tym, txm]];
           end
           else
           begin
             if ATilePtr^.HasRGBPixels then
-              FromRGB(ATilePtr^.RGBPixels[tym, txm], r, g, b);
+              col := ATilePtr^.RGBPixels[tym, txm];
           end;
         end;
 
         if FRenderUseGamma then
         begin
+          FromRGB(col, r, g, b);
           r := round(GammaCorrect(1, r) * 255.0);
           g := round(GammaCorrect(1, g) * 255.0);
           b := round(GammaCorrect(1, b) * 255.0);
+          col := ToRGB(r, g, b);
         end;
 
-        psl^ := ToRGB(r, g, b);
+        psl^ := col;
         Inc(psl);
       end;
     end;
