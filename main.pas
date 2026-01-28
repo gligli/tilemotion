@@ -610,9 +610,8 @@ begin
   imgPalette.Picture.Bitmap := FTilingEncoder.PaletteBitmap;
   imgTiles.Picture.Bitmap := FTilingEncoder.TilesBitmap;
 
-  imgPalette.Height := Min(High(Word) + 1, FTilingEncoder.PaletteCount * cTileWidth);
-
-  UpdateGUI(Sender);
+  pnLbl.Caption := FTilingEncoder.RenderTitleText;
+  lblCorrel.Caption := FormatFloat('##0.000000', FTilingEncoder.RenderPsychoVisualQuality);
 end;
 
 procedure TMainForm.UpdateGUI(Sender: TObject);
@@ -675,13 +674,12 @@ begin
 
     FTilingEncoder.MaxThreadCount := seMaxCores.Value;
 
-    pnLbl.Caption := FTilingEncoder.RenderTitleText;
-    lblCorrel.Caption := FormatFloat('##0.000000', FTilingEncoder.RenderPsychoVisualQuality);
     sedPalIdx.MaxValue := FTilingEncoder.PaletteCount - 1;
     imgSource.Stretch := chkStretch.State in [cbGrayed, cbChecked];
     imgDest.Stretch := imgSource.Stretch;
     imgSource.Proportional := chkStretch.State = cbGrayed;
     imgDest.Proportional := imgSource.Proportional;
+    imgPalette.Height := Min(High(Word) + 1, FTilingEncoder.PaletteCount * cTileWidth);
     sePSNR.Enabled := rbPSNR.Checked;
     seQbTiles.Enabled := rbTileLimit.Checked;
     seMaxTiles.Enabled := rbTileLimit.Checked;
