@@ -272,7 +272,7 @@ type
     procedure AcquireFrameTiles;
     procedure ReleaseFrameTiles;
 
-    function PredictTile(ARadius, ADX, ADY: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
+    function PredictTile(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
       const ABackBuffer: TIntegerDynArray2; const ADCTs: TDCTDynArray): Cardinal;
 
     // processes
@@ -626,7 +626,7 @@ end;
 
 function TTileMapItemHelper.GetIsSmoothed: Boolean;
 begin
-  Result := IsPredicted and (PredictedX = 0) and (PredictedY = 0);
+  Result := IsPredicted and (PredictedX = 0) and (PredictedY = 0) and (Zoom = cTileWidth);
 end;
 
 function TTileMapItemHelper.GetVMirror: Boolean;
@@ -1197,7 +1197,7 @@ begin
   end;
 end;
 
-function TFrame.PredictTile(ARadius, ADX, ADY: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
+function TFrame.PredictTile(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
   const ABackBuffer: TIntegerDynArray2; const ADCTs: TDCTDynArray): Cardinal;
 var
   oy, ox, oymn, oymx, oxmn, oxmx, yx, iZoom, bestX, bestY, bestZoom: Integer;
@@ -1335,7 +1335,7 @@ procedure TFrame.PredictMotion(ARadius: Integer; AOnlyBuffer: Boolean; var AFron
       if not AOnlyBuffer then
       begin
         Encoder.ConvertToCpnPixels(FrameTile^, False, False, False, False, nil, CurCpnPixels);
-        PredictTile(ARadius, dx, dy, TMI, CurCpnPixels, ABackBuffer, ADCTs);
+        PredictTile(ARadius, dy, dx, TMI, CurCpnPixels, ABackBuffer, ADCTs);
       end;
 
       FrameTile^.Blit(AFrontBuffer, dy, dx);
@@ -1576,7 +1576,7 @@ var
     if (Index <> PKeyFrame.StartFrame) and (ARadius >= 0) then
     begin
       Encoder.ConvertToCpnPixels(FrameTile^, False, False, FrameTile^.HMirror_Initial, FrameTile^.VMirror_Initial, nil, CurCpnPixels);
-      mpErr := PredictTile(ARadius, dx, dy, TMI, CurCpnPixels, ABackBuffer, ADCTs);
+      mpErr := PredictTile(ARadius, dy, dx, TMI, CurCpnPixels, ABackBuffer, ADCTs);
     end;
 
     if IsZero(mpErr, cTileDCTSize) then
@@ -5055,6 +5055,7 @@ var
       frm.TileMap[sy, sx].IsPredicted := True;
       frm.TileMap[sy, sx].PredictedX := 0;
       frm.TileMap[sy, sx].PredictedY := 0;
+      frm.TileMap[sy, sx].Zoom := cTileWidth;
     end;
     tmPos += SkipCount;
   end;
