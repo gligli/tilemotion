@@ -463,10 +463,6 @@ begin
 end;
 
 procedure TMainForm.btnDebugClick(Sender: TObject);
-var
-  i, j: Integer;
-  a: TIntegerDynArray2;
-  t: PTile;
 begin
   edInput.Text := ExtractFilePath(Application.ExeName) + '..\tiler_misc\Star.Wars.Despecialized.Edition.v2.5.avi';
   edOutput.Text := ExtractFilePath(Application.ExeName) + 'debug.gtm';
@@ -476,24 +472,6 @@ begin
   cbxMPRadius.Text := '128';
 
   FTilingEncoder.Test;
-
-  SetLength(a, 256, 256);
-  for j := 0 to 63 do
-    for i := 0 to 63 do
-      a[j, i] := ToRGB(byte(j shl 4), byte(i shl 3), Byte(not (i xor j) shl 4)) * IfThen((i and 1 = 0) or (j and 1 = 0), 1, 0);
-  t := TTile.New(True, False);
-
-  t^.ZoomRGBPixels(a, 56, 56, cZoomLevels[cTileWidth]);
-
-  for i := 0 to 31 do
-  begin
-    t^.ZoomRGBPixels(a, 32 - 4, 16 - 4, cZoomLevels[i + 1]);
-    t^.Blit(a, 0, i shl 3);
-  end;
-
-  for j := 0 to 255 do
-    for i := 0 to 255 do
-      imgSource.Canvas.Pixels[i, j + 16] := SwapRB(a[j, i]);
 
   UpdateGUI(nil);
 end;
