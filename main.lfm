@@ -122,9 +122,9 @@ object MainForm: TMainForm
     Height = 548
     Top = 40
     Width = 1028
-    ActivePage = tsSettings
+    ActivePage = tsTilesPal
     Anchors = [akTop, akLeft, akRight, akBottom]
-    TabIndex = 0
+    TabIndex = 3
     TabOrder = 5
     OnChange = UpdateVideo
     object tsSettings: TTabSheet

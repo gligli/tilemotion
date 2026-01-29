@@ -145,48 +145,49 @@ type
   { TZoomLevel }
 
   TZoomLevel = record
-    Level: Byte;
-    Delta, Offset: Integer;
+    Level, Delta, Offset, Dummy: Integer;
   end;
 
   PZoomLevel = ^TZoomLevel;
 
 const
-  CZoomShift = 12;
+  cZoomShift = 12;
+  cZoomPx = 1 shl cZoomShift;
+  cZoomHPx = 1 shl (cZoomShift - 1);
 
-  CZoomLevels: array[1 .. 32] of TZoomLevel = (
-    (Level:  1; Delta: ( 1 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth -  1) shl CZoomShift) div 2), // uniform tile (all pixels same color)
-    (Level:  2; Delta: ( 2 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth -  2) shl CZoomShift) div 2),
-    (Level:  3; Delta: ( 3 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth -  3) shl CZoomShift) div 2),
-    (Level:  4; Delta: ( 4 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth -  4) shl CZoomShift) div 2),
-    (Level:  5; Delta: ( 5 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth -  5) shl CZoomShift) div 2),
-    (Level:  6; Delta: ( 6 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth -  6) shl CZoomShift) div 2),
-    (Level:  7; Delta: ( 7 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth -  7) shl CZoomShift) div 2),
-    (Level:  8; Delta: ( 8 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth -  8) shl CZoomShift) div 2), // = cTileWidth (not a zoom level)
-    (Level:  9; Delta: ( 9 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth -  9) shl CZoomShift) div 2),
-    (Level: 10; Delta: (10 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 10) shl CZoomShift) div 2),
-    (Level: 11; Delta: (11 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 11) shl CZoomShift) div 2),
-    (Level: 12; Delta: (12 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 12) shl CZoomShift) div 2),
-    (Level: 13; Delta: (13 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 13) shl CZoomShift) div 2),
-    (Level: 14; Delta: (14 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 14) shl CZoomShift) div 2),
-    (Level: 15; Delta: (15 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 15) shl CZoomShift) div 2),
-    (Level: 16; Delta: (16 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 16) shl CZoomShift) div 2),
-    (Level: 17; Delta: (17 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 17) shl CZoomShift) div 2),
-    (Level: 18; Delta: (18 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 18) shl CZoomShift) div 2),
-    (Level: 19; Delta: (19 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 19) shl CZoomShift) div 2),
-    (Level: 20; Delta: (20 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 20) shl CZoomShift) div 2),
-    (Level: 21; Delta: (21 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 21) shl CZoomShift) div 2),
-    (Level: 22; Delta: (22 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 22) shl CZoomShift) div 2),
-    (Level: 23; Delta: (23 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 23) shl CZoomShift) div 2),
-    (Level: 24; Delta: (24 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 24) shl CZoomShift) div 2),
-    (Level: 25; Delta: (25 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 25) shl CZoomShift) div 2),
-    (Level: 26; Delta: (26 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 26) shl CZoomShift) div 2),
-    (Level: 27; Delta: (27 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 27) shl CZoomShift) div 2),
-    (Level: 28; Delta: (28 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 28) shl CZoomShift) div 2),
-    (Level: 29; Delta: (29 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 29) shl CZoomShift) div 2),
-    (Level: 30; Delta: (30 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 30) shl CZoomShift) div 2),
-    (Level: 31; Delta: (31 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 31) shl CZoomShift) div 2),
-    (Level: 32; Delta: (32 shl CZoomShift) div cTileWidth; Offset: ((cTileWidth - 32) shl CZoomShift) div 2)  // 4x unzoom (32x32 -> 8x8)
+  cZoomLevels: array[1 .. 32] of TZoomLevel = (
+    (Level:  1; Delta:  1 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth -  1) div 2), // uniform tile (all pixels same color)
+    (Level:  2; Delta:  2 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth -  2) div 2),
+    (Level:  3; Delta:  3 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth -  3) div 2),
+    (Level:  4; Delta:  4 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth -  4) div 2),
+    (Level:  5; Delta:  5 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth -  5) div 2),
+    (Level:  6; Delta:  6 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth -  6) div 2),
+    (Level:  7; Delta:  7 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth -  7) div 2),
+    (Level:  8; Delta:  8 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth -  8) div 2), // = cTileWidth (not a zoom level)
+    (Level:  9; Delta:  9 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth -  9) div 2),
+    (Level: 10; Delta: 10 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 10) div 2),
+    (Level: 11; Delta: 11 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 11) div 2),
+    (Level: 12; Delta: 12 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 12) div 2),
+    (Level: 13; Delta: 13 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 13) div 2),
+    (Level: 14; Delta: 14 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 14) div 2),
+    (Level: 15; Delta: 15 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 15) div 2),
+    (Level: 16; Delta: 16 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 16) div 2),
+    (Level: 17; Delta: 17 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 17) div 2),
+    (Level: 18; Delta: 18 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 18) div 2),
+    (Level: 19; Delta: 19 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 19) div 2),
+    (Level: 20; Delta: 20 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 20) div 2),
+    (Level: 21; Delta: 21 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 21) div 2),
+    (Level: 22; Delta: 22 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 22) div 2),
+    (Level: 23; Delta: 23 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 23) div 2),
+    (Level: 24; Delta: 24 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 24) div 2),
+    (Level: 25; Delta: 25 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 25) div 2),
+    (Level: 26; Delta: 26 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 26) div 2),
+    (Level: 27; Delta: 27 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 27) div 2),
+    (Level: 28; Delta: 28 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 28) div 2),
+    (Level: 29; Delta: 29 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 29) div 2),
+    (Level: 30; Delta: 30 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 30) div 2),
+    (Level: 31; Delta: 31 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 31) div 2),
+    (Level: 32; Delta: 32 shl (cZoomShift - cTileWidthBits); Offset: (cTileWidth - 32) div 2)  // 4x unzoom (32x32 -> 8x8)
   );
 
 procedure SpinEnter(Lock: PSpinLock); assembler;
@@ -213,6 +214,7 @@ function LABToRGB(ll, aa, bb: TFloat): Integer;
 function YUVToRGB(y, u, v: TFloat): Integer;
 function lerp(x, y, alpha: Double): Double; inline;
 function ilerp(x, y, alpha, maxAlpha: Integer): Integer; inline;
+function zlerp(x, y: Integer; alpha: Integer): Integer;
 function revlerp(x, r, alpha: Double): Double; inline;
 function Posterize(v: Byte; cvt: Integer): Byte; inline;
 function PosterizeBpc(v, bpc: Byte): Byte; inline;
@@ -576,6 +578,22 @@ end;
 function ilerp(x, y, alpha, maxAlpha: Integer): Integer; inline;
 begin
   Result := x + ((y - x) * alpha) div maxAlpha;
+end;
+
+function zlerp(x, y: Integer; alpha: Integer): Integer;
+var
+  xr, xg, xb, yr, yg, yb, r, g, b: Integer;
+begin
+  alpha := alpha and (cZoomPx - 1);
+
+  FromRGB(x, xr, xg, xb);
+  FromRGB(y, yr, yg, yb);
+
+  r := xr + SarLongint((yr - xr) * alpha, cZoomShift);
+  g := xg + SarLongint((yg - xg) * alpha, cZoomShift);
+  b := xb + SarLongint((yb - xb) * alpha, cZoomShift);
+
+  Result := ToRGB(r, g, b);
 end;
 
 function revlerp(x, r, alpha: Double): Double; inline;

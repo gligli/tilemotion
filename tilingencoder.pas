@@ -415,7 +415,8 @@ type
 
     function PearsonCorrelation(const x: TFloatDynArray; const y: TFloatDynArray): TFloat;
 
-    function GetSettings: String;
+    function GetSettings: AnsiString;
+    procedure SetSettings(ASettings: AnsiString);
     procedure ProgressRedraw(ASubStepIdx: Integer; AReason: String; AProgressStep: TEncoderStep = esAll; AThread: TThread = nil);
     procedure SyncProgress;
 
@@ -897,27 +898,50 @@ function TTileHelper.ZoomRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX
 var
   tx, ty: Integer;
   zdx, zdy, zymn, zymx, zxmn, zxmx: Integer;
+  p00, p01, p10, p11, l0, l1: Integer;
+  prp: PRGBPixels;
 begin
   Result := True;
 
-  zymn := (AY shl CZoomShift) + AZoomLevel.Offset;
-  zymx := zymn + (cTileWidth - 1) * AZoomLevel.Delta;
-  zxmn := (AX shl CZoomShift) + AZoomLevel.Offset;
-  zxmx := zxmn + (cTileWidth - 1) * AZoomLevel.Delta;
+  if AZoomLevel.Level = cTileWidth then
+  begin
+    CopyRGBPixels(AFrameBuffer, AY, AX);
+    Exit;
+  end;
 
-  if (zymn < 0) or (zymx >= Length(AFrameBuffer) shl CZoomShift) or
-     (zxmn < 0) or (zxmx >= Length(AFrameBuffer[0]) shl CZoomShift) then
-    Exit(False);
+  zymn := AY + AZoomLevel.Offset;
+  zxmn := AX + AZoomLevel.Offset;
+  zymx := zymn + AZoomLevel.Level;
+  zxmx := zxmn + AZoomLevel.Level;
 
-  zdy := zymn;
+  if (zymn < 0) or (zymx >= Length(AFrameBuffer)) or
+     (zxmn < 0) or (zxmx >= Length(AFrameBuffer[0])) then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  prp := GetRGBPixelsPtr;
+
+  zdy := zymn shl cZoomShift;
   for ty := 0 to cTileWidth - 1 do
   begin
-    zdx := zxmn;
+    zdx := zxmn shl cZoomShift;
     for tx := 0 to cTileWidth - 1 do
     begin
-      GetRGBPixelsPtr^[ty, tx] := AFrameBuffer[zdy shr CZoomShift, zdx shr CZoomShift];
+      p00 := AFrameBuffer[(zdy shr cZoomShift) + 0, (zdx shr cZoomShift) + 0];
+      p01 := AFrameBuffer[(zdy shr cZoomShift) + 0, (zdx shr cZoomShift) + 1];
+      p10 := AFrameBuffer[(zdy shr cZoomShift) + 1, (zdx shr cZoomShift) + 0];
+      p11 := AFrameBuffer[(zdy shr cZoomShift) + 1, (zdx shr cZoomShift) + 1];
+
+      l0 := zlerp(p00, p01, zdx);
+      l1 := zlerp(p10, p11, zdx);
+
+      prp^[ty, tx] := zlerp(l0, l1, zdy);
+
       Inc(zdx, AZoomLevel.Delta);
     end;
+
     Inc(zdy, AZoomLevel.Delta);
   end;
 end;
@@ -1212,8 +1236,8 @@ begin
   try
     Encoder.ComputeCpnPixelsPsyVisFeatures(ACpnPixels, pvsWeightedDCT, cColorCpns, CurDCT);
 
-    bestX := MaxInt;
     bestY := MaxInt;
+    bestX := MaxInt;
     bestZoom := MaxInt;
     Result := High(Cardinal);
 
@@ -1237,8 +1261,8 @@ begin
           if err < Result then
           begin
             Result := err;
-            bestX := ox;
             bestY := oy;
+            bestX := ox;
             bestZoom := cTileWidth;
           end;
         end;
@@ -1247,11 +1271,11 @@ begin
       end;
     end;
 
-    for iZoom := Low(CZoomLevels) to High(CZoomLevels) do
+    for iZoom := Low(cZoomLevels) to High(cZoomLevels) do
     begin
-      Zoom := @CZoomLevels[iZoom];
+      Zoom := @cZoomLevels[iZoom];
 
-      if not ZoomTile^.ZoomRGBPixels(ABackBuffer, bestY, bestX, Zoom^) then
+      if (Zoom^.Level = cTileWidth) or not ZoomTile^.ZoomRGBPixels(ABackBuffer, ADY, ADX, Zoom^) then
         Continue;
 
       Encoder.ConvertToCpnPixels(ZoomTile^, False, False, False, False, nil, ZoomCpnPixels);
@@ -1265,14 +1289,16 @@ begin
         if err < Result then
         begin
           Result := err;
+          bestY := ADY;
+          bestX := ADX;
           bestZoom := iZoom;
         end;
       end;
     end;
 
     ATMI^.PSNR := EuclideanToPSNR(Result);
-    ATMI^.PredictedX := bestX - ADX;
     ATMI^.PredictedY := bestY - ADY;
+    ATMI^.PredictedX := bestX - ADX;
     ATMI^.Zoom := bestZoom;
 
   finally
@@ -1695,7 +1721,7 @@ var
         // draw fb (motion predicted tile)
         ZoomTile := TTile.New(True, False);
         try
-          res := ZoomTile^.ZoomRGBPixels(ABackBuffer, dy + TMI^.PredictedY, dx + TMI^.PredictedX, CZoomLevels[TMI^.Zoom]);
+          res := ZoomTile^.ZoomRGBPixels(ABackBuffer, dy + TMI^.PredictedY, dx + TMI^.PredictedX, cZoomLevels[TMI^.Zoom]);
           Assert(res);
           ZoomTile^.Blit(AFrontBuffer, dy, dx);
         finally
@@ -2303,7 +2329,7 @@ begin
   Result := FGamma[1];
 end;
 
-function TTilingEncoder.GetSettings: String;
+function TTilingEncoder.GetSettings: AnsiString;
 var
   tmpFN: String;
 begin
@@ -2311,6 +2337,25 @@ begin
   try
     SaveSettings(tmpFN);
     Result := ReadFileToString(tmpFN);
+  finally
+    DeleteFile(tmpFN);
+  end;
+end;
+
+procedure TTilingEncoder.SetSettings(ASettings: AnsiString);
+var
+  tmpFN: String;
+  fs: TFileStream;
+begin
+  tmpFN := GetTempFileName;
+  try
+    fs := TFileStream.Create(tmpFN, fmCreate or fmShareDenyWrite);
+    try
+      fs.WriteAnsiString(ASettings);
+    finally
+      fs.Free;
+    end;
+    LoadSettings(tmpFN);
   finally
     DeleteFile(tmpFN);
   end;
@@ -3552,6 +3597,28 @@ procedure TTilingEncoder.Render;
     end;
   end;
 
+  procedure DrawDummyTile(var ABuffer: TIntegerDynArray2; ASY, ASX: Integer; AColor: Integer = $303030);
+  const
+    cTileData: array[0..7] of Byte = ($81, $42, $24, $18, $18, $24, $42, $81);
+  var
+    d: Byte;
+    tx, ty: Integer;
+    psl: PInteger;
+  begin
+    for ty := 0 to cTileWidth - 1 do
+    begin
+      psl := @ABuffer[(ASY shl cTileWidthBits) + ty, ASX shl cTileWidthBits];
+      d := cTileData[ty];
+
+      for tx := 0 to cTileWidth - 1 do
+      begin
+        psl^ := IfThen(d and 1 <> 0, AColor, $000000);
+        Inc(psl);
+        d := d shr 1;
+      end;
+    end;
+  end;
+
   procedure BlitBuffer(const ABuffer: TIntegerDynArray2; ABitmap: PInteger; ASY, ASX, ABitmapStride: Integer); inline;
   var
     by, bx: Integer;
@@ -3571,17 +3638,16 @@ procedure TTilingEncoder.Render;
     end;
   end;
 
-  procedure SwapBuffer(var ABuffer1, ABuffer2: TIntegerDynArray2); inline;
+  procedure SwapBuffer(var AFrontBuffer, ABackBuffer: TIntegerDynArray2); inline;
   var
-    tmp: TIntegerDynArray2;
+    by: Integer;
   begin
-    tmp := ABuffer2;
-    ABuffer2 := ABuffer1;
-    ABuffer1 := tmp;
+    for by := 0 to High(AFrontBuffer) do
+      Move(AFrontBuffer[by, 0], ABackBuffer[by, 0], SizeOf(Integer) * Length(AFrontBuffer[0]));
   end;
 
 var
-  i, j, sx, sy, globalTileCount, col: Integer;
+  i, j, sx, sy, globalTileCount, col, off, siz: Integer;
   hmir, vmir, res: Boolean;
   tidx: Int64;
   pFB: PInteger;
@@ -3665,10 +3731,12 @@ begin
           res := TempTile^.ZoomRGBPixels(
               FRenderBackBuffer,
               (sy shl cTileWidthBits) + TMI^.PredictedY, (sx shl cTileWidthBits) + TMI^.PredictedX,
-              CZoomLevels[TMI^.Zoom]);
-          Assert(res);
+              cZoomLevels[TMI^.Zoom]);
 
-          DrawTile(FRenderFrontBuffer, nil, TempTile, sy, sx, False, False, True);
+          if res then
+            DrawTile(FRenderFrontBuffer, nil, TempTile, sy, sx, False, False, True)
+          else
+            DrawDummyTile(FRenderFrontBuffer, sy, sx, $0000ff);
         end
         else if InRange(TMI^.TileIdx, 0, High(Tiles)) then
         begin
@@ -3679,13 +3747,19 @@ begin
             if FRenderPaletteIndex < 0 then
             begin
               if not InRange(TMI^.PalIdx, 0, High(FPalettes)) then
+              begin
+                DrawDummyTile(FRenderFrontBuffer, sy, sx);
                 Continue;
+              end;
               pal := FPalettes[TMI^.PalIdx].PaletteRGB;
             end
             else
             begin
               if FRenderPaletteIndex <> TMI^.PalIdx then
+              begin
+                DrawDummyTile(FRenderFrontBuffer, sy, sx);
                 Continue;
+              end;
               pal := FPalettes[FRenderPaletteIndex].PaletteRGB;
             end;
 
@@ -3699,20 +3773,15 @@ begin
           end;
 
           DrawTile(FRenderFrontBuffer, pal, tilePtr, sy, sx, hmir, vmir, False);
+        end
+        else
+        begin
+          DrawDummyTile(FRenderFrontBuffer, sy, sx);
         end;
       end;
 
     if FRenderPage = rpOutput then
     begin
-      FOutputBitmap.Canvas.Pen.Color := clWhite;
-      FOutputBitmap.Canvas.Pen.Style := psSolid;
-      FOutputBitmap.Canvas.Brush.Color := clBlack;
-      FOutputBitmap.Canvas.Brush.Style := bsSolid;
-      FOutputBitmap.Canvas.FillRect(FOutputBitmap.Canvas.ClipRect);
-      FOutputBitmap.Canvas.Brush.Color := $202020;
-      FOutputBitmap.Canvas.Brush.Style := bsDiagCross;
-      FOutputBitmap.Canvas.FillRect(FOutputBitmap.Canvas.ClipRect);
-
       FOutputBitmap.BeginUpdate;
       try
         pFB := PInteger(FOutputBitmap.RawImage.Data);
@@ -3724,6 +3793,9 @@ begin
 
       if not FRenderPredicted then
       begin
+        FOutputBitmap.Canvas.Pen.Style := psSolid;
+        FOutputBitmap.Canvas.Brush.Style := bsSolid;
+
         for sy := 0 to FTileMapHeight - 1 do
           for sx := 0 to FTileMapWidth - 1 do
           begin
@@ -3731,26 +3803,32 @@ begin
 
             if TMI^.IsPredicted then
             begin
-              if TMI^.Zoom > cTileWidth then
+              if TMI^.Zoom = cTileWidth then
               begin
-                col := ilerp($c0, $40, TMI^.Zoom - cTileWidth, High(CZoomLevels) - cTileWidth);
-                col := ToRGB($ff, col, col);
-              end
-              else if TMI^.Zoom < cTileWidth then
-              begin
-                col := ilerp($40, $c0, TMI^.Zoom, cTileWidth);
-                col := ToRGB(col, col, $ff);
+                off := cTileWidth div 2;
+                siz := Abs(TMI^.PredictedX) + Abs(TMI^.PredictedY);
+
+                col := High(Byte) - Max(0, siz - cTileWidth);
+                col := ToRGB(High(Byte), col, col);
+
+                FOutputBitmap.Canvas.Pen.Color := col;
+                FOutputBitmap.Canvas.Line(
+                  (sx shl cTileWidthBits) + off, (sy shl cTileWidthBits) + off,
+                  (sx shl cTileWidthBits) + TMI^.PredictedX + off, (sy shl cTileWidthBits) + TMI^.PredictedY + off);
               end
               else
               begin
-                col := ToRGB($ff, $ff, $ff);
+                off := cZoomLevels[TMI^.Zoom].Offset;
+                siz := cZoomLevels[TMI^.Zoom].Level;
+
+                col := High(Byte) - IfThen(siz > cTileWidth, High(Byte) * (siz - cTileWidth) div High(cZoomLevels), High(Byte) * (cTileWidth - siz) div cTileWidth);
+                col := ToRGB(col, col, High(Byte));
+
+                FOutputBitmap.Canvas.Brush.Color := col;
+                FOutputBitmap.Canvas.FrameRect(
+                  (sx shl cTileWidthBits) + off, (sy shl cTileWidthBits) + off,
+                  (sx shl cTileWidthBits) + off + siz, (sy shl cTileWidthBits) + off + siz);
               end;
-
-              FOutputBitmap.Canvas.Pen.Color := SwapRB(col);
-
-              FOutputBitmap.Canvas.Line(
-                (sx shl cTileWidthBits) + cTileWidth div 2, (sy shl cTileWidthBits) + cTileWidth div 2,
-                (sx shl cTileWidthBits) + TMI^.PredictedX + cTileWidth div 2, (sy shl cTileWidthBits) + TMI^.PredictedY + cTileWidth div 2);
             end;
           end;
       end;
@@ -4969,6 +5047,13 @@ var
     Data := d shr CGTMCommandCodeBits;
   end;
 
+  procedure ReadSettings;
+  var
+    settings: AnsiString;
+  begin
+    settings := KFStream.ReadAnsiString;
+  end;
+
   procedure ReadTiles(PaletteSize: Integer);
   var
     i, startIdx, endIdx: Integer;
@@ -5120,7 +5205,10 @@ begin
         case Command of
           gtExtendedCommand:
           begin
-            KFStream.Seek(ReadDWord, soCurrent);
+            if CommandData = 0 then
+              ReadSettings
+            else
+              KFStream.Seek(ReadDWord, soCurrent);
           end;
           gtSetDimensions:
           begin
@@ -5183,6 +5271,7 @@ begin
 
             TMI^.PredictedX := (CommandData and 31) - (CommandData and 32);
             TMI^.PredictedY := ((CommandData shr 6) and 31) - ((CommandData shr 6) and 32);
+            TMI^.Zoom := cTileWidth;
             TMI^.IsPredicted := True;
 
             Inc(tmPos);
@@ -5197,7 +5286,7 @@ begin
 
             TMI^.PredictedX := ShortInt(ReadByte);
             TMI^.PredictedY := ShortInt(ReadByte);
-
+            TMI^.Zoom := cTileWidth; // TODO: ZOOM
             TMI^.IsPredicted := True;
 
             Inc(tmPos);
