@@ -270,13 +270,13 @@ type
     procedure AcquireFrameTiles;
     procedure ReleaseFrameTiles;
 
-    function PredictTile(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
+    function PredictTile(ARadius, ADY, ADX: Integer; APredictIntra: Boolean; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
       const ABackBuffer: TIntegerDynArray2; const ADCTs: TDCTDynArray): Cardinal;
 
     // processes
 
     procedure LoadFromImage(AImageWidth, AImageHeight: Integer; AImage: PInteger);
-    procedure PredictMotion(ARadius: Integer; AOnlyBuffer: Boolean; var AFrontBuffer, ABackBuffer: TIntegerDynArray2;
+    procedure PredictMotion(ARadius: Integer; AOnlyBuffer, APredictIntra: Boolean; var AFrontBuffer, ABackBuffer: TIntegerDynArray2;
       var ADCTs: TDCTDynArray);
     procedure Reconstruct(ARadius: Integer; var AFrontBuffer, ABackBuffer: TIntegerDynArray2;
       var ADCTs: TDCTDynArray);
@@ -1167,8 +1167,8 @@ begin
   end;
 end;
 
-function TFrame.PredictTile(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
-  const ABackBuffer: TIntegerDynArray2; const ADCTs: TDCTDynArray): Cardinal;
+function TFrame.PredictTile(ARadius, ADY, ADX: Integer; APredictIntra: Boolean; ATMI: PTileMapItem;
+  const ACpnPixels: TCpnPixels; const ABackBuffer: TIntegerDynArray2; const ADCTs: TDCTDynArray): Cardinal;
 var
   oy, ox, oymn, oymx, oxmn, oxmx, yx, bestX, bestY: Integer;
   err: Cardinal;
@@ -1188,9 +1188,15 @@ begin
 
   for oy := oymn to oymx do
   begin
+    if APredictIntra and InRange(oy - ADY, -cTileWidth, cTileWidth - 1) then
+      Continue;
+
     yx := oy * (Encoder.FScreenWidth - cTileWidth + 1) + oxmn;
     for ox := oxmn to oxmx do
     begin
+      if APredictIntra and InRange(ox - ADX, -cTileWidth, cTileWidth - 1) then
+        Continue;
+
       PrevDCTPtr := ADCTs[yx];
 
       if QuickTestEuclideanDCTPtr_asm(CurDCT, PrevDCTPtr, Result) then
@@ -1215,7 +1221,7 @@ begin
   ATMI^.PredictedX := bestX - ADX;
 end;
 
-procedure TFrame.PredictMotion(ARadius: Integer; AOnlyBuffer: Boolean; var AFrontBuffer,
+procedure TFrame.PredictMotion(ARadius: Integer; AOnlyBuffer, APredictIntra: Boolean; var AFrontBuffer,
   ABackBuffer: TIntegerDynArray2; var ADCTs: TDCTDynArray);
 
   procedure DoDCTs(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
@@ -1263,6 +1269,8 @@ procedure TFrame.PredictMotion(ARadius: Integer; AOnlyBuffer: Boolean; var AFron
     FrameTile := TTile.New(True, False);
     try
       TMI := @TileMap[sy, sx];
+      TMI^.IsPredicted := True;
+
       FrameTile^.CopyFrom(FrameTiles[AIndex]^);
       if FrameTile^.HMirror_Initial then Encoder.HMirrorTile(FrameTile^);
       if FrameTile^.VMirror_Initial then Encoder.VMirrorTile(FrameTile^);
@@ -1270,7 +1278,7 @@ procedure TFrame.PredictMotion(ARadius: Integer; AOnlyBuffer: Boolean; var AFron
       if not AOnlyBuffer then
       begin
         Encoder.ConvertToCpnPixels(FrameTile^, False, False, False, False, nil, CurCpnPixels);
-        PredictTile(ARadius, dy, dx, TMI, CurCpnPixels, ABackBuffer, ADCTs);
+        PredictTile(ARadius, dy, dx, APredictIntra, TMI, CurCpnPixels, ABackBuffer, ADCTs);
       end;
 
       FrameTile^.Blit(AFrontBuffer, dy, dx);
@@ -1510,7 +1518,7 @@ var
     if (Index <> PKeyFrame.StartFrame) and (ARadius >= 0) then
     begin
       Encoder.ConvertToCpnPixels(FrameTile^, False, False, FrameTile^.HMirror_Initial, FrameTile^.VMirror_Initial, nil, CurCpnPixels);
-      mpErr := PredictTile(ARadius, dy, dx, TMI, CurCpnPixels, ABackBuffer, ADCTs);
+      mpErr := PredictTile(ARadius, dy, dx, False, TMI, CurCpnPixels, ABackBuffer, ADCTs);
     end;
 
     if IsZero(mpErr, cTileDCTSize) then
@@ -1872,7 +1880,7 @@ procedure TTilingEncoder.Dither;
 var
   palIdx: Integer;
 begin
-  if FrameCount = 0 then
+  if Length(FFrames) = 0 then
     Exit;
 
   ProgressRedraw(0, '', esDither);
@@ -1890,7 +1898,7 @@ end;
 
 procedure TTilingEncoder.Reduce;
 begin
-  if FrameCount = 0 then
+  if Length(FFrames) = 0 then
     Exit;
 
   ProgressRedraw(0, '', esReduce);
@@ -1945,9 +1953,9 @@ end;
 
 procedure TTilingEncoder.PredictMotion;
 var
-  frmIdx: Integer;
+  kfIdx, frmIdx: Integer;
   curBuffer: Boolean;
-
+  KF: TKeyFrame;
   FrameBuffer: array[Boolean] of TIntegerDynArray2;
   DCTs: TDCTDynArray;
 begin
@@ -1961,12 +1969,18 @@ begin
   SetLength(FrameBuffer[True], FScreenHeight, FScreenWidth);
   SetLength(DCTs, (FScreenHeight - cTileWidth + 1) * (FScreenWidth - cTileWidth + 1));
 
-  for frmIdx := -Min(1, High(FFrames)) to High(FFrames) do // first frame is predicted from next frame if it exists
-  begin
-    FFrames[Abs(frmIdx)].PredictMotion(FMotionPredictRadius, frmIdx < 0, FrameBuffer[not curBuffer], FrameBuffer[curBuffer], DCTs);
-    curBuffer := not curBuffer;
 
-    Write(frmIdx + 1:8, ' / ', Length(FFrames):8, #13);
+  for kfIdx := 0 to High(FKeyFrames) do
+  begin
+    KF := FKeyFrames[kfIdx];
+
+    for frmIdx := KF.StartFrame - 1 to KF.EndFrame do // first frame of the keyframe is predicted intra (back buffer is then the frame itself)
+    begin
+      FFrames[Max(KF.StartFrame, frmIdx)].PredictMotion(FMotionPredictRadius, frmIdx < KF.StartFrame, frmIdx = KF.StartFrame, FrameBuffer[not curBuffer], FrameBuffer[curBuffer], DCTs);
+      curBuffer := not curBuffer;
+
+      Write(frmIdx + 1:8, ' / ', Length(FFrames):8, #13);
+    end;
   end;
 
   ProgressRedraw(1, '', esPredictMotion);
@@ -4087,25 +4101,29 @@ end;
 
 function TTilingEncoder.STCGREval(x: Double; Data: Pointer): Double;
 const
-  CKFPSNRDiv = 10.0;
+  CFirstFramePSNRBonus = -10.0;
 var
   frmIdx, sy, sx, unpredictedTileCount: Integer;
+  bonus: TFloat;
   TMI: PTileMapItem;
 begin
   unpredictedTileCount := 0;
   for frmIdx := 0 to High(FFrames) do
+  begin
+    bonus := 0.0;
+    if frmIdx = FFrames[frmIdx].PKeyFrame.StartFrame then
+      bonus := CFirstFramePSNRBonus;
+
     for sy := 0 to FTileMapHeight - 1 do
       for sx := 0 to FTileMapWidth - 1 do
       begin
         TMI := @FFrames[frmIdx].TileMap[sy, sx];
 
-        if (frmIdx = FFrames[frmIdx].PKeyFrame.StartFrame) and not IsInfinite(TMI^.PSNR) then
-          TMI^.IsPredicted := TMI^.PSNR / CKFPSNRDiv > x
-        else
-          TMI^.IsPredicted := TMI^.PSNR > x;
+        TMI^.IsPredicted := TMI^.PSNR > x - bonus;
 
         inc(unpredictedTileCount, Ord(not TMI^.IsPredicted));
       end;
+  end;
 
   TransferTiles(unpredictedTileCount);
 
