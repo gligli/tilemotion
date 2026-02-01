@@ -297,7 +297,7 @@ var
   palIdx, useCount: Integer;
 begin
   P := imgPalette.ScreenToClient(Mouse.CursorPos);
-  palIdx := iDiv0(P.Y * FTilingEncoder.PaletteCount, imgPalette.Height);
+  palIdx := iDivDef(P.Y * FTilingEncoder.PaletteCount, imgPalette.Height, 0);
 
   useCount := -1;
   if InRange(FTilingEncoder.RenderFrameIndex, 0, High(FTilingEncoder.Frames)) and
@@ -582,7 +582,7 @@ var
   P: TPoint;
 begin
   P := imgPalette.ScreenToClient(Mouse.CursorPos);
-  sedPalIdx.Value := iDiv0(P.Y * FTilingEncoder.PaletteCount, imgPalette.Height);
+  sedPalIdx.Value := iDivDef(P.Y * FTilingEncoder.PaletteCount, imgPalette.Height, 0);
   FTilingEncoder.RenderPaletteIndex := sedPalIdx.Value;
 end;
 

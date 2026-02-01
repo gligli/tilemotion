@@ -146,9 +146,9 @@ type
 procedure SpinEnter(Lock: PSpinLock); assembler;
 procedure SpinLeave(Lock: PSpinLock); assembler;
 procedure Exchange(var a, b: Integer);
-function iDiv0(x, y: Integer): Integer;overload;inline;
-function iDiv0(x, y: Int64): Int64;overload;inline;
-function Div0(x, y: TFloat): TFloat;inline;
+function iDivDef(x, y, def: Integer): Integer;overload;inline;
+function iDivDef(x, y, def: Int64): Int64;overload;inline;
+function DivDef(x, y, def: TFloat): TFloat;inline;
 function NanDef(x, def: TFloat): TFloat; inline;
 function SwapRB(c: Integer): Integer; inline;
 function ToRGB(r, g, b: Byte): Integer; inline;
@@ -221,23 +221,23 @@ begin
   a := tmp;
 end;
 
-function iDiv0(x, y: Integer): Integer;overload;inline;
+function iDivDef(x, y, def: Integer): Integer;
 begin
-  Result := 0;
+  Result := def;
   if y <> 0 then
     Result := x div y;
 end;
 
-function iDiv0(x, y: Int64): Int64;overload;inline;
+function iDivDef(x, y, def: Int64): Int64;
 begin
-  Result := 0;
+  Result := def;
   if y <> 0 then
     Result := x div y;
 end;
 
-function Div0(x, y: TFloat): TFloat;inline;
+function DivDef(x, y, def: TFloat): TFloat;
 begin
-  Result := 0;
+  Result := def;
   if y <> 0 then
     Result := x / y;
 end;

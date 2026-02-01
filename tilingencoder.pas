@@ -270,7 +270,11 @@ type
     procedure AcquireFrameTiles;
     procedure ReleaseFrameTiles;
 
-    function PredictTile(ARadius, ADY, ADX: Integer; APredictIntra: Boolean; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
+    procedure GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
+
+    function PredictTileMotion(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
+      const ABackBuffer: TIntegerDynArray2; const ADCTs: TDCTDynArray): Cardinal;
+    function PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
       const ABackBuffer: TIntegerDynArray2; const ADCTs: TDCTDynArray): Cardinal;
 
     // processes
@@ -1167,8 +1171,16 @@ begin
   end;
 end;
 
-function TFrame.PredictTile(ARadius, ADY, ADX: Integer; APredictIntra: Boolean; ATMI: PTileMapItem;
-  const ACpnPixels: TCpnPixels; const ABackBuffer: TIntegerDynArray2; const ADCTs: TDCTDynArray): Cardinal;
+procedure TFrame.GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
+begin
+  oymn := Max(0, ADY - ARadius - 1);
+  oymx := Min(Encoder.FScreenHeight - cTileWidth, ADY + ARadius);
+  oxmn := Max(0, ADX - ARadius - 1);
+  oxmx := Min(Encoder.FScreenWidth - cTileWidth, ADX + ARadius);
+end;
+
+function TFrame.PredictTileMotion(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
+  const ABackBuffer: TIntegerDynArray2; const ADCTs: TDCTDynArray): Cardinal;
 var
   oy, ox, oymn, oymx, oxmn, oxmx, yx, bestX, bestY: Integer;
   err: Cardinal;
@@ -1177,26 +1189,17 @@ var
 begin
   Encoder.ComputeCpnPixelsPsyVisFeatures(ACpnPixels, pvsWeightedDCT, cColorCpns, CurDCT);
 
+  GetPredictExtents(ARadius, ADY, ADX, oxmn, oxmx, oymn, oymx);
+
   bestY := MaxInt;
   bestX := MaxInt;
   Result := High(Cardinal);
 
-  oymn := Max(0, ADY - ARadius - 1);
-  oymx := Min(Encoder.FScreenHeight - cTileWidth, ADY + ARadius);
-  oxmn := Max(0, ADX - ARadius - 1);
-  oxmx := Min(Encoder.FScreenWidth - cTileWidth, ADX + ARadius);
-
   for oy := oymn to oymx do
   begin
-    if APredictIntra and InRange(oy - ADY, -cTileWidth, cTileWidth - 1) then
-      Continue;
-
     yx := oy * (Encoder.FScreenWidth - cTileWidth + 1) + oxmn;
     for ox := oxmn to oxmx do
     begin
-      if APredictIntra and InRange(ox - ADX, -cTileWidth, cTileWidth - 1) then
-        Continue;
-
       PrevDCTPtr := ADCTs[yx];
 
       if QuickTestEuclideanDCTPtr_asm(CurDCT, PrevDCTPtr, Result) then
@@ -1220,6 +1223,62 @@ begin
   ATMI^.PredictedY := bestY - ADY;
   ATMI^.PredictedX := bestX - ADX;
 end;
+
+function TFrame.PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
+  const ABackBuffer: TIntegerDynArray2; const ADCTs: TDCTDynArray): Cardinal;
+var
+  oy, ox, oymn, oymx, oxmn, oxmx, yx, bestX, bestY: Integer;
+  PSNRAcc: TFloat;
+  PSNRIdx, PSNRCnt, err: Cardinal;
+  PrevDCTPtr: PDCTScalar;
+  CurDCT: TDCT;
+begin
+  Encoder.ComputeCpnPixelsPsyVisFeatures(ACpnPixels, pvsWeightedDCT, cColorCpns, CurDCT);
+
+  GetPredictExtents(ARadius, ADY, ADX, oxmn, oxmx, oymn, oymx);
+
+  bestY := MaxInt;
+  bestX := MaxInt;
+  Result := High(Cardinal);
+
+  PSNRAcc := 0;
+  PSNRIdx := 1;
+  PSNRCnt := 0;
+  for oy := oymn to oymx do
+  begin
+    if InRange(oy - ADY, -cTileWidth, cTileWidth - 1) then
+      Continue;
+
+    yx := oy * (Encoder.FScreenWidth - cTileWidth + 1) + oxmn;
+    for ox := oxmn to oxmx do
+    begin
+      if InRange(ox - ADX, -cTileWidth, cTileWidth - 1) then
+        Continue;
+
+      PrevDCTPtr := ADCTs[yx];
+
+      err := CompareEuclideanDCTPtr_asm(CurDCT, PrevDCTPtr);
+
+      if err < Result then
+      begin
+        Result := err;
+        bestY := oy;
+        bestX := ox;
+
+        PSNRAcc += EuclideanToPSNR(err) * PSNRIdx;
+        Inc(PSNRCnt, PSNRIdx);
+        Inc(PSNRIdx);
+      end;
+
+      Inc(yx);
+    end;
+  end;
+
+  ATMI^.PSNR := PSNRAcc / PSNRCnt;
+  ATMI^.PredictedY := bestY - ADY;
+  ATMI^.PredictedX := bestX - ADX;
+end;
+
 
 procedure TFrame.PredictMotion(ARadius: Integer; AOnlyBuffer, APredictIntra: Boolean; var AFrontBuffer,
   ABackBuffer: TIntegerDynArray2; var ADCTs: TDCTDynArray);
@@ -1278,7 +1337,11 @@ procedure TFrame.PredictMotion(ARadius: Integer; AOnlyBuffer, APredictIntra: Boo
       if not AOnlyBuffer then
       begin
         Encoder.ConvertToCpnPixels(FrameTile^, False, False, False, False, nil, CurCpnPixels);
-        PredictTile(ARadius, dy, dx, APredictIntra, TMI, CurCpnPixels, ABackBuffer, ADCTs);
+
+        if APredictIntra then
+          PredictTileIntra(ARadius, dy, dx, TMI, CurCpnPixels, ABackBuffer, ADCTs)
+        else
+          PredictTileMotion(ARadius, dy, dx, TMI, CurCpnPixels, ABackBuffer, ADCTs);
       end;
 
       FrameTile^.Blit(AFrontBuffer, dy, dx);
@@ -1518,7 +1581,7 @@ var
     if (Index <> PKeyFrame.StartFrame) and (ARadius >= 0) then
     begin
       Encoder.ConvertToCpnPixels(FrameTile^, False, False, FrameTile^.HMirror_Initial, FrameTile^.VMirror_Initial, nil, CurCpnPixels);
-      mpErr := PredictTile(ARadius, dy, dx, False, TMI, CurCpnPixels, ABackBuffer, ADCTs);
+      mpErr := PredictTileMotion(ARadius, dy, dx, TMI, CurCpnPixels, ABackBuffer, ADCTs);
     end;
 
     if IsZero(mpErr, cTileDCTSize) then
@@ -1686,7 +1749,7 @@ begin
   // inverse
 
   for i := 0 to High(FVecInv) do
-    FVecInv[i] := iDiv0(1 shl cVecInvWidth, i shr 2);
+    FVecInv[i] := iDivDef(1 shl cVecInvWidth, i shr 2, 0);
 
   // DCT
 
@@ -4034,7 +4097,7 @@ begin
 
   ProgressStepPosition := 0;
   if ASubStepIdx >= 0 then
-    ProgressStepPosition := iDiv0(ASubStepIdx * cProgressMul, GetStepLen);
+    ProgressStepPosition := iDivDef(ASubStepIdx * cProgressMul, GetStepLen, ProgressStepPosition);
 
   ProgressHourGlass := (AProgressStep <> esAll) and (ASubStepIdx < GetStepLen);
 
@@ -4100,30 +4163,21 @@ end;
 
 
 function TTilingEncoder.STCGREval(x: Double; Data: Pointer): Double;
-const
-  CFirstFramePSNRBonus = -10.0;
 var
   frmIdx, sy, sx, unpredictedTileCount: Integer;
-  bonus: TFloat;
   TMI: PTileMapItem;
 begin
   unpredictedTileCount := 0;
   for frmIdx := 0 to High(FFrames) do
-  begin
-    bonus := 0.0;
-    if frmIdx = FFrames[frmIdx].PKeyFrame.StartFrame then
-      bonus := CFirstFramePSNRBonus;
-
     for sy := 0 to FTileMapHeight - 1 do
       for sx := 0 to FTileMapWidth - 1 do
       begin
         TMI := @FFrames[frmIdx].TileMap[sy, sx];
 
-        TMI^.IsPredicted := TMI^.PSNR > x - bonus;
+        TMI^.IsPredicted := TMI^.PSNR > x;
 
         inc(unpredictedTileCount, Ord(not TMI^.IsPredicted));
       end;
-  end;
 
   TransferTiles(unpredictedTileCount);
 
