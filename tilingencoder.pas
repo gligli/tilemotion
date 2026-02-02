@@ -1063,18 +1063,6 @@ begin
   inherited Destroy;
 end;
 
-function CompareDSPixel(Item1,Item2,UserParameter:Pointer):Integer;
-var
-  a1: ^TDoubleDynArray absolute Item1;
-  a2: ^TDoubleDynArray absolute Item2;
-begin
-  Result := CompareValue(a1^[1], a2^[1]); // G
-  if Result = 0 then
-    Result := CompareValue(a1^[0], a2^[0]); // R
-  if Result = 0 then
-    Result := CompareValue(a1^[2], a2^[2]); // B
-end;
-
 { TFrame }
 
 constructor TFrame.Create(AParent: TTilingEncoder; AIndex: Integer);
@@ -4281,13 +4269,14 @@ begin
 
   // cluster by palette index
 
+  SetLength(YakmoWeights, DSLen);
+  SetLength(YakmoClusters, DSLen);
+
   if DSLen > FPaletteCount then
   begin
     if FPaletteCount > 1 then
     begin
       SetLength(YakmoDataset, DSLen, cTileDCTSize);
-      SetLength(YakmoWeights, DSLen);
-      SetLength(YakmoClusters, DSLen);
 
       ProcThreadPool.DoParallelLocalProc(@DoDCT, 0, High(FTiles));
 
@@ -4295,7 +4284,7 @@ begin
       try
         yakmo_set_num_threads(MaxThreadCount);
 
-        yakmo_load_train_data_weighted(Yakmo, Length(YakmoDataset), cTileDCTSize, PPDouble(@YakmoDataset[0]), PCardinal(@YakmoWeights[0]));
+        yakmo_load_train_data_weighted(Yakmo, Length(YakmoDataset), cTileDCTSize, PPDouble(@YakmoDataset[0]), @YakmoWeights[0]);
         SetLength(YakmoDataset, 0); // free up some memmory
         yakmo_train_on_data(Yakmo, @YakmoClusters[0]);
       finally
@@ -4304,14 +4293,17 @@ begin
     end
     else
     begin
-      SetLength(YakmoClusters, DSLen);
+      for di := 0 to High(YakmoClusters) do
+        YakmoWeights[di] := 1;
     end;
   end
   else
   begin
-    SetLength(YakmoClusters, DSLen);
     for di := 0 to High(YakmoClusters) do
+    begin
+      YakmoWeights[di] := 1;
       YakmoClusters[di] := di;
+    end;
   end;
 
   // sort entire palettes by use count
@@ -4323,7 +4315,7 @@ begin
     FPalettes[palIdx].PalIdx_Initial := palIdx;
 
   for di := 0 to High(YakmoClusters) do
-    Inc(FPalettes[YakmoClusters[di]].UseCount);
+    Inc(FPalettes[YakmoClusters[di]].UseCount, YakmoWeights[di]);
 
   QuickSort(FPalettes[0], 0, FPaletteCount - 1, SizeOf(FPalettes[0]), @ComparePaletteUseCount, Self);
   for palIdx := 0 to FPaletteCount - 1 do
@@ -4533,6 +4525,7 @@ var
   rr, gg, bb: Byte;
   Tile: PTile;
   Dataset, Centroids: TDoubleDynArray2;
+  Weights: TCardinalDynArray;
   Clusters: TIntegerDynArray;
   Yakmo: PYakmo;
   CMPal: TCountIndexList;
@@ -4552,6 +4545,7 @@ begin
     Exit;
 
   SetLength(Dataset, DSLen, cFeatureCount);
+  SetLength(Weights, DSLen);
   SetLength(Clusters, DSLen);
   SetLength(Centroids, AColorCount, cFeatureCount);
 
@@ -4572,12 +4566,11 @@ begin
           Dataset[di, 0] := rr;
           Dataset[di, 1] := gg;
           Dataset[di, 2] := bb;
+          Weights[di] := Tile^.UseCount;
           Inc(di);
         end;
   end;
   Assert(di = Length(Dataset));
-
-  QuickSort(Dataset[0], 0, di - 1, SizeOf(Pointer), @CompareDSPixel);
 
   // use KMeans to quantize to AColorCount elements
 
@@ -4585,8 +4578,9 @@ begin
   begin
     Yakmo := yakmo_create(AColorCount, 1, cYakmoMaxIterations, 1, 0, 0, 0);
     try
-      yakmo_load_train_data(Yakmo, DSLen, cFeatureCount, PPDouble(@Dataset[0]));
-      SetLength(Dataset, 0); // free up some memmory
+      yakmo_load_train_data_weighted(Yakmo, DSLen, cFeatureCount, PPDouble(@Dataset[0]), @Weights[0]);
+      SetLength(Dataset, 0); // free up some memory
+      SetLength(Weights, 0); // free up some memory
       yakmo_train_on_data(Yakmo, @Clusters[0]);
       yakmo_get_centroids(Yakmo, PPDouble(@Centroids[0]));
     finally
