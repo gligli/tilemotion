@@ -175,10 +175,6 @@ function FFMPEG_Open(AFileName: String; AScaling: Double; ASilent: Boolean): TFF
 procedure FFMPEG_Close(AFFMPEG: TFFMPEG);
 procedure FFMPEG_LoadFrames(AFFMPEG: TFFMPEG; AStartFrame, AFrameCount: Integer; AFrameCallback: TFFMPEGFrameCallback; AUserParameter: Pointer = nil);
 
-function ann_kdtree_create(pa: PPDouble; n, dd, bs: Integer; split: TANNsplitRule): PANNkdtree; external 'ANN.dll';
-procedure ann_kdtree_destroy(akd: PANNkdtree); external 'ANN.dll';
-function ann_kdtree_search(akd: PANNkdtree; q: PDouble; eps: Double; err: PDouble): Integer; external 'ANN.dll';
-
 function ann_kdtree_short_create(pa: PPSmallint; n, dd, bs: Integer; split: TANNsplitRule): PANNkdtree; external 'ANN_short.dll' name 'ann_kdtree_create';
 procedure ann_kdtree_short_destroy(akd: PANNkdtree); external 'ANN_short.dll' name 'ann_kdtree_destroy';
 function ann_kdtree_short_search(akd: PANNkdtree; q: PSmallInt; eps: Cardinal; err: PCardinal): Integer; external 'ANN_short.dll' name 'ann_kdtree_search';
