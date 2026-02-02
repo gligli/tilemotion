@@ -38,7 +38,7 @@
           </Target>
           <SearchPaths>
             <IncludeFiles Value="$(ProjOutDir)"/>
-            <OtherUnitFiles Value="ffmpeg-5.1-binding\headers;ffmpeg-5.1-binding\examples;LZMA;LMath;OpenCL"/>
+            <OtherUnitFiles Value="ffmpeg-7.1.1-binding\headers;ffmpeg-7.1.1-binding\examples;LZMA;LMath"/>
             <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)-$(BuildMode)"/>
           </SearchPaths>
           <Parsing>
@@ -81,7 +81,7 @@
           </Target>
           <SearchPaths>
             <IncludeFiles Value="$(ProjOutDir)"/>
-            <OtherUnitFiles Value="ffmpeg-5.1-binding\headers;ffmpeg-5.1-binding\examples;LZMA;LMath;OpenCL"/>
+            <OtherUnitFiles Value="ffmpeg-7.1.1-binding\headers;ffmpeg-7.1.1-binding\examples;LZMA;LMath"/>
             <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)-$(BuildMode)"/>
           </SearchPaths>
           <Parsing>
@@ -138,7 +138,7 @@
           </Target>
           <SearchPaths>
             <IncludeFiles Value="$(ProjOutDir)"/>
-            <OtherUnitFiles Value="ffmpeg-5.1-binding\headers;ffmpeg-5.1-binding\examples;LZMA;LMath;OpenCL"/>
+            <OtherUnitFiles Value="ffmpeg-7.1.1-binding\headers;ffmpeg-7.1.1-binding\examples;LZMA;LMath"/>
             <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)-$(BuildMode)"/>
           </SearchPaths>
           <Parsing>
@@ -250,7 +250,7 @@
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
-      <OtherUnitFiles Value="ffmpeg-5.1-binding\headers;ffmpeg-5.1-binding\examples;LZMA;LMath;OpenCL"/>
+      <OtherUnitFiles Value="ffmpeg-7.1.1-binding\headers;ffmpeg-7.1.1-binding\examples;LZMA;LMath"/>
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)-$(BuildMode)"/>
     </SearchPaths>
     <Parsing>

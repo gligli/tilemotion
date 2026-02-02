@@ -819,7 +819,7 @@ begin
       else if ret < 0 then
         raise EFFMPEGError.Create('Error receiving frame');
 
-      frmIdx := (FFFrame^.best_effort_timestamp - AFFMPEG.StartTimeStamp) div FFFrame^.pkt_duration;
+      frmIdx := (FFFrame^.best_effort_timestamp - AFFMPEG.StartTimeStamp) div FFFrame^.duration;
 
       // seeking can be inaccurate, so ensure we have the frame we want
       if (frmIdx >= AStartFrame + doneFrameCount) or (frmIdx < 0) then
