@@ -20,7 +20,7 @@ type
   TClusteringMethod = (cmBIRCH, cmBICO, cmTransferTiles);
 
 const
-  cEncoderStepLen: array[TEncoderStep] of Integer = (0, 5, 1, 2, 3, 2, 2, 3, 1);
+  cEncoderStepLen: array[TEncoderStep] of Integer = (0, 5, 1, 3, 3, 2, 2, 3, 1);
 
 type
   // GliGli's TileMotion header structs and commands
@@ -1948,6 +1948,11 @@ begin
 end;
 
 procedure TTilingEncoder.Reduce;
+const
+  CCircularRefCountThres = 100;
+var
+  frmIdx, predFrmIdx, firstKFFrmIdx, predSY, predSX, sy, sx, predRefCount: Integer;
+  TMI: PTileMapItem;
 begin
   if Length(FFrames) = 0 then
     Exit;
@@ -1961,9 +1966,42 @@ begin
 
   ProgressRedraw(1, 'SolveTileCount');
 
+  for frmIdx := 0 to High(FFrames) do
+  begin
+    firstKFFrmIdx := FFrames[frmIdx].PKeyFrame.StartFrame;
+
+    for sy := 0 to FTileMapHeight - 1 do
+      for sx := 0 to FTileMapWidth - 1 do
+      begin
+        TMI := @FFrames[frmIdx].TileMap[sy, sx];
+
+        predRefCount := 0;
+        predSY := sy;
+        predSX := sx;
+        predFrmIdx := frmIdx;
+        while TMI^.IsPredicted do
+        begin
+          Inc(predRefCount, Ord(predFrmIdx = firstKFFrmIdx));
+          if predRefCount >= CCircularRefCountThres then
+            Break;
+
+          Inc(predSY, SarShortint(TMI^.PredictedY, cTileWidthBits));
+          Inc(predSX, SarShortint(TMI^.PredictedX, cTileWidthBits));
+          predFrmIdx := Max(firstKFFrmIdx, predFrmIdx - 1);
+
+          TMI := @FFrames[predFrmIdx].TileMap[predSY, predSX];
+        end;
+
+        if not TMI^.IsPredicted then
+          Inc(FTiles[TMI^.TileIdx]^.UseCount);
+      end;
+  end;
+
+  ProgressRedraw(2, 'CountPredictionsTileUsage');
+
   ReindexTiles(True);
 
-  ProgressRedraw(2, 'ReindexTiles');
+  ProgressRedraw(3, 'ReindexTiles');
 end;
 
 procedure TTilingEncoder.Reconstruct;
@@ -2019,7 +2057,6 @@ begin
   SetLength(FrameBuffer[False], FScreenHeight, FScreenWidth);
   SetLength(FrameBuffer[True], FScreenHeight, FScreenWidth);
   SetLength(DCTs, (FScreenHeight - cTileWidth + 1) * (FScreenWidth - cTileWidth + 1));
-
 
   for kfIdx := 0 to High(FKeyFrames) do
   begin
@@ -4525,7 +4562,6 @@ var
   rr, gg, bb: Byte;
   Tile: PTile;
   Dataset, Centroids: TDoubleDynArray2;
-  Weights: TCardinalDynArray;
   Clusters: TIntegerDynArray;
   Yakmo: PYakmo;
   CMPal: TCountIndexList;
@@ -4545,7 +4581,6 @@ begin
     Exit;
 
   SetLength(Dataset, DSLen, cFeatureCount);
-  SetLength(Weights, DSLen);
   SetLength(Clusters, DSLen);
   SetLength(Centroids, AColorCount, cFeatureCount);
 
@@ -4563,10 +4598,9 @@ begin
         for tx := 0 to cTileWidth - 1 do
         begin
           FromRGB(Tile^.RGBPixels[ty, tx], rr, gg, bb);
-          Dataset[di, 0] := rr;
-          Dataset[di, 1] := gg;
-          Dataset[di, 2] := bb;
-          Weights[di] := Tile^.UseCount;
+          Dataset[di, 0] := GammaCorrect(0, rr);
+          Dataset[di, 1] := GammaCorrect(0, gg);
+          Dataset[di, 2] := GammaCorrect(0, bb);
           Inc(di);
         end;
   end;
@@ -4578,9 +4612,8 @@ begin
   begin
     Yakmo := yakmo_create(AColorCount, 1, cYakmoMaxIterations, 1, 0, 0, 0);
     try
-      yakmo_load_train_data_weighted(Yakmo, DSLen, cFeatureCount, PPDouble(@Dataset[0]), @Weights[0]);
+      yakmo_load_train_data(Yakmo, DSLen, cFeatureCount, PPDouble(@Dataset[0]));
       SetLength(Dataset, 0); // free up some memory
-      SetLength(Weights, 0); // free up some memory
       yakmo_train_on_data(Yakmo, @Clusters[0]);
       yakmo_get_centroids(Yakmo, PPDouble(@Centroids[0]));
     finally
@@ -4608,9 +4641,9 @@ begin
 
     if not IsNan(Centroids[i, 0]) and not IsNan(Centroids[i, 1]) and not IsNan(Centroids[i, 2]) then
     begin
-      CMItem^.R := Posterize(EnsureRange(Round(Centroids[i, 0]), 0, 255), APosterize);
-      CMItem^.G := Posterize(EnsureRange(Round(Centroids[i, 1]), 0, 255), APosterize);
-      CMItem^.B := Posterize(EnsureRange(Round(Centroids[i, 2]), 0, 255), APosterize);
+      CMItem^.R := Posterize(GammaUncorrect(0, Centroids[i, 0]), APosterize);
+      CMItem^.G := Posterize(GammaUncorrect(0, Centroids[i, 1]), APosterize);
+      CMItem^.B := Posterize(GammaUncorrect(0, Centroids[i, 2]), APosterize);
     end;
 
     CMItem^.Count := 0;
@@ -5676,7 +5709,7 @@ begin
   FormatSettings.DecimalSeparator := '.';
   InitializeCriticalSection(FCS);
 
-  FGamma[0] := 2.0;
+  FGamma[0] := 1.0 / 1.8;
   FGamma[1] := 0.6;
 
   FInputBitmap := TBitmap.Create;
