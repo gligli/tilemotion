@@ -3551,6 +3551,9 @@ begin
       FreeAndNil(FKeyFrames[i]);
   SetLength(FKeyFrames, 0);
 
+  SetLength(FRenderBackBuffer, 0);
+  SetLength(FRenderFrontBuffer, 0);
+
   TTile.Array1DDispose(FTiles);
 end;
 
@@ -3558,7 +3561,7 @@ procedure TTilingEncoder.Render;
 
   procedure DrawTile(var ABuffer: TIntegerDynArray2; const APal: TIntegerDynArray; ATilePtr: PTile; ASY, ASX: Integer; AHmirror, AVmirror, AForceActive: Boolean); inline;
   var
-    col, r, g, b, tx, ty, txm, tym: Integer;
+    col, tx, ty, txm, tym: Integer;
     psl: PInteger;
   begin
     for ty := 0 to cTileWidth - 1 do
@@ -3586,15 +3589,6 @@ procedure TTilingEncoder.Render;
             if ATilePtr^.HasRGBPixels then
               col := ATilePtr^.RGBPixels[tym, txm];
           end;
-        end;
-
-        if FRenderUseGamma then
-        begin
-          FromRGB(col, r, g, b);
-          r := round(GammaCorrect(1, r) * 255.0);
-          g := round(GammaCorrect(1, g) * 255.0);
-          b := round(GammaCorrect(1, b) * 255.0);
-          col := ToRGB(r, g, b);
         end;
 
         psl^ := col;
@@ -3627,7 +3621,8 @@ procedure TTilingEncoder.Render;
 
   procedure BlitBuffer(const ABuffer: TIntegerDynArray2; ABitmap: PInteger; ASY, ASX, ABitmapStride: Integer); inline;
   var
-    by, bx: Integer;
+    by, bx, col: Integer;
+    r, g, b: Byte;
     pi, po: PInteger;
   begin
     for by := 0 to High(ABuffer) do
@@ -3635,11 +3630,31 @@ procedure TTilingEncoder.Render;
       pi := @ABuffer[by, 0];
       po := @ABitmap[((ASY shl cTileWidthBits) + by) * ABitmapStride + (ASX shl cTileWidthBits)];
 
-      for bx := 0 to High(ABuffer[0]) do
+      if FRenderUseGamma then
       begin
-        po^ := SwapRB(pi^);
-        Inc(pi);
-        Inc(po);
+        for bx := 0 to High(ABuffer[0]) do
+        begin
+          col := pi^;
+
+          FromRGB(col, r, g, b);
+          r := round(GammaCorrect(1, r) * 255.0);
+          g := round(GammaCorrect(1, g) * 255.0);
+          b := round(GammaCorrect(1, b) * 255.0);
+          col := ToRGB(b, g, r);
+
+          po^ := col;
+          Inc(pi);
+          Inc(po);
+        end;
+      end
+      else
+      begin
+        for bx := 0 to High(ABuffer[0]) do
+        begin
+          po^ := SwapRB(pi^);
+          Inc(pi);
+          Inc(po);
+        end;
       end;
     end;
   end;
