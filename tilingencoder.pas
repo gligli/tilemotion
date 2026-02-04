@@ -4,6 +4,7 @@ unit tilingencoder;
 {$ModeSwitch advancedrecords}
 {$TYPEDADDRESS ON}
 {$CODEALIGN LOCALMIN=16}
+{$PACKSET 1}
 
 {$define ASM_DBMP}
 
@@ -175,16 +176,22 @@ type
   { TTileMapItem }
 
   TTileMapItem = packed record
-    TileIdx: Integer;
-    PalIdx: Integer;
-    PSNR: TFloat;
-    PredictedX, PredictedY: ShortInt;
-    Flags: set of (tmfHMirror, tmfVMirror, tmfPredicted);
+    TileIdx: Integer; // 4
+    PalIdx: Integer; // 4
+    PSNR: TFloat; // 4
+    PredictedX, PredictedY: ShortInt; // 2 * 1
+    Flags: set of (tmfHMirror, tmfVMirror, tmfPredicted); // 1
+    Dummy: Byte; // for bit-aligned size (16)
   end;
+
+{$if SizeOf(TTileMapItem) <> 16}
+  {$error misaligned SizeOf(TTileMapItem) !}
+{$endif}
 
   PTileMapItem = ^TTileMapItem;
 
   TTileMapItems = array of TTileMapItem;
+  TTileMapItems2 = array of TTileMapItems;
 
   { TTileMapItemHelper }
 
@@ -247,7 +254,7 @@ type
     PKeyFrame: TKeyFrame;
     Index: Integer;
 
-    TileMap: array of array of TTileMapItem;
+    TileMap: TTileMapItems2;
 
     InterframeCorrelationData: TFloatDynArray;
     InterframeCorrelation: TFloat; // with previous frame
@@ -5477,7 +5484,7 @@ var
     tIdx, frmIdx, sy, sx, kfIdx: Integer;
     perKFPos: TIntegerDynArray;
     globalPos: Integer;
-    tmi: PTileMapItem;
+    TMI: PTileMapItem;
     tile: PTile;
   begin
     // init
@@ -5491,9 +5498,9 @@ var
       for sy := 0 to FTileMapHeight - 1 do
         for sx := 0 to FTileMapWidth - 1 do
         begin
-          tmi := @FFrames[frmIdx].TileMap[sy, sx];
+          TMI := @FFrames[frmIdx].TileMap[sy, sx];
 
-          tIdx := tmi^.TileIdx;
+          tIdx := TMI^.TileIdx;
           if tIdx < 0 then
             Continue;
 
@@ -5619,7 +5626,7 @@ begin
 
       WriteTiles(perKfTiles[kfIdx], Length(globalTiles));
 
-      // palletes must always be written after at least one tileset
+      // paletes must always be written after at least one tileset
       if kfIdx = 0 then
         WritePalettes;
 
