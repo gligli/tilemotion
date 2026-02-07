@@ -25,6 +25,8 @@ type
   PPFloat = ^PFloat;
   PFloatDynArray = ^TFloatDynArray;
   PFloatDynArray2 = ^TFloatDynArray2;
+  PDoubleDynArray = ^TDoubleDynArray;
+  PDoubleDynArray2 = ^TDoubleDynArray2;
   PPSingle = ^PSingle;
   TSingleDynArray2 = array of TSingleDynArray;
 
