@@ -2132,7 +2132,10 @@ begin
 
   ProgressRedraw(0, '', esReduce);
 
-  SolveTileCount(FGlobalTilingTileCount div 2, True); // allocate theoretically half the tiles for key frames first frames
+  if FGlobalTilingUseTargetPSNR then
+    GRTileCountFromPSNR(FGlobalTilingTargetPSNR, @FGlobalTilingUseTargetPSNR)
+  else
+    SolveTileCount(FGlobalTilingTileCount div 2, True); // allocate theoretically half the tiles for key frames first frames
 
   ProgressRedraw(1, 'KFSolveTileCount');
 
@@ -2148,7 +2151,10 @@ begin
 
   ProgressRedraw(2, 'KFIntraReduce');
 
-  SolveTileCount(FGlobalTilingTileCount, False);
+  if FGlobalTilingUseTargetPSNR then
+    GRTileCountFromPSNR(FGlobalTilingTargetPSNR, nil)
+  else
+    SolveTileCount(FGlobalTilingTileCount, False);
 
   ProgressRedraw(3, 'SolveTileCount');
 
