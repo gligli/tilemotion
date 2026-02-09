@@ -21,7 +21,7 @@ type
   TClusteringMethod = (cmBIRCH, cmBICO, cmTransferTiles);
 
 const
-  cEncoderStepLen: array[TEncoderStep] of Integer = (-1, 5, 1, 4, 4, 2, 2, 3, 1);
+  cEncoderStepLen: array[TEncoderStep] of Integer = (-1, 5, 1, 5, 4, 2, 2, 3, 1);
 
 type
   // GliGli's TileMotion header structs and commands
@@ -1537,6 +1537,7 @@ var
 
 var
   DSLen: Integer;
+  psnr: Double;
 begin
   AcquireFrameTiles;
   try
@@ -1551,19 +1552,19 @@ begin
     begin
       // solve tile count for PSNR
 
-      WriteLn('KF: ', Index:8, ' Target PSNR-HVS: ', ATargetPSNR:15:6, ' (by tile)');
+      psnr := ATargetPSNR;
       GoldenRatioSearch(@GRPSNRFromTileCount, 2, Encoder.FTileMapSize, ATargetPSNR, 0.5, 0.1, @YakmoDataset);
     end
     else if IsNan(ATargetPSNR) and (ATargetTileCount >= 0) then
     begin
       // reduce to TileCount tiles
 
-      WriteLn('KF: ', Index:8, ' Target TileCount: ', ATargetTileCount:8);
-      GRPSNRFromTileCount(ATargetTileCount, @YakmoDataset);
+      psnr := GRPSNRFromTileCount(ATargetTileCount, @YakmoDataset);
     end
     else
       Assert(False);
 
+    WriteLn('KF: ', Index:8, ' TileCount: ', Length(IntraReducedTiles):6, ' PSNR-HVS: ', psnr:9:6, ' (by tile)');
   finally
     ReleaseFrameTiles;
   end;
@@ -2133,6 +2134,8 @@ begin
 
   SolveTileCount(FGlobalTilingTileCount div 2, True); // allocate theoretically half the tiles for key frames first frames
 
+  ProgressRedraw(1, 'KFSolveTileCount');
+
   for kfIdx := 0 to High(FKeyFrames) do
   begin
     KF := FKeyFrames[kfIdx];
@@ -2143,11 +2146,11 @@ begin
     Write(kfIdx + 1:8, ' / ', Length(FKeyFrames):8, #13);
   end;
 
-  ProgressRedraw(1, 'KFIntraReduce');
+  ProgressRedraw(2, 'KFIntraReduce');
 
   SolveTileCount(FGlobalTilingTileCount, False);
 
-  ProgressRedraw(2, 'SolveTileCount');
+  ProgressRedraw(3, 'SolveTileCount');
 
   for frmIdx := 0 to High(FFrames) do
   begin
@@ -2180,11 +2183,11 @@ begin
       end;
   end;
 
-  ProgressRedraw(3, 'CountPredictionsTileUsage');
+  ProgressRedraw(4, 'CountPredictionsTileUsage');
 
   ReindexTiles(True);
 
-  ProgressRedraw(4, 'ReindexTiles');
+  ProgressRedraw(5, 'ReindexTiles');
 end;
 
 procedure TTilingEncoder.Reconstruct;
