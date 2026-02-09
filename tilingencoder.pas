@@ -473,7 +473,7 @@ type
 
     function GRTileCountFromPSNR(x: Double; Data: Pointer): Double;
     function SolveTileCount(ATileCount: Integer; AKFFirstFrameOnly: Boolean): Double;
-    procedure TransferTiles(ATileCount: Integer);
+    procedure TransferTiles(ATileCount: Integer; AKFFirstFrameOnly: Boolean);
 
     procedure DoPalettization;
     function MinimizeOP(const x: TDoubleDynArray; data: Pointer): Double;
@@ -4383,7 +4383,6 @@ function TTilingEncoder.GRTileCountFromPSNR(x: Double; Data: Pointer): Double;
 var
   KFFirstFrameOnly: PBoolean absolute Data;
   frmIdx, sy, sx, unpredictedTileCount: Integer;
-  thres: Double;
   Frame: TFrame;
   TMI: PTileMapItem;
 begin
@@ -4392,9 +4391,8 @@ begin
   begin
     Frame := FFrames[frmIdx];
 
-    thres := x;
     if Assigned(KFFirstFrameOnly) and KFFirstFrameOnly^ and (frmIdx <> Frame.PKeyFrame.StartFrame) then
-      thres := -Infinity;
+      Continue;
 
     if Assigned(Frame.IntraReducedTiles) then
     begin
@@ -4408,14 +4406,14 @@ begin
           TMI := @Frame.TileMap[sy, sx];
 
           // trim bad (unfit) PSNRs
-          TMI^.IsPredicted := TMI^.PSNR > thres;
+          TMI^.IsPredicted := TMI^.PSNR > x;
 
           inc(unpredictedTileCount, Ord(not TMI^.IsPredicted));
         end;
     end;
   end;
 
-  TransferTiles(unpredictedTileCount);
+  TransferTiles(unpredictedTileCount, Assigned(KFFirstFrameOnly) and KFFirstFrameOnly^);
 
   MakeTilesUnique(True);
 
@@ -4427,7 +4425,7 @@ begin
   Result := GoldenRatioSearch(@GRTileCountFromPSNR, 0.0, cPsnrMaxValue, ATileCount, cPsyVEpsilon, 0.5, @AKFFirstFrameOnly);
 end;
 
-procedure TTilingEncoder.TransferTiles(ATileCount: Integer);
+procedure TTilingEncoder.TransferTiles(ATileCount: Integer; AKFFirstFrameOnly: Boolean);
 var
   doneFrameCount: Integer;
   newTIdx: Integer;
@@ -4486,12 +4484,23 @@ var
             end;
           end;
 
-        Write(InterLockedIncrement(doneFrameCount):8, ' / ', Length(FFrames):8, #13);
+        if not AKFFirstFrameOnly then
+          Write(InterLockedIncrement(doneFrameCount):8, ' / ', Length(FFrames):8, #13);
 
       finally
         Frame.ReleaseFrameTiles;
       end;
     end;
+  end;
+
+  procedure DoTransferKFFF(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  begin
+    if not InRange(AIndex, 0, High(FKeyFrames)) then
+      Exit;
+
+    DoTransfer(FKeyFrames[AIndex].StartFrame, nil, nil);
+
+    Write(InterLockedIncrement(doneFrameCount):8, ' / ', Length(FKeyFrames):8, #13);
   end;
 
 begin
@@ -4500,7 +4509,11 @@ begin
 
   doneFrameCount := 0;
   newTIdx := 0;
-  ProcThreadPool.DoParallelLocalProc(@DoTransfer, 0, High(FFrames));
+
+  if AKFFirstFrameOnly then
+    ProcThreadPool.DoParallelLocalProc(@DoTransferKFFF, 0, High(FKeyFrames))
+  else
+    ProcThreadPool.DoParallelLocalProc(@DoTransfer, 0, High(FFrames));
 
   Assert(newTIdx = ATileCount);
 end;
