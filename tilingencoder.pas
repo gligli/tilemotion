@@ -1634,6 +1634,7 @@ procedure TFrame.Reconstruct(ARadius: Integer; var AFrontBuffer, ABackBuffer: TI
   var ADCTs: TDCTDynArray);
 const
   cEpuKnnK = 64;
+  cEuclideanErrorEpsilon = 1024;
 var
   DS: PTilingDataset;
 
@@ -1701,7 +1702,7 @@ var
       mpErr := PredictTileMotion(ARadius, dy, dx, TMI, CurCpnPixels, ABackBuffer, ADCTs);
     end;
 
-    if IsZero(mpErr, cTileDCTSize) then
+    if IsZero(mpErr, cEuclideanErrorEpsilon) then
     begin
       // motion prediction has priority in case perfect (less bitrate)
 
@@ -1781,7 +1782,7 @@ var
 
     // devise which is best
 
-    case CompareValue(knnErr, mpErr, cTileDCTSize) of
+    case CompareValue(knnErr, mpErr, cEuclideanErrorEpsilon) of
       LessThanValue:
       begin
         // KNN is best
@@ -1813,6 +1814,8 @@ var
 
         TMI^.PSNR := EuclideanToPSNR(mpErr);
         TMI^.IsPredicted := True;
+        TMI^.PalIdx := -1;
+        TMI^.TileIdx := -1;
 
         // draw fb (motion predicted tile)
         for ty := 0 to cTileWidth - 1 do
