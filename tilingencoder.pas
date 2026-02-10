@@ -1709,7 +1709,7 @@ var
       TMI^.TileIdx := -1;
       knnErr := High(Cardinal);
     end
-    else if not Encoder.FrameTilingExtendedPaletteUsage then
+    else if not Encoder.FrameTilingExtendedPaletteUsage or (DS^.KNNSize < cEpuKnnK) then
     begin
       // use the KNN dataset to predict a tile with its associated palette
 
