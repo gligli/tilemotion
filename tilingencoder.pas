@@ -282,7 +282,6 @@ type
 
     procedure GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
 
-    function GRPSNRFromTileCount(x: Double; Data: Pointer): Double;
     function PredictTileMotion(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
       const ABackBuffer: TIntegerDynArray2; const ADCTs: TDCTDynArray): Cardinal;
     function PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
@@ -291,7 +290,7 @@ type
     // processes
 
     procedure LoadFromImage(AImageWidth, AImageHeight: Integer; AImage: PInteger);
-    procedure IntraReduce(ATargetPSNR: Double = NaN; ATargetTileCount: Integer = -1);
+    procedure IntraReduce(ATargetTileCount: Integer);
     procedure PredictMotion(ARadius: Integer; AOnlyBuffer, APredictIntra: Boolean; var AFrontBuffer, ABackBuffer: TIntegerDynArray2;
       var ADCTs: TDCTDynArray);
     procedure Reconstruct(ARadius: Integer; var AFrontBuffer, ABackBuffer: TIntegerDynArray2;
@@ -1198,93 +1197,6 @@ begin
   oxmx := Min(Encoder.FScreenWidth - cTileWidth, ADX + ARadius);
 end;
 
-function TFrame.GRPSNRFromTileCount(x: Double; Data: Pointer): Double;
-var
-  nbTiles, DSLen, sy, sx, iDS, iCluster, iDCT: Integer;
-  dist, psnr: Double;
-
-  Tile: PTile;
-  TMI: PTileMapItem;
-  Yakmo: PYakmo;
-
-  YakmoDataset: TDoubleDynArray2;
-  YakmoCentroids: TDoubleDynArray2;
-  YakmoClusters: TIntegerDynArray;
-  CentroidPSNRAccs: TDoubleDynArray;
-begin
-  YakmoDataset := PDoubleDynArray2(Data)^;
-  DSLen := Length(YakmoDataset);
-  nbTiles := min(round(x), DSLen);
-  SetLength(YakmoClusters, DSLen);
-  SetLength(YakmoCentroids, nbTiles, cTileDCTSize);
-
-  // use Yakmo KMeans to reduce tile count
-
-  Yakmo := yakmo_create(nbTiles, 1, cYakmoMaxIterations, 1, 0, 0, 0);
-  try
-    yakmo_set_num_threads(Encoder.MaxThreadCount);
-
-    yakmo_load_train_data(Yakmo, Length(YakmoDataset), cTileDCTSize, PPDouble(@YakmoDataset[0]));
-    yakmo_train_on_data(Yakmo, @YakmoClusters[0]);
-    yakmo_get_centroids(Yakmo, PPDouble(@YakmoCentroids[0]));
-  finally
-    yakmo_destroy(Yakmo);
-  end;
-
-  // store centroid tiles
-
-  if Assigned(IntraReducedTiles) then
-    TTile.Array1DDispose(IntraReducedTiles);
-  IntraReducedTiles := TTile.Array1DNew(nbTiles, True, False);
-  SetLength(IntraReducedTileIndexes, Encoder.FTileMapHeight, Encoder.FTileMapWidth);
-
-  for iCluster := 0 to High(YakmoCentroids) do
-  begin
-    Tile := IntraReducedTiles[iCluster];
-
-    Tile^.Active := True;
-    for iDS := 0 to High(YakmoClusters) do
-      if YakmoClusters[iDS] = iCluster then
-        Inc(Tile^.UseCount);
-
-    for iDCT := 0 to cTileDCTSize - 1 do
-      YakmoCentroids[iCluster, iDCT] := NanDef(YakmoCentroids[iCluster, iDCT], 0.0);
-
-    Encoder.ComputeInvTilePsyVisFeatures(@YakmoCentroids[iCluster, 0], pvsWeightedDCT, False, cColorCpns, Tile^);
-  end;
-
-  // compute transform resulting PSNR
-
-  SetLength(CentroidPSNRAccs, Length(YakmoCentroids));
-
-  Result := 0.0;
-  iDS := 0;
-  for sy := 0 to Encoder.FTileMapHeight - 1 do
-    for sx := 0 to Encoder.FTileMapWidth - 1 do
-    begin
-      TMI := @TileMap[sy, sx];
-      iCluster := YakmoClusters[iDS];
-
-      dist := CompareEuclidean(@YakmoDataset[iDS, 0], @YakmoCentroids[iCluster, 0], cTileDCTSize);
-      psnr := EuclideanToPSNR(dist);
-
-      IntraReducedTileIndexes[sy, sx] := iCluster;
-      CentroidPSNRAccs[iCluster] += psnr;
-
-      TMI^.IsPredicted := False;
-      TMI^.PSNR := psnr;
-
-      Inc(iDS);
-    end;
-
-  // compute average PSNR by tile
-
-  Result := 0.0;
-  for iCluster := 0 to High(YakmoCentroids) do
-    Result += DivDef(CentroidPSNRAccs[iCluster], IntraReducedTiles[iCluster]^.UseCount, 0.0);
-  Result /= Length(YakmoCentroids);
-end;
-
 function TFrame.PredictTileMotion(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
   const ABackBuffer: TIntegerDynArray2; const ADCTs: TDCTDynArray): Cardinal;
 var
@@ -1518,7 +1430,7 @@ begin
   TThread.ExecuteInThread(@DoAsyncLoadFromImage, Self);
 end;
 
-procedure TFrame.IntraReduce(ATargetPSNR: Double; ATargetTileCount: Integer);
+procedure TFrame.IntraReduce(ATargetTileCount: Integer);
 var
   YakmoDataset: TDoubleDynArray2;
 
@@ -1536,8 +1448,14 @@ var
   end;
 
 var
-  DSLen: Integer;
-  psnr: Double;
+  nbTiles, DSLen, sy, sx, iDS, iCluster, iDCT: Integer;
+
+  Tile: PTile;
+  TMI: PTileMapItem;
+  Yakmo: PYakmo;
+
+  YakmoCentroids: TDoubleDynArray2;
+  YakmoClusters: TIntegerDynArray;
 begin
   AcquireFrameTiles;
   try
@@ -1548,23 +1466,63 @@ begin
     SetLength(YakmoDataset, DSLen, cTileDCTSize);
     ProcThreadPool.DoParallelLocalProc(@DoDCT, 0, DSLen - 1);
 
-    if not IsNan(ATargetPSNR) and (ATargetTileCount < 0) then
+    // reduce to TileCount tiles (use Yakmo KMeans)
+
+    DSLen := Length(YakmoDataset);
+    nbTiles := min(ATargetTileCount, DSLen);
+    SetLength(YakmoClusters, DSLen);
+    SetLength(YakmoCentroids, nbTiles, cTileDCTSize);
+
+    Yakmo := yakmo_create(nbTiles, 1, cYakmoMaxIterations, 1, 0, 0, 0);
+    try
+      yakmo_set_num_threads(Encoder.MaxThreadCount);
+
+      yakmo_load_train_data(Yakmo, Length(YakmoDataset), cTileDCTSize, PPDouble(@YakmoDataset[0]));
+      yakmo_train_on_data(Yakmo, @YakmoClusters[0]);
+      yakmo_get_centroids(Yakmo, PPDouble(@YakmoCentroids[0]));
+    finally
+      yakmo_destroy(Yakmo);
+    end;
+
+    // store centroid tiles
+
+    if Assigned(IntraReducedTiles) then
+      TTile.Array1DDispose(IntraReducedTiles);
+    IntraReducedTiles := TTile.Array1DNew(nbTiles, True, False);
+    SetLength(IntraReducedTileIndexes, Encoder.FTileMapHeight, Encoder.FTileMapWidth);
+
+    for iCluster := 0 to High(YakmoCentroids) do
     begin
-      // solve tile count for PSNR
+      Tile := IntraReducedTiles[iCluster];
 
-      psnr := ATargetPSNR;
-      GoldenRatioSearch(@GRPSNRFromTileCount, 2, Encoder.FTileMapSize, ATargetPSNR, 0.5, 0.1, @YakmoDataset);
-    end
-    else if IsNan(ATargetPSNR) and (ATargetTileCount >= 0) then
-    begin
-      // reduce to TileCount tiles
+      Tile^.Active := True;
+      for iDS := 0 to High(YakmoClusters) do
+        if YakmoClusters[iDS] = iCluster then
+          Inc(Tile^.UseCount);
 
-      psnr := GRPSNRFromTileCount(ATargetTileCount, @YakmoDataset);
-    end
-    else
-      Assert(False);
+      for iDCT := 0 to cTileDCTSize - 1 do
+        YakmoCentroids[iCluster, iDCT] := NanDef(YakmoCentroids[iCluster, iDCT], 0.0);
 
-    WriteLn('KF: ', Index:8, ' TileCount: ', Length(IntraReducedTiles):6, ' PSNR-HVS: ', psnr:9:6, ' (by tile)');
+      Encoder.ComputeInvTilePsyVisFeatures(@YakmoCentroids[iCluster, 0], pvsWeightedDCT, False, cColorCpns, Tile^);
+    end;
+
+    // update tilemap / tile indexes
+
+    iDS := 0;
+    for sy := 0 to Encoder.FTileMapHeight - 1 do
+      for sx := 0 to Encoder.FTileMapWidth - 1 do
+      begin
+        TMI := @TileMap[sy, sx];
+        iCluster := YakmoClusters[iDS];
+
+        IntraReducedTileIndexes[sy, sx] := iCluster;
+
+        TMI^.IsPredicted := False;
+
+        Inc(iDS);
+      end;
+
+    WriteLn('KF: ', Index:8, ' TileCount: ', Length(IntraReducedTiles):8);
   finally
     ReleaseFrameTiles;
   end;
@@ -2133,9 +2091,18 @@ begin
   ProgressRedraw(0, '', esReduce);
 
   if FGlobalTilingUseTargetPSNR then
+  begin
     GRTileCountFromPSNR(FGlobalTilingTargetPSNR, @FGlobalTilingUseTargetPSNR)
+  end
   else
-    SolveTileCount(FGlobalTilingTileCount div 2, True); // allocate theoretically half the tiles for key frames first frames
+  begin
+    // allocate theoretically half the tiles for key frames first frames
+    tileCount := FGlobalTilingTileCount;
+    if Length(FFrames) > 1 then
+      tileCount := tileCount shr 1;
+
+    SolveTileCount(tileCount, True);
+  end;
 
   ProgressRedraw(1, 'KFSolveTileCount');
 
@@ -2144,7 +2111,7 @@ begin
     KF := FKeyFrames[kfIdx];
     Frame := FFrames[KF.StartFrame];
 
-    Frame.IntraReduce(NaN, GetFrameTileCount(Frame));
+    Frame.IntraReduce(GetFrameTileCount(Frame));
 
     Write(kfIdx + 1:8, ' / ', Length(FKeyFrames):8, #13);
   end;
