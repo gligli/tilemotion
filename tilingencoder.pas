@@ -1473,7 +1473,7 @@ begin
     SetLength(YakmoClusters, DSLen);
     SetLength(YakmoCentroids, nbTiles, cTileDCTSize);
 
-    Yakmo := yakmo_create(nbTiles, 1, cYakmoMaxIterations, 1, 0, 0, 0);
+    Yakmo := yakmo_create(nbTiles, 1, cYakmoMaxIterations, 1, 0, 0, 1);
     try
       yakmo_set_num_threads(Encoder.MaxThreadCount);
 
