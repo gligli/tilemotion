@@ -1200,47 +1200,35 @@ end;
 function TFrame.PredictTileMotion(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;
   const ABackBuffer: TIntegerDynArray2; const ADCTs: TDCTDynArray): Cardinal;
 var
-  oy, ox, oymn, oymx, oxmn, oxmx, yx, bestX, bestY: Integer;
-  err: Cardinal;
+  oy, yx: Integer;
+  state: TDCTCribbleState;
   PrevDCTPtr: PDCTScalar;
   CurDCT: TDCT;
 begin
   Encoder.ComputeCpnPixelsPsyVisFeatures(ACpnPixels, pvsWeightedDCT, cColorCpns, CurDCT);
 
-  GetPredictExtents(ARadius, ADY, ADX, oxmn, oxmx, oymn, oymx);
-
-  bestY := MaxInt;
-  bestX := MaxInt;
   Result := High(Cardinal);
+  state.Err := High(Cardinal);
+  state.Y := MaxInt;
+  state.X := MaxInt;
+  state.DY := ADY;
+  state.DX := ADX;
 
-  for oy := oymn to oymx do
+  GetPredictExtents(ARadius, state.DY, state.DX, state.oxmn, state.oxmx, state.oymn, state.oymx);
+
+  for oy := state.oymn to state.oymx do
   begin
-    yx := oy * (Encoder.FScreenWidth - cTileWidth + 1) + oxmn;
-    for ox := oxmn to oxmx do
-    begin
-      PrevDCTPtr := ADCTs[yx];
+    yx := oy * (Encoder.FScreenWidth - cTileWidth + 1) + state.oxmn;
+    PrevDCTPtr := ADCTs[yx];
 
-      if QuickTestEuclideanDCTPtr_asm(CurDCT, PrevDCTPtr, Result) then
-      begin
-        err := CompareEuclideanDCTPtr_asm(CurDCT, PrevDCTPtr);
-        err += ApplyMotionPredictionPenalty(ox, oy, ADX, ADY);
-
-        if err < Result then
-        begin
-          Result := err;
-          bestY := oy;
-          bestX := ox;
-        end;
-      end;
-
-      Inc(yx);
-    end;
+    CribbleEuclideanDCTPtr_asm(CurDCT, PrevDCTPtr, @state, oy);
   end;
 
   ATMI^.IsPredicted := True;
-  ATMI^.PSNR := EuclideanToPSNR(Result);
-  ATMI^.PredictedY := bestY - ADY;
-  ATMI^.PredictedX := bestX - ADX;
+  ATMI^.PSNR := EuclideanToPSNR(state.Err);
+  ATMI^.PredictedY := state.Y - ADY;
+  ATMI^.PredictedX := state.X - ADX;
+  Result := state.Err;
 end;
 
 function TFrame.PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels;

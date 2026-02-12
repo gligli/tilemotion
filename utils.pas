@@ -136,6 +136,18 @@ type
   PIndexWeight = ^TIndexWeight;
   TIndexWeightList = specialize TFPGList<PIndexWeight>;
 
+  { TDCTCribbleState }
+
+  TDCTCribbleState = packed record
+    Err: Cardinal;
+    X, Y: Integer;
+    DX, DY: Integer;
+    oxmn, oxmx: Integer;
+    oymn, oymx: Integer;
+  end;
+
+  PDCTCribbleState = ^TDCTCribbleState;
+
   TEvalFunc = function(const arg: TDoubleDynArray; data: Pointer): Double of object;
   TGRSEvalFunc = function(x: Double; Data: Pointer): Double of object;
 
@@ -180,6 +192,8 @@ function ComparePaletteUseCount(Item1,Item2,UserParameter:Pointer):Integer;
 function QuickTestEuclideanDCTPtr(pa, pb: PDCTScalar; min_dist: Cardinal): Boolean;
 function QuickTestEuclideanDCTPtr_asm(pa_rcx, pb_rdx: PDCTScalar; min_dist_r8: Cardinal): Boolean; register; assembler;
 function ApplyMotionPredictionPenalty(ox, oy, dx, dy: Integer): Cardinal;
+procedure CribbleEuclideanDCTPtr(cur: PDCTScalar; prev: PDCTScalar; state: PDCTCribbleState; oy: Integer);
+procedure CribbleEuclideanDCTPtr_asm(cur_rcx: PDCTScalar; prev_rdx: PDCTScalar; state_r8: PDCTCribbleState; oy_r9: Integer); register; assembler;
 generic function DCTInner<T>(pCpn, pLut: T; count: Integer): Double;
 function DCTInner_asm(pCpn_rcx, pLut_rdx: PFloat): Double; register; assembler;
 function EqualQualityTileCount(tileCount: Double): Integer;
@@ -796,6 +810,116 @@ begin
   // apply a penalty of the euclidean distance to the center
   // rationale: slightly favoring the center in case of ties improves compressibility
   Result := Sqr(ox - dx) + Sqr(oy - dy);
+end;
+
+procedure CribbleEuclideanDCTPtr(cur: PDCTScalar; prev: PDCTScalar; state: PDCTCribbleState; oy: Integer);
+var
+  ox: Integer;
+  err, best: Cardinal;
+begin
+  best := state^.Err;
+
+  for ox := state^.oxmn to state^.oxmx do
+  begin
+    if QuickTestEuclideanDCTPtr_asm(cur, prev, best) then
+    begin
+      err := CompareEuclideanDCTPtr_asm(cur, prev);
+      err += ApplyMotionPredictionPenalty(ox, oy, state^.DX, state^.DY);
+
+      if err < best then
+      begin
+        best := err;
+        state^.Err := err;
+        state^.Y := oy;
+        state^.X := ox;
+      end;
+    end;
+
+    Inc(prev, cTileDCTSize);
+  end;
+end;
+
+procedure CribbleEuclideanDCTPtr_asm(cur_rcx: PDCTScalar; prev_rdx: PDCTScalar; state_r8: PDCTCribbleState; oy_r9: Integer); register; assembler;
+label
+  xloop, evicted, worse;
+asm
+  push rax
+  push rbx
+  push rdx
+  push rsi
+  push rdi
+  push r10
+  push r11
+  push r12
+
+  sub rsp, 16 * 2
+  movdqu oword ptr [rsp], xmm0
+  movdqu oword ptr [rsp + $10], xmm1
+
+  movdqu xmm1, oword ptr [rcx]
+
+  mov ebx, dword ptr [r8]
+  mov r10d, dword ptr [r8 + 3 * 4]
+  mov r11d, dword ptr [r8 + 4 * 4]
+  mov esi, dword ptr [r8 + 5 * 4]
+  mov edi, dword ptr [r8 + 6 * 4]
+
+  xloop:
+    movdqa xmm0, xmm1
+    psubsw xmm0, oword ptr [rdx]
+
+    pmaddwd xmm0, xmm0
+
+    phaddd xmm0, xmm0
+    phaddd xmm0, xmm0
+
+    movd eax, xmm0
+    cmp eax, ebx
+    jae evicted
+
+        call CompareEuclideanDCTPtr_asm
+
+        mov r12d, esi
+        sub r12d, r10d
+        imul r12d, r12d
+        add eax, r12d
+
+        mov r12d, r9d
+        sub r12d, r11d
+        imul r12d, r12d
+        add eax, r12d
+
+        cmp eax, ebx
+        jae worse
+
+           mov ebx, eax
+           mov dword ptr [r8 + 1 * 4], esi
+           mov dword ptr [r8 + 2 * 4], r9d
+
+        worse:
+
+    evicted:
+
+    add rdx, 192 * 2
+
+    inc esi
+    cmp esi, edi
+    jbe xloop
+
+  mov dword ptr [r8], ebx
+
+  movdqu xmm0, oword ptr [rsp]
+  movdqu xmm1, oword ptr [rsp + $10]
+  add rsp, 16 * 2
+
+  pop r12
+  pop r11
+  pop r10
+  pop rdi
+  pop rsi
+  pop rdx
+  pop rbx
+  pop rax
 end;
 
 generic function DCTInner<T>(pCpn, pLut: T; count: Integer): Double;
