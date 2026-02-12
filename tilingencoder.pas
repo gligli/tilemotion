@@ -21,7 +21,7 @@ type
   TClusteringMethod = (cmBIRCH, cmBICO, cmTransferTiles);
 
 const
-  cEncoderStepLen: array[TEncoderStep] of Integer = (-1, 5, 1, 5, 4, 2, 2, 3, 1);
+  cEncoderStepLen: array[TEncoderStep] of Integer = (-1, 5, 1, 4, 4, 2, 2, 3, 1);
 
 type
   // GliGli's TileMotion header structs and commands
@@ -2068,11 +2068,8 @@ begin
 end;
 
 procedure TTilingEncoder.Reduce;
-const
-  CCircularRefCountThres = 100;
 var
-  kfIdx, frmIdx, predFrmIdx, firstKFFrmIdx, predSY, predSX, sy, sx, predRefCount, tileCount: Integer;
-  TMI: PTileMapItem;
+  kfIdx, tileCount: Integer;
   KF: TKeyFrame;
   Frame: TFrame;
 begin
@@ -2116,42 +2113,9 @@ begin
 
   ProgressRedraw(3, 'SolveTileCount');
 
-  for frmIdx := 0 to High(FFrames) do
-  begin
-    firstKFFrmIdx := FFrames[frmIdx].PKeyFrame.StartFrame;
-
-    for sy := 0 to FTileMapHeight - 1 do
-      for sx := 0 to FTileMapWidth - 1 do
-      begin
-        TMI := @FFrames[frmIdx].TileMap[sy, sx];
-
-        predRefCount := 0;
-        predSY := sy;
-        predSX := sx;
-        predFrmIdx := frmIdx;
-        while TMI^.IsPredicted do
-        begin
-          Inc(predRefCount, Ord(predFrmIdx = firstKFFrmIdx));
-          if predRefCount >= CCircularRefCountThres then
-            Break;
-
-          Inc(predSY, SarShortint(TMI^.PredictedY, cTileWidthBits));
-          Inc(predSX, SarShortint(TMI^.PredictedX, cTileWidthBits));
-          predFrmIdx := Max(firstKFFrmIdx, predFrmIdx - 1);
-
-          TMI := @FFrames[predFrmIdx].TileMap[predSY, predSX];
-        end;
-
-        if not TMI^.IsPredicted then
-          Inc(FTiles[TMI^.TileIdx]^.UseCount);
-      end;
-  end;
-
-  ProgressRedraw(4, 'CountPredictionsTileUsage');
-
   ReindexTiles(True);
 
-  ProgressRedraw(5, 'ReindexTiles');
+  ProgressRedraw(4, 'ReindexTiles');
 end;
 
 procedure TTilingEncoder.Reconstruct;
