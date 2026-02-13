@@ -16,15 +16,9 @@ const
   cPsyVEpsilon = 1e-6;
   cYakmoMaxIterations = 1000;
 
-  {$if 0}
-    cRedMul = 2126;
-    cGreenMul = 7152;
-    cBlueMul = 722;
-  {$else}
-    cRedMul = 299;
-    cGreenMul = 587;
-    cBlueMul = 114;
-  {$endif}
+  cRedMul = 299;
+  cGreenMul = 587;
+  cBlueMul = 114;
 
   cRGBw = 16; // in 1 / 32th
   cChromaWeight = 1.0;
@@ -110,7 +104,6 @@ const
     (sqrt(0.5), 1, 1, 1, 1, 1, 1, 1)
   );
 
-  cPsnrMaxValue = 20.0 * Ln((1 shl cBitsPerComp) - 1) / Ln(10.0);
 type
   TSpinlock = LongInt;
   PSpinLock = ^TSpinlock;
@@ -155,6 +148,10 @@ type
   PDCTScalar = ^TDCTScalar;
   TDCT = array[0 .. cTileDCTSize - 1] of TDCTScalar;
   TDCTDynArray = array of TDCT;
+
+const
+  cYUVScale = -Low(TDCTScalar) / ((1 shl cBitsPerComp) * Sqr(cTileWidth));
+  cPsnrMaxValue = 20.0 * Ln((1 shl cBitsPerComp) * cYUVScale - 1) / Ln(10.0);
 
 procedure SpinEnter(Lock: PSpinLock); assembler;
 procedure SpinLeave(Lock: PSpinLock); assembler;
@@ -505,34 +502,19 @@ begin
 end;
 
 procedure RGBToYUV(r, g, b: Byte; out y, u, v: TFloat);
-var
-  yy, uu, vv: TFloat;
 begin
-  yy := r * (cRedMul / cLumaDiv) + g * (cGreenMul / cLumaDiv) + b * (cBlueMul / cLumaDiv);
-  uu := (b - yy) * 0.492;
-  vv := (r - yy) * 0.877;
-{$if cRedMul <> 299}
-  {$error RGBToYUV should be changed!}
-{$endif}
-
-  y := yy; u := uu; v := vv; // for safe "out" param
+  y := (16  +  65.481 / 255.0 * r + 128.553 / 255.0 * g +  24.966 / 255.0 * b) * cYUVScale;
+  u := (128 -  37.797 / 255.0 * r -  74.203 / 255.0 * g + 112.000 / 255.0 * b) * cYUVScale;
+  v := (128 + 112.000 / 255.0 * r -  93.786 / 255.0 * g -  18.214 / 255.0 * b) * cYUVScale;
 end;
 
 function YUVToRGB(y, u, v: TFloat): Integer;
 var
   r, g, b: TFloat;
 begin
-{$if cRedMul = 299}
-  r := y + v * 1.13983;
-  g := y - u * 0.39465 - v * 0.58060;
-  b := y + u * 2.03211;
-{$elseif cRedMul = 2126}
-  r := y + v * 1.28033;
-  g := y - u * 0.21482 - v * 0.38059;
-  b := y + u * 2.12798;
-{$else}
-  {$error YUVToRGB not implemented!}
-{$endif}
+  r := 298.082 / (256.0 * cYUVScale) * y                                     + 408.583 / (256.0 * cYUVScale) * v - 222.921;
+  g := 298.082 / (256.0 * cYUVScale) * y - 100.291 / (256.0 * cYUVScale) * u - 208.120 / (256.0 * cYUVScale) * v + 135.576;
+  b := 298.082 / (256.0 * cYUVScale) * y + 516.412 / (256.0 * cYUVScale) * u                                     - 276.836;
 
   Result := ToRGB(EnsureRange(Round(r), 0, 255), EnsureRange(Round(g), 0, 255), EnsureRange(Round(b), 0, 255));
 end;
