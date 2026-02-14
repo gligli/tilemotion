@@ -2099,7 +2099,7 @@ begin
     KF := FKeyFrames[kfIdx];
     Frame := FFrames[KF.StartFrame];
 
-    Frame.IntraReduce(GetFrameTileCount(Frame));
+    Frame.IntraReduce(max(1, GetFrameTileCount(Frame)));
 
     Write(kfIdx + 1:8, ' / ', Length(FKeyFrames):8, #13);
   end;
@@ -4487,12 +4487,12 @@ begin
 
   if DSLen > FPaletteCount then
   begin
+    SetLength(YakmoDataset, DSLen, cTileDCTSize);
+
+    ProcThreadPool.DoParallelLocalProc(@DoDCT, 0, DSLen - 1);
+
     if FPaletteCount > 1 then
     begin
-      SetLength(YakmoDataset, DSLen, cTileDCTSize);
-
-      ProcThreadPool.DoParallelLocalProc(@DoDCT, 0, DSLen - 1);
-
       Yakmo := yakmo_create(FPaletteCount, 1, cYakmoMaxIterations, 1, 0, 0, 1);
       try
         yakmo_set_num_threads(MaxThreadCount);
@@ -4503,18 +4503,13 @@ begin
       finally
         yakmo_destroy(Yakmo);
       end;
-    end
-    else
-    begin
-      for di := 0 to High(YakmoClusters) do
-        YakmoWeights[di] := 1;
     end;
   end
   else
   begin
     for di := 0 to High(YakmoClusters) do
     begin
-      YakmoWeights[di] := 1;
+      YakmoWeights[di] := FTiles[di]^.UseCount;
       YakmoClusters[di] := di;
     end;
   end;
