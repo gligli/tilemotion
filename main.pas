@@ -378,17 +378,9 @@ procedure TMainForm.miReloadClick(Sender: TObject);
 begin
   if odGTM.Execute then
   begin
-    if not FileExists(edInput.Text) then
-      btnInputClick(nil);
-
-    if FileExists(edInput.Text) then
-    begin
-      btnGlobalLoadClick(nil);
-
-      FTilingEncoder.ReloadGTM(odGTM.FileName);
-      LoadGUISettings;
-      UpdateGUI(nil);
-    end;
+    FTilingEncoder.ReloadGTM(odGTM.FileName);
+    LoadGUISettings;
+    UpdateGUI(nil);
   end;
 end;
 

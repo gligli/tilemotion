@@ -848,6 +848,7 @@ begin
   for i := prevLen to ANewX - 1 do
   begin
     AArray[i] := PTile(data);
+    FillChar(AArray[i]^, size, 0);
     AArray[i]^.HasPalPixels := HasPalPx;
     AArray[i]^.HasRGBPixels := HasRGBPx;
     AArray[i]^.PalIdx_Initial := -1;
@@ -5172,7 +5173,8 @@ end;
 procedure TTilingEncoder.LoadStream(AStream: TStream);
 var
   KFStream: TMemoryStream;
-  frmIdx, lastTileIdx: Integer;
+  frmIdx, frmCount: Integer;
+  rawTileIdxToTileIdx: TIntegerDynArray;
 
   function ReadDWord: Cardinal;
   begin
@@ -5207,16 +5209,26 @@ var
 
   procedure ReadTiles(PaletteSize: Integer);
   var
-    i, startIdx, endIdx: Integer;
+    iRawTile, rawStartIdx, rawEndIdx, baseTileIdx, tileIdx, tileCnt: Integer;
   begin
-    startIdx := ReadDWord; // start tile
-    endIdx := ReadDWord; // end tile
+    rawStartIdx := ReadDWord; // start tile
+    rawEndIdx := ReadDWord; // end tile
 
-    lastTileIdx := max(lastTileIdx, endIdx);
-    for i := startIdx to endIdx do
+    baseTileIdx := Length(FTiles);
+    tileCnt := rawEndIdx - rawStartIdx + 1;
+
+    if baseTileIdx > 0 then
+      TTile.Array1DRealloc(FTiles, Length(FTiles) + tileCnt)
+    else
+      FTiles := TTile.Array1DNew(tileCnt, True, True);
+
+    for iRawTile := rawStartIdx to rawEndIdx do
     begin
-      KFStream.Read(FTiles[i]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
-      FTiles[i]^.Active := True;
+      tileIdx := baseTileIdx + iRawTile - rawStartIdx;
+
+      KFStream.Read(FTiles[tileIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
+      FTiles[tileIdx]^.Active := True;
+      rawTileIdxToTileIdx[iRawTile] := tileIdx;
     end;
 
     FPaletteSize := PaletteSize;
@@ -5234,7 +5246,7 @@ var
     FFramesPerSecond := 1000*1000*1000 / frmLen;
 
     tileCount := ReadDWord; // tile count
-    FTiles := TTile.Array1DNew(tileCount, False, True); // tile count
+    SetLength(rawTileIdxToTileIdx, tileCount);
   end;
 
   procedure ReadPalette;
@@ -5275,8 +5287,16 @@ var
   function NextFrame(KF: TKeyFrame): TFrame;
   begin
     Inc(frmIdx);
-    Result := FFrames[frmIdx];
+    Result := TFrame.Create(Self, frmIdx);
     Result.PKeyFrame := kf;
+
+    Result.FrameTiles := TTile.Array1DNew(FTileMapSize, True, False);
+    Result.CompressFrameTiles;
+
+    SetLength(FFrames, frmIdx + 1);
+    FFrames[frmIdx] := Result;
+
+    Write(Length(FFrames):8, ' / ', frmCount:8, #13);
   end;
 
   procedure SkipBlock(frm: TFrame; SkipCount: Integer; var tmPos: Integer);
@@ -5304,7 +5324,6 @@ var
   palIdx: Word;
   frm: TFrame;
   kf: TKeyFrame;
-  compat: String;
   TMI: PTileMapItem;
 begin
   FillChar(Header, SizeOf(Header), 0);
@@ -5312,28 +5331,18 @@ begin
   AStream.ReadBuffer(Header, SizeOf(Header.FourCC));
   AStream.Seek(0, soBeginning);
 
+  frmCount := -1;
   if Header.FourCC = 'GTMv' then
   begin
     AStream.ReadBuffer(Header, SizeOf(Header));
     AStream.Seek(Header.WholeHeaderSize, soBeginning);
-
-    compat := '';
-    if Header.FrameCount <> FrameCount then
-      compat := compat + Format('GTM FrameCount = %d; FrameCount = %d' + sLineBreak, [Header.FrameCount, Length(FFrames)]);
-    if Header.FramePixelWidth <> ScreenWidth then
-      compat := compat + Format('GTM ScreenWidth = %d; ScreenWidth = %d' + sLineBreak, [Header.FramePixelWidth, FScreenWidth]);
-    if Header.FramePixelHeight <> ScreenHeight then
-      compat := compat + Format('GTM ScreenHeight = %d; ScreenHeight = %d' + sLineBreak, [Header.FramePixelHeight, FScreenHeight]);
-
-    if compat <> '' then
-      raise ETilingEncoderGTMReloadError.Create('Mismatch between GTM and loaded video!' + sLineBreak + compat);
+    frmCount := Header.FrameCount;
   end;
 
   ClearAll(True);
 
   frm := nil;
   frmIdx := -1;
-  lastTileIdx := -1;
   loadedFrmCount := 0;
   KFStream := TMemoryStream.Create;
   try
@@ -5408,6 +5417,8 @@ begin
             if frm = nil then
               frm := NextFrame(kf);
 
+            tileIdx := rawTileIdxToTileIdx[tileIdx];
+
             SetTMI(tileIdx, palIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
             Inc(tmPos);
           end;
@@ -5443,16 +5454,17 @@ begin
           begin
             palIdx := ReadWord;
 
-            Inc(lastTileIdx);
-            Assert(lastTileIdx < Length(FTiles));
-            KFStream.Read(FTiles[lastTileIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
-            FTiles[lastTileIdx]^.Active := True;
+            tileIdx := Length(FTiles);
+            TTile.Array1DRealloc(FTiles, tileIdx + 1);
+
+            KFStream.Read(FTiles[tileIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
+            FTiles[tileIdx]^.Active := True;
 
             // next frame if needed
             if frm = nil then
               frm := NextFrame(kf);
 
-            SetTMI(lastTileIdx, palIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
+            SetTMI(tileIdx, palIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
             Inc(tmPos);
           end
 
