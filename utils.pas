@@ -196,7 +196,8 @@ function DCTInner_asm(pCpn_rcx, pLut_rdx: PFloat): Double; register; assembler;
 function EqualQualityTileCount(tileCount: Double): Integer;
 function GoldenRatioSearch(Func: TGRSEvalFunc; MinX, MaxX: Double; ObjectiveY: Double;
   EpsilonX, EpsilonY: Double; Data: Pointer): Double;
-function EuclideanToPSNR(AEuclidean: Double): Double;
+function EuclideanToPSNR(AEuclidean: Cardinal): Double;
+function PSNRToEuclidean(APSNR: Double): Cardinal;
 
 implementation
 
@@ -1196,10 +1197,15 @@ begin
   end;
 end;
 
-function EuclideanToPSNR(AEuclidean: Double): Double;
+function EuclideanToPSNR(AEuclidean: Cardinal): Double;
 begin
   Result := AEuclidean * (1 / cTileDCTSize);
   Result := cPsnrMaxValue - 10.0 * Log10(Max(1.0, Result));
+end;
+
+function PSNRToEuclidean(APSNR: Double): Cardinal;
+begin
+  Result := Round(Power(10.0, (cPsnrMaxValue - APSNR) * 0.1) * cTileDCTSize);
 end;
 
 end.
