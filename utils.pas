@@ -132,7 +132,7 @@ type
   { TDCTCribbleState }
 
   TDCTCribbleState = packed record
-    Err: Cardinal;
+    Error: Integer;
     X, Y: Integer;
     DX, DY: Integer;
     oxmn, oxmx: Integer;
@@ -151,7 +151,7 @@ type
 
 const
   cYUVScale = -Low(TDCTScalar) / ((1 shl cBitsPerComp) * Sqr(cTileWidth));
-  cPsnrMaxValue = 20.0 * Ln((1 shl cBitsPerComp) * cYUVScale - 1) / Ln(10.0);
+  cBestPSNR = 20.0 * Ln((1 shl cBitsPerComp) * cYUVScale - 1) / Ln(10.0);
 
 procedure SpinEnter(Lock: PSpinLock); assembler;
 procedure SpinLeave(Lock: PSpinLock); assembler;
@@ -800,7 +800,7 @@ var
   ox: Integer;
   err, best: Cardinal;
 begin
-  best := state^.Err;
+  best := state^.Error;
 
   for ox := state^.oxmn to state^.oxmx do
   begin
@@ -812,7 +812,7 @@ begin
       if err < best then
       begin
         best := err;
-        state^.Err := err;
+        state^.Error := err;
         state^.Y := oy;
         state^.X := ox;
       end;
@@ -1200,12 +1200,12 @@ end;
 function EuclideanToPSNR(AEuclidean: Cardinal): Double;
 begin
   Result := AEuclidean * (1 / cTileDCTSize);
-  Result := cPsnrMaxValue - 10.0 * Log10(Max(1.0, Result));
+  Result := cBestPSNR - 10.0 * Log10(Max(1.0, Result));
 end;
 
 function PSNRToEuclidean(APSNR: Double): Cardinal;
 begin
-  Result := Round(Power(10.0, (cPsnrMaxValue - APSNR) * 0.1) * cTileDCTSize);
+  Result := Round(Power(10.0, (cBestPSNR - APSNR) * 0.1) * cTileDCTSize);
 end;
 
 end.

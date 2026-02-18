@@ -298,8 +298,8 @@ type
 
     procedure GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
 
-    function PredictTileMotion(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels; const ADCTs: TDCTDynArray): Cardinal;
-    function PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels; const ADCTs: TDCTDynArray): Cardinal;
+    function PredictTileMotion(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels; const ADCTs: TDCTDynArray): Integer;
+    function PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels; const ADCTs: TDCTDynArray): Integer;
 
     // processes
 
@@ -308,7 +308,7 @@ type
     procedure PredictMotion(ARadius: Integer; APredictIntra: Boolean; const ABackBuffer: TIntegerDynArray2; var ADCTs: TDCTDynArray);
     procedure Reconstruct(ARadius: Integer; const ABackBuffer, AFrontBuffer: TIntegerDynArray2);
     procedure DirectBlit(const AFrameBuffer: TIntegerDynArray2);
-    procedure MotionUnsharpPenalize;
+    procedure MotionUnsharpPenalize(APSNRThreshold: TFloat);
   end;
 
   TFrameArray =  array of TFrame;
@@ -457,8 +457,7 @@ type
 
     procedure ComputeTilePsyVisFeatures(const ATile: TTile; Mode: TPsyVisMode; FromPal, UseLAB, VMirror, HMirror: Boolean;
      ColorCpns: Integer; const APalette: TIntegerDynArray; ADCT: PDouble); inline; overload;
-    procedure ComputeInvTilePsyVisFeatures(DCT: PDouble; Mode: TPsyVisMode; UseLAB: Boolean; ColorCpns: Integer;
-      var ATile: TTile);
+    procedure ComputeInvTilePsyVisFeatures(DCT: PDouble; Mode: TPsyVisMode; UseLAB: Boolean; ColorCpns: Integer; var ATile: TTile);
 
     // Dithering algorithms ported from http://bisqwit.iki.fi/story/howto/dither/jy/
 
@@ -500,8 +499,7 @@ type
     procedure MakeTilesUnique(OnRGBPixels: Boolean);
     procedure InitMergeTiles;
     procedure FinishMergeTiles;
-    procedure MergeTiles(const TileIndexes: array of Int64; TileCount: Integer; BestIdx: Int64; NewTile: PPalPixels;
-      NewTileRGB: PRGBPixels);
+    procedure MergeTiles(const TileIndexes: array of Int64; TileCount: Integer; BestIdx: Int64; NewTile: PPalPixels; NewTileRGB: PRGBPixels);
 
     procedure LoadStream(AStream: TStream);
     procedure SaveStream(AStream: TStream);
@@ -650,7 +648,7 @@ procedure TTileMapItemHelper.Reset(AKeepMirrors: Boolean);
 begin
   TileIdx := -1;
   PalIdx := -1;
-  PSNR := -Infinity; // lower than worst PSNR (unpredicted by default)
+  PSNR := Infinity;
   PredictedX := 0;
   PredictedY := 0;
   IsPredicted := False;
@@ -1266,7 +1264,7 @@ begin
   oxmx := Min(Encoder.FScreenWidth - cTileWidth, ADX + ARadius);
 end;
 
-function TFrame.PredictTileMotion(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels; const ADCTs: TDCTDynArray): Cardinal;
+function TFrame.PredictTileMotion(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels; const ADCTs: TDCTDynArray): Integer;
 var
   oy, yx: Integer;
   state: TDCTCribbleState;
@@ -1275,8 +1273,8 @@ var
 begin
   Encoder.ComputeCpnPixelsPsyVisFeatures(ACpnPixels, pvsWeightedDCT, cColorCpns, CurDCT);
 
-  Result := High(Cardinal);
-  state.Err := High(Cardinal);
+  Result := MaxInt;
+  state.Error := MaxInt;
   state.Y := MaxInt;
   state.X := MaxInt;
   state.DY := ADY;
@@ -1293,13 +1291,13 @@ begin
   end;
 
   ATMI^.IsPredicted := True;
-  ATMI^.PSNR := EuclideanToPSNR(state.Err);
+  ATMI^.PSNR := EuclideanToPSNR(state.Error);
   ATMI^.PredictedY := state.Y - ADY;
   ATMI^.PredictedX := state.X - ADX;
-  Result := state.Err;
+  Result := state.Error;
 end;
 
-function TFrame.PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels; const ADCTs: TDCTDynArray): Cardinal;
+function TFrame.PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels; const ADCTs: TDCTDynArray): Integer;
 var
   oy, ox, oymn, oymx, oxmn, oxmx, yx, bestX, bestY: Integer;
   PSNRAcc: TFloat;
@@ -1311,9 +1309,9 @@ begin
 
   GetPredictExtents(ARadius, ADY, ADX, oxmn, oxmx, oymn, oymx);
 
+  Result := MaxInt;
   bestY := MaxInt;
   bestX := MaxInt;
-  Result := High(Cardinal);
 
   PSNRAcc := 0;
   PSNRIdx := 1;
@@ -1348,6 +1346,7 @@ begin
     end;
   end;
 
+  ATMI^.IsPredicted := True;
   ATMI^.PSNR := PSNRAcc / PSNRCnt;
   ATMI^.PredictedY := bestY - ADY;
   ATMI^.PredictedX := bestX - ADX;
@@ -1394,15 +1393,13 @@ procedure TFrame.PredictMotion(ARadius: Integer; APredictIntra: Boolean; const A
 
     DivMod(AIndex, Encoder.FTileMapWidth, sy, sx);
 
-    dx := sx shl cTileWidthBits;
-    dy := sy shl cTileWidthBits;
-
     TMI := @TileMap[sy, sx];
-    TMI^.IsPredicted := True;
-
     FrameTile := FrameTiles[AIndex];
 
     Encoder.ConvertToCpnPixels(FrameTile^, False, False, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, nil, CurCpnPixels);
+
+    dx := sx shl cTileWidthBits;
+    dy := sy shl cTileWidthBits;
 
     if APredictIntra then
       PredictTileIntra(ARadius, dy, dx, TMI, CurCpnPixels, ADCTs)
@@ -1864,24 +1861,31 @@ begin
   PKeyFrame.LogPSNR;
 end;
 
-procedure TFrame.MotionUnsharpPenalize;
+procedure TFrame.MotionUnsharpPenalize(APSNRThreshold: TFloat);
 const
   CCSz = 2;
-  CConvBlur: array[-CCSz .. CCSz, -CCSz .. CCSz] of Integer = ((1, 4, 6, 4, 1), (4, 16, 24, 16, 4), (6, 24, -476, 24, 6), (4, 16, 24, 16, 4), (1, 4, 6, 4, 1));
   CConvBlurShift = 8;
+  CConvBlur: array[-CCSz .. CCSz, -CCSz .. CCSz] of Integer = (
+    (   1,    4,    6,    4,    1),
+    (   4,   16,   24,   16,    4),
+    (   6,   24, -476,   24,    6),
+    (   4,   16,   24,   16,    4),
+    (   1,    4,    6,    4,    1)
+  );
   CCoordCount = 2;
 var
-  sy, sx, cy, cx, iConv, v: Integer;
+  sy, sx, cy, cx, iConv, v, penalty: Integer;
+  penalizedPSNR: TFloat;
   TMI: PTileMapItem;
   Convolver: array of array of array[0 .. CCoordCount - 1] of Integer;
   ConvolvedCoords: array[0 .. CCoordCount - 1] of Integer;
 begin
   SetLength(Convolver, Encoder.FTileMapHeight + CCSz * 2, Encoder.FTileMapWidth + CCSz * 2);
 
-  for sy := CCSz to Encoder.FTileMapHeight - 1 + CCSz do
-    for sx := CCSz to Encoder.FTileMapWidth - 1 + CCSz do
+  for sy := 0 to Encoder.FTileMapHeight - 1 + CCSz * 2 do
+    for sx := 0 to Encoder.FTileMapWidth - 1 + CCSz * 2 do
     begin
-      TMI := @TileMap[sy - CCSz, sx - CCSz];
+      TMI := @TileMap[EnsureRange(sy - CCSz, 0, Encoder.FTileMapHeight - 1), EnsureRange(sx - CCSz, 0, Encoder.FTileMapWidth - 1)];
       Convolver[sy, sx, 0] := TMI^.PredictedX;
       Convolver[sy, sx, 1] := TMI^.PredictedY;
     end;
@@ -1899,7 +1903,10 @@ begin
       end;
 
       TMI := @TileMap[sy - CCSz, sx - CCSz];
-      TMI^.PSNR := EuclideanToPSNR(ApplyMotionPredictionPenalty(TMI^.PredictedX, TMI^.PredictedY, ConvolvedCoords[0], ConvolvedCoords[1]) + PSNRToEuclidean(TMI^.PSNR));
+      penalty := ApplyMotionPredictionPenalty(ConvolvedCoords[0], ConvolvedCoords[1], 0, 0);
+      penalizedPSNR := EuclideanToPSNR(penalty + PSNRToEuclidean(TMI^.PSNR));
+      TMI^.IsPredicted := CompareValue(penalizedPSNR, TMI^.PSNR, APSNRThreshold) <> LessThanValue;
+      TMI^.PSNR := penalizedPSNR;
     end;
 end;
 
@@ -3253,7 +3260,7 @@ end;
 procedure TTilingEncoder.SetGlobalTilingTargetPSNR(AValue: Double);
 begin
   if FGlobalTilingTargetPSNR = AValue then Exit;
-  FGlobalTilingTargetPSNR := EnsureRange(AValue, 0, cPsnrMaxValue);
+  FGlobalTilingTargetPSNR := EnsureRange(AValue, 0, cBestPSNR);
 end;
 
 procedure TTilingEncoder.SetGlobalTilingTileCount(AValue: Integer);
@@ -4429,7 +4436,7 @@ end;
 
 function TTilingEncoder.SolveTileCount(ATileCount: Integer; AKFFirstFrameOnly: Boolean): Double;
 begin
-  Result := GoldenRatioSearch(@GRTileCountFromPSNR, 0.0, cPsnrMaxValue, ATileCount, cPsyVEpsilon, 0.5, @AKFFirstFrameOnly);
+  Result := GoldenRatioSearch(@GRTileCountFromPSNR, 0.0, cBestPSNR, ATileCount, cPsyVEpsilon, 0.5, @AKFFirstFrameOnly);
 end;
 
 procedure TTilingEncoder.TransferTiles(ATileCount: Integer; AKFFirstFrameOnly: Boolean);
