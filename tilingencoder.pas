@@ -18,7 +18,6 @@ type
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
   TRenderPage = (rpNone, rpInput, rpOutput, rpTilesPalette);
   TPsyVisMode = (pvsDCT, pvsWeightedDCT, pvsWavelets, pvsSpeDCT, pvsWeightedSpeDCT);
-  TClusteringMethod = (cmBIRCH, cmBICO, cmTransferTiles);
 
 const
   cEncoderStepLen: array[TEncoderStep] of Integer = ({esAll} -1, {esLoad} 5, {esPredictMotion} 1, {esReduce} 4, {esPreparePalettes} 4, {esDither} 2, {esReconstruct} 2, {esReindex} 3, {esSave} 1);
@@ -266,6 +265,11 @@ type
   { TFrame }
 
   TFrame = class
+  const
+    CFrameTilesHaveRGBPixels = True;
+    CFrameTilesHavePalPixels = False;
+    CFrameTileSize = SizeOf(TTile) + SizeOf(TRGBPixels) * Ord(CFrameTilesHaveRGBPixels) + SizeOf(TPalPixels) * Ord(CFrameTilesHavePalPixels);
+  public
     Encoder: TTilingEncoder;
     PKeyFrame: TKeyFrame;
     Index: Integer;
@@ -1189,7 +1193,7 @@ begin
   CompressedFrameTiles.Clear;
   CompStream := Tcompressionstream.create(Tcompressionlevel.cldefault, CompressedFrameTiles, True);
   try
-    CompStream.WriteBuffer(FrameTiles[0]^, Length(TileMap) * Length(TileMap[0]) * (SizeOf(TTile) + SizeOf(TRGBPixels)));
+    CompStream.WriteBuffer(FrameTiles[0]^, Length(TileMap) * Length(TileMap[0]) * CFrameTileSize);
     CompStream.flush;
   finally
     CompStream.Free;
@@ -1220,11 +1224,11 @@ begin
     Assert(CompressedFrameTiles.Size > 0);
 
     CompressedFrameTiles.Position := 0;
-    FrameTiles := TTile.Array1DNew(Length(TileMap) * Length(TileMap[0]), True, False);
+    FrameTiles := TTile.Array1DNew(Length(TileMap) * Length(TileMap[0]), CFrameTilesHaveRGBPixels, CFrameTilesHavePalPixels);
 
     CompStream := Tdecompressionstream.create(CompressedFrameTiles, True);
     try
-      CompStream.ReadBuffer(FrameTiles[0]^, Length(TileMap) * Length(TileMap[0]) * (SizeOf(TTile) + SizeOf(TRGBPixels)));
+      CompStream.ReadBuffer(FrameTiles[0]^, Length(TileMap) * Length(TileMap[0]) * CFrameTileSize);
     finally
       CompStream.Free;
     end;
@@ -1434,7 +1438,7 @@ var
 begin
   // create frame tiles from image data
 
-  FrameTiles := TTile.Array1DNew(Encoder.FTileMapSize, True, False);
+  FrameTiles := TTile.Array1DNew(Encoder.FTileMapSize, CFrameTilesHaveRGBPixels, CFrameTilesHavePalPixels);
 
   pcol := PInteger(AImage);
   for j := 0 to AImageHeight - 1 do
@@ -5598,7 +5602,7 @@ var
     begin
       tileIdx := Max(0, TMI.TileIdx);
       palIdx := Max(0, TMI.PalIdx);
-      finalTileIdx := Max(0, Tiles[tileIdx]^.TmpIndex);
+      finalTileIdx := Max(0, FTiles[tileIdx]^.TmpIndex);
 
       isIntra := InRange(tileIdx, 0, High(FTiles)) and (FTiles[tileIdx]^.UseCount <= 1);
       isLongTile := finalTileIdx > High(Word);
@@ -5610,7 +5614,7 @@ var
       begin
         DoCmd(gtIntraTile, attrs);
         DoWord(palIdx);
-        ZStream.Write(Tiles[tileIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
+        ZStream.Write(FTiles[tileIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
       end
       else
       begin
