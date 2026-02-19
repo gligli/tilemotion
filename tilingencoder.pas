@@ -308,7 +308,6 @@ type
     procedure PredictMotion(ARadius: Integer; APredictIntra: Boolean; const ABackBuffer: TIntegerDynArray2; var ADCTs: TDCTDynArray);
     procedure Reconstruct(ARadius: Integer; const ABackBuffer, AFrontBuffer: TIntegerDynArray2);
     procedure DirectBlit(const AFrameBuffer: TIntegerDynArray2);
-    procedure MotionUnsharpPenalize(APSNRThreshold: TFloat);
   end;
 
   TFrameArray =  array of TFrame;
@@ -1879,55 +1878,6 @@ begin
   ProcThreadPool.DoParallelLocalProc(@DoXY, 0, Encoder.FTileMapSize - 1);
 
   PKeyFrame.LogPSNR;
-end;
-
-procedure TFrame.MotionUnsharpPenalize(APSNRThreshold: TFloat);
-const
-  CCSz = 2;
-  CConvBlurShift = 8;
-  CConvBlur: array[-CCSz .. CCSz, -CCSz .. CCSz] of Integer = (
-    (   1,    4,    6,    4,    1),
-    (   4,   16,   24,   16,    4),
-    (   6,   24, -476,   24,    6),
-    (   4,   16,   24,   16,    4),
-    (   1,    4,    6,    4,    1)
-  );
-  CCoordCount = 2;
-var
-  sy, sx, cy, cx, iConv, v, penalty: Integer;
-  penalizedPSNR: TFloat;
-  TMI: PTileMapItem;
-  Convolver: array of array of array[0 .. CCoordCount - 1] of Integer;
-  ConvolvedCoords: array[0 .. CCoordCount - 1] of Integer;
-begin
-  SetLength(Convolver, Encoder.FTileMapHeight + CCSz * 2, Encoder.FTileMapWidth + CCSz * 2);
-
-  for sy := 0 to Encoder.FTileMapHeight - 1 + CCSz * 2 do
-    for sx := 0 to Encoder.FTileMapWidth - 1 + CCSz * 2 do
-    begin
-      TMI := @TileMap[EnsureRange(sy - CCSz, 0, Encoder.FTileMapHeight - 1), EnsureRange(sx - CCSz, 0, Encoder.FTileMapWidth - 1)];
-      Convolver[sy, sx, 0] := TMI^.PredictedX;
-      Convolver[sy, sx, 1] := TMI^.PredictedY;
-    end;
-
-  for sy := CCSz to Encoder.FTileMapHeight - 1 + CCSz do
-    for sx := CCSz to Encoder.FTileMapWidth - 1 + CCSz do
-    begin
-      for iConv := Low(ConvolvedCoords) to High(ConvolvedCoords) do
-      begin
-        v := 0;
-        for cy := -CCSz to CCSz do
-          for cx := -CCSz to CCSz do
-            v += Convolver[sy + cy, sx + cx, iConv] * CConvBlur[cy, cx];
-        ConvolvedCoords[iConv] := SarLongint(v, CConvBlurShift);
-      end;
-
-      TMI := @TileMap[sy - CCSz, sx - CCSz];
-      penalty := ApplyMotionPredictionPenalty(ConvolvedCoords[0], ConvolvedCoords[1], 0, 0);
-      penalizedPSNR := EuclideanToPSNR(penalty + PSNRToEuclidean(TMI^.PSNR));
-      TMI^.IsPredicted := CompareValue(penalizedPSNR, TMI^.PSNR, APSNRThreshold) <> LessThanValue;
-      TMI^.PSNR := penalizedPSNR;
-    end;
 end;
 
 { TTilingEncoder }
