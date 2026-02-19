@@ -1694,14 +1694,15 @@ end;
 procedure TFrame.Reconstruct(ARadius: Integer; const ABackBuffer, AFrontBuffer: TIntegerDynArray2);
 const
   cEpuKnnK = 64;
-  cEuclideanErrorEpsilon = 1024;
+  cPSNREpsilon = 1.0;
 var
   DS: PTilingDataset;
 
   procedure DoXY(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
     sx, sy, dx, dy, ty, tileEpuIdx, palEpuIdx, prevTileIdx, prevPalIdx: Integer;
-    knnErr, mpErr, err: Cardinal;
+    knnErr, err: Cardinal;
+    knnPSNR, mpPSNR: TFloat;
 
     FrameTile, Tile: PTile;
     TMI: PTileMapItem;
@@ -1728,11 +1729,11 @@ var
 
     // redo motion prediction (account for palette)
 
-    mpErr := High(Cardinal);
+    mpPSNR := -Infinity;
     if (Index <> PKeyFrame.StartFrame) and (ARadius >= 0) then
-      mpErr := PSNRToEuclidean(TMI^.PSNR);
+      mpPSNR := TMI^.PSNR;
 
-    if IsZero(mpErr, cEuclideanErrorEpsilon) then
+    if CompareValue(mpPSNR, cBestPSNR, cPSNREpsilon) > LessThanValue  then
     begin
       // motion prediction has priority in case perfect (less bitrate)
 
@@ -1812,36 +1813,55 @@ var
 
     // devise which is best
 
-    case CompareValue(knnErr, mpErr, cEuclideanErrorEpsilon) of
-      LessThanValue:
+    if knnErr = High(Cardinal) then
+      knnPSNR := -Infinity
+    else
+      knnPSNR := EuclideanToPSNR(knnErr);
+
+    case CompareValue(knnPSNR, mpPSNR, cPSNREpsilon) of
+      GreaterThanValue:
       begin
         // KNN is best
 
-        TMI^.PSNR := EuclideanToPSNR(knnErr);
+        TMI^.PSNR := knnPSNR;
         TMI^.IsPredicted := False;
-
-        Tile := Encoder.FTiles[TMI^.TileIdx];
-
-        // draw fb (pal tile)
-        Tile^.BlitPalPixels(AFrontBuffer, Encoder.FPalettes[TMI^.PalIdx].PaletteRGB, TMI^.VMirror, TMI^.HMirror, dy, dx);
       end;
-      EqualsValue, // motion prediction has priority in case of ties (less bitrate)
-      GreaterThanValue:
+      EqualsValue:
       begin
-        // motion prediction is best
+        // motion prediction has priority in case of ties (less bitrate)
 
-        TMI^.PSNR := EuclideanToPSNR(mpErr);
+        TMI^.PSNR := mpPSNR;
         TMI^.IsPredicted := True;
         TMI^.PalIdx := -1;
         TMI^.TileIdx := -1;
-
-        // draw fb (motion predicted tile)
-        for ty := 0 to cTileWidth - 1 do
-        begin
-          Move(ABackBuffer[dy + TMI^.PredictedY, dx + TMI^.PredictedX], AFrontBuffer[dy, dx], cTileWidth * SizeOf(Integer));
-          Inc(dy);
-        end;
       end;
+      LessThanValue:
+      begin
+        // motion prediction is best
+
+        TMI^.PSNR := mpPSNR;
+        TMI^.IsPredicted := True;
+        TMI^.PalIdx := -1;
+        TMI^.TileIdx := -1;
+      end;
+    end;
+
+    if TMI^.IsPredicted then
+    begin
+      // draw fb (motion predicted tile)
+
+      for ty := 0 to cTileWidth - 1 do
+      begin
+        Move(ABackBuffer[dy + TMI^.PredictedY, dx + TMI^.PredictedX], AFrontBuffer[dy, dx], cTileWidth * SizeOf(Integer));
+        Inc(dy);
+      end;
+    end
+    else
+    begin
+      // draw fb (pal tile)
+
+      Tile := Encoder.FTiles[TMI^.TileIdx];
+      Tile^.BlitPalPixels(AFrontBuffer, Encoder.FPalettes[TMI^.PalIdx].PaletteRGB, TMI^.VMirror, TMI^.HMirror, dy, dx);
     end;
 
     SpinEnter(@PKeyFrame.ReconstructLock);
