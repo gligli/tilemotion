@@ -137,6 +137,7 @@ type
     DX, DY: Integer;
     oxmn, oxmx: Integer;
     oymn, oymx: Integer;
+    PenaltyWeight: Integer;
   end;
 
   PDCTCribbleState = ^TDCTCribbleState;
@@ -169,12 +170,12 @@ function ToBW(col: Integer): Integer;
 function HSVToRGB(h, s, v: Byte): Integer;
 procedure RGBToHSV(col: Integer; out h, s, v: Byte); overload;
 procedure RGBToHSV(col: Integer; out h, s, v: TFloat); overload;
-procedure RGBToYUV(col: Integer; out y, u, v: TFloat);
-procedure RGBToYUV(r, g, b: Byte; out y, u, v: TFloat);
+procedure RGBToYUV(col: Integer; out y, u, v: TFloat; scl: TFloat);
+procedure RGBToYUV(r, g, b: Byte; out y, u, v: TFloat; scl: TFloat);
 procedure RGBToLAB(r, g, b: TFloat; out ol, oa, ob: TFloat);
 procedure RGBToLAB(ir, ig, ib: Integer; out ol, oa, ob: TFloat);
 function LABToRGB(ll, aa, bb: TFloat): Integer;
-function YUVToRGB(y, u, v: TFloat): Integer;
+function YUVToRGB(y, u, v, scl: TFloat): Integer;
 function lerp(x, y, alpha: Double): Double; inline;
 function ilerp(x, y, alpha, maxAlpha: Integer): Integer; inline;
 function revlerp(x, r, alpha: Double): Double; inline;
@@ -492,30 +493,30 @@ begin
   Result := ToRGB(EnsureRange(Round(r * 255.0), 0, 255), EnsureRange(Round(g * 255.0), 0, 255), EnsureRange(Round(b * 255.0), 0, 255));
 end;
 
-procedure RGBToYUV(col: Integer; out y, u, v: TFloat); inline;
+procedure RGBToYUV(col: Integer; out y, u, v: TFloat; scl: TFloat); inline;
 var
   yy, uu, vv: TFloat;
   r, g, b: Byte;
 begin
   FromRGB(col, r, g, b);
-  RGBToYUV(r, g, b, yy, uu, vv);
+  RGBToYUV(r, g, b, yy, uu, vv, scl);
   y := yy; u := uu; v := vv; // for safe "out" param
 end;
 
-procedure RGBToYUV(r, g, b: Byte; out y, u, v: TFloat);
+procedure RGBToYUV(r, g, b: Byte; out y, u, v: TFloat; scl: TFloat);
 begin
-  y := (16  +  65.481 / 255.0 * r + 128.553 / 255.0 * g +  24.966 / 255.0 * b) * cYUVScale;
-  u := (128 -  37.797 / 255.0 * r -  74.203 / 255.0 * g + 112.000 / 255.0 * b) * cYUVScale;
-  v := (128 + 112.000 / 255.0 * r -  93.786 / 255.0 * g -  18.214 / 255.0 * b) * cYUVScale;
+  y := (16  +  65.481 / 255.0 * r + 128.553 / 255.0 * g +  24.966 / 255.0 * b) * scl;
+  u := (128 -  37.797 / 255.0 * r -  74.203 / 255.0 * g + 112.000 / 255.0 * b) * scl;
+  v := (128 + 112.000 / 255.0 * r -  93.786 / 255.0 * g -  18.214 / 255.0 * b) * scl;
 end;
 
-function YUVToRGB(y, u, v: TFloat): Integer;
+function YUVToRGB(y, u, v, scl: TFloat): Integer;
 var
   r, g, b: TFloat;
 begin
-  r := 298.082 / (256.0 * cYUVScale) * y                                     + 408.583 / (256.0 * cYUVScale) * v - 222.921;
-  g := 298.082 / (256.0 * cYUVScale) * y - 100.291 / (256.0 * cYUVScale) * u - 208.120 / (256.0 * cYUVScale) * v + 135.576;
-  b := 298.082 / (256.0 * cYUVScale) * y + 516.412 / (256.0 * cYUVScale) * u                                     - 276.836;
+  r := 298.082 / (256.0 * scl) * y                               + 408.583 / (256.0 * scl) * v - 222.921;
+  g := 298.082 / (256.0 * scl) * y - 100.291 / (256.0 * scl) * u - 208.120 / (256.0 * scl) * v + 135.576;
+  b := 298.082 / (256.0 * scl) * y + 516.412 / (256.0 * scl) * u                               - 276.836;
 
   Result := ToRGB(EnsureRange(Round(r), 0, 255), EnsureRange(Round(g), 0, 255), EnsureRange(Round(b), 0, 255));
 end;
@@ -807,7 +808,7 @@ begin
     if QuickTestEuclideanDCTPtr_asm(cur, prev, best) then
     begin
       err := CompareEuclideanDCTPtr_asm(cur, prev);
-      err += ApplyMotionPredictionPenalty(ox, oy, state^.DX, state^.DY);
+      err += ApplyMotionPredictionPenalty(ox, oy, state^.DX, state^.DY) * state^.PenaltyWeight;
 
       if err < best then
       begin
@@ -834,6 +835,7 @@ asm
   push r10
   push r11
   push r12
+  push r13
 
   sub rsp, 16 * 2
   movdqu oword ptr [rsp], xmm0
@@ -846,6 +848,7 @@ asm
   mov r11d, dword ptr [r8 + 4 * 4]
   mov esi, dword ptr [r8 + 5 * 4]
   mov edi, dword ptr [r8 + 6 * 4]
+  mov r13d, dword ptr [r8 + 9 * 4]
 
   xloop:
     movdqa xmm0, xmm1
@@ -865,11 +868,13 @@ asm
         mov r12d, esi
         sub r12d, r10d
         imul r12d, r12d
+        imul r12d, r13d
         add eax, r12d
 
         mov r12d, r9d
         sub r12d, r11d
         imul r12d, r12d
+        imul r12d, r13d
         add eax, r12d
 
         cmp eax, ebx
@@ -895,6 +900,7 @@ asm
   movdqu xmm1, oword ptr [rsp + $10]
   add rsp, 16 * 2
 
+  pop r13
   pop r12
   pop r11
   pop r10
