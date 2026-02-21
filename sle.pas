@@ -1,3 +1,5 @@
+{$TYPEDADDRESS OFF}
+
 {
     This file is part of the Numlib package.
     Copyright (c) 1986-2000 by

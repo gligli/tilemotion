@@ -149,6 +149,7 @@ type
   PDCTScalar = ^TDCTScalar;
   TDCT = array[0 .. cTileDCTSize - 1] of TDCTScalar;
   TDCTDynArray = array of TDCT;
+  TDCTDynArray2 = array of TDCTDynArray;
 
 const
   cYUVScale = -Low(TDCTScalar) / ((1 shl cBitsPerComp) * Sqr(cTileWidth));

@@ -12,7 +12,7 @@ interface
 
 uses
   windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, zstream, IniFiles, Graphics,
-  IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, MTProcs, extern, tbbmalloc, bufstream, utils, kmodes, powell;
+  IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, MTProcs, extern, tbbmalloc, bufstream, utils, kmodes, powell, sle;
 type
   TEncoderStep = (esAll = -1, esLoad = 0, esPredictMotion, esReduce, esPreparePalettes, esDither, esReconstruct, esReindex, esSave);
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
@@ -58,6 +58,7 @@ type
   // LongTileIdxLongPalIdx:            data -> palette index (16 bits); tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
   // IntraTile:                        data -> palette index (16 bits); indexes per pixel (64 bytes); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
   // SkipBlock:                        data -> none; commandBits -> skip count - 1 (12 bits)
+  // Blend:                            data -> none; commandBits -> frame -2 weight (6 bits); frame -1 weight (6 bits)
   //
   // (insert new commands here...)
   //
@@ -75,6 +76,7 @@ type
     gtLongTileIdxLongPalIdx = 4,
     gtIntraTile = 5,
     gtSkipBlock = 6,
+    gtBlend = 7,
 
     gtFrameEnd = 11,
     gtLoadPalette = 12,
@@ -179,9 +181,11 @@ type
     TileIdx: Integer; // 4
     PalIdx: Integer; // 4
     PSNR: TFloat; // 4
-    PredictedX, PredictedY: ShortInt; // 2 * 1
-    PredictedBackBufferOffset: Byte; // 1
-    Flags: set of (tmfHMirror, tmfVMirror, tmfPredicted); // 1
+    Attrs: record case Boolean of // 3 * 1
+      False: (MotionX, MotionY: ShortInt; MotionBackBufferOffset: Byte);
+      True: (BlendWeightM1, BlendWeightM2, Dummy: Byte);
+    end;
+    Flags: set of (tmfHMirror, tmfVMirror, tmfPredicted, tmfBlended); // 1
   end;
 
 {$if SizeOf(TTileMapItem) <> 16}
@@ -198,9 +202,11 @@ type
   TTileMapItemHelper = record helper for TTileMapItem
   private
     function GetHMirror: Boolean;
+    function GetIsBlended: Boolean;
     function GetIsSmoothed: Boolean;
     function GetVMirror: Boolean;
     procedure SetHMirror(AValue: Boolean);
+    procedure SetIsBlended(AValue: Boolean);
     procedure SetVMirror(AValue: Boolean);
     function GetIsPredicted: Boolean;
     procedure SetIsPredicted(AValue: Boolean);
@@ -208,6 +214,7 @@ type
     procedure Reset(AKeepMirrors: Boolean);
 
     property IsPredicted: Boolean read GetIsPredicted write SetIsPredicted;
+    property IsBlended: Boolean read GetIsBlended write SetIsBlended;
     property IsSmoothed: Boolean read GetIsSmoothed;
     property HMirror: Boolean read GetHMirror write SetHMirror;
     property VMirror: Boolean read GetVMirror write SetVMirror;
@@ -262,6 +269,19 @@ type
     procedure AdvanceFrame;
   end;
 
+  { TDCTBuffer }
+
+  TDCTBuffer = class
+    DCTBuffer: TDCTDynArray2;
+    CurBufferIndex: Integer;
+
+    constructor Create(ABufferCount, ASize: Integer);
+
+    function GetBuffer(ARelativeIndex: Integer): TDCTDynArray; overload;
+    function GetBuffer: TDCTDynArray; overload;
+    procedure AdvanceFrame;
+  end;
+
   { TFrame }
 
   TFrame = class
@@ -304,16 +324,18 @@ type
 
     procedure GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
 
-    function PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels; const ADCTs: TDCTDynArray): Integer;
-    function PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels; const ADCTs: TDCTDynArray): Integer;
+    procedure PrepareDCTs(const ADCTs: TDCTDynArray; const ABuffer: TIntegerDynArray2);
+    function PredictTileBlending(ADY, ADX: Integer; ATMI: PTileMapItem; const  ADCT: TDCT; ADCTBuffer: TDCTBuffer): Integer;
+    function PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Integer;
+    function PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const  ADCT: TDCT; const ADCTs: TDCTDynArray): Integer;
 
     // processes
 
     procedure LoadFromImage(AImageWidth, AImageHeight: Integer; AImage: PInteger);
     procedure IntraReduce(ATargetTileCount: Integer);
-    procedure PredictMotion(ARadius, ABackBufferOffset: Integer; const ABackBuffer: TIntegerDynArray2; var ADCTs: TDCTDynArray);
+    procedure Predict(ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBuffer);
     procedure Reconstruct(ARadius: Integer; AFrameBuffer: TFrameBuffer);
-    procedure DirectBlit(const AFrameBuffer: TIntegerDynArray2);
+    procedure DirectBlit(const ABuffer: TIntegerDynArray2);
   end;
 
   TFrameArray =  array of TFrame;
@@ -619,6 +641,9 @@ const
   CGTMCommandsCount = Ord(High(TGTMCommand)) + 1;
   CGTMCommandCodeBits = round(ln(CGTMCommandsCount) / ln(2));
   CGTMCommandBits = 16 - CGTMCommandCodeBits;
+  CGTMBlendBufferCount = 2;
+  CGTMBlendWeightShift = CGTMCommandBits div CGTMBlendBufferCount;
+  CGTMBlendWeightMax = (1 shl CGTMBlendWeightShift) - 1;
 
   function CompareTileUseCountRev(Item1, Item2, UserParameter:Pointer):Integer;
   var
@@ -657,10 +682,11 @@ begin
   TileIdx := -1;
   PalIdx := -1;
   PSNR := Infinity;
-  PredictedX := 0;
-  PredictedY := 0;
-  PredictedBackBufferOffset := 0;
+  Attrs.MotionX := 0;
+  Attrs.MotionY := 0;
+  Attrs.MotionBackBufferOffset := 0;
   IsPredicted := False;
+  IsBlended := False;
   if not AKeepMirrors then
     Flags := [];
 end;
@@ -670,9 +696,14 @@ begin
   Result := tmfHMirror in Flags;
 end;
 
+function TTileMapItemHelper.GetIsBlended: Boolean;
+begin
+  Result := tmfBlended in Flags;
+end;
+
 function TTileMapItemHelper.GetIsSmoothed: Boolean;
 begin
-  Result := IsPredicted and (PredictedX = 0) and (PredictedY = 0);
+  Result := IsPredicted and (Attrs.MotionX = 0) and (Attrs.MotionY = 0);
 end;
 
 function TTileMapItemHelper.GetVMirror: Boolean;
@@ -686,6 +717,14 @@ begin
     Flags += [tmfHMirror]
   else
     Flags -= [tmfHMirror];
+end;
+
+procedure TTileMapItemHelper.SetIsBlended(AValue: Boolean);
+begin
+  if AValue then
+    Flags += [tmfBlended]
+  else
+    Flags -= [tmfBlended];
 end;
 
 procedure TTileMapItemHelper.SetVMirror(AValue: Boolean);
@@ -1157,6 +1196,28 @@ begin
   CurBufferIndex := (CurBufferIndex + 1) mod Length(FrameBuffer);
 end;
 
+{ TDCTBuffer }
+
+constructor TDCTBuffer.Create(ABufferCount, ASize: Integer);
+begin
+  SetLength(DCTBuffer, ABufferCount, ASize);
+end;
+
+function TDCTBuffer.GetBuffer(ARelativeIndex: Integer): TDCTDynArray;
+begin
+  Result := DCTBuffer[(CurBufferIndex + ARelativeIndex + Length(DCTBuffer)) mod Length(DCTBuffer)];
+end;
+
+function TDCTBuffer.GetBuffer: TDCTDynArray;
+begin
+  Result := DCTBuffer[CurBufferIndex];
+end;
+
+procedure TDCTBuffer.AdvanceFrame;
+begin
+  CurBufferIndex := (CurBufferIndex + 1) mod Length(DCTBuffer);
+end;
+
 { TFrame }
 
 constructor TFrame.Create(AParent: TTilingEncoder; AIndex: Integer);
@@ -1281,16 +1342,104 @@ begin
   oxmx := Min(Encoder.FScreenWidth - cTileWidth, ADX + ARadius);
 end;
 
-function TFrame.PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels; const ADCTs: TDCTDynArray): Integer;
+procedure TFrame.PrepareDCTs(const ADCTs: TDCTDynArray; const ABuffer: TIntegerDynArray2);
+
+  procedure DoDCTs(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  var
+    x, yx: Integer;
+    DCTTile: PTile;
+    CpnPixels: TCpnPixels;
+  begin
+    if not InRange(AIndex, 0, Encoder.FScreenHeight - cTileWidth) then
+      Exit;
+
+    yx := AIndex * (Encoder.FScreenWidth - cTileWidth + 1);
+
+    DCTTile := TTile.New(True, False);
+    try
+      for x := 0 to Encoder.FScreenWidth - cTileWidth do
+      begin
+        DCTTile^.CopyRGBPixels(ABuffer, AIndex, x);
+
+        Encoder.ConvertToCpnPixels(DCTTile^, False, False, False, False, nil, CpnPixels);
+        Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsWeightedDCT, cColorCpns, ADCTs[yx]);
+
+        Inc(yx);
+      end;
+    finally
+      TTile.Dispose(DCTTile);
+    end;
+  end;
+
+begin
+  ProcThreadPool.DoParallelLocalProc(@DoDCTs, 0, Encoder.FScreenHeight - cTileWidth);
+end;
+
+function TFrame.PredictTileBlending(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; ADCTBuffer: TDCTBuffer): Integer;
+var
+  i, term, bm1, bm2, yx: Integer;
+  fm1, fm2, psnr: TFloat;
+  fcp: array[0 .. 1] of ArbFloat;
+  prev: array[0 .. cTileDCTSize * 2 - 1] of ArbFloat;
+  plain: array[0 .. cTileDCTSize - 1] of ArbFloat;
+  blended: TDCT;
+  prevDCTM1, prevDCTM2: TDCT;
+begin
+  Result := MaxInt;
+
+  yx := ADY * (Encoder.FScreenWidth - cTileWidth + 1) + ADX;
+
+  prevDCTM1 := ADCTBuffer.GetBuffer(-1)[yx];
+  prevDCTM2 := ADCTBuffer.GetBuffer(-2)[yx];
+
+  for i := 0 to cTileDCTSize - 1 do
+  begin
+    prev[i * 2 + 0] := prevDCTM1[i];
+    prev[i * 2 + 1] := prevDCTM2[i];
+    plain[i] := ADCT[i];
+  end;
+
+  slegls(prev[0], cTileDCTSize, 2, 2, plain[0], fcp[0], term);
+  if term = 1 then
+  begin
+    bm1 := EnsureRange(round(fcp[0] * CGTMBlendWeightMax), 1, CGTMBlendWeightMax);
+    fm1 := bm1 * (1.0 / CGTMBlendWeightMax);
+
+    // try to compensate for rounding to 64 levels by sending rounding error to other parameter
+
+    fm2 := fcp[1] + fcp[0] - fm1;
+    bm2 := EnsureRange(round(fm2 * CGTMBlendWeightMax), 1, CGTMBlendWeightMax);
+    fm2 := bm2 * (1.0 / CGTMBlendWeightMax);
+
+    for i := 0 to cTileDCTSize - 1 do
+      blended[i] := SarLongint(prevDCTM1[i] * bm1 + prevDCTM2[i] * bm2, CGTMBlendWeightShift);
+
+    Result := CompareEuclideanDCTPtr_asm(ADCT, blended);
+
+    psnr := EuclideanToPSNR(Result);
+
+    if not ATMI^.IsPredicted or (psnr > ATMI^.PSNR) then
+    begin
+      ATMI^.IsPredicted := True;
+      ATMI^.IsBlended := True;
+      ATMI^.PSNR := psnr;
+      ATMI^.Attrs.BlendWeightM1 := bm1;
+      ATMI^.Attrs.BlendWeightM2 := bm2;
+    end
+    else
+    begin
+      Result := MaxInt;
+    end;
+  end;
+end;
+
+function TFrame.PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Integer;
 var
   oy, yx: Integer;
   state: TDCTCribbleState;
   PrevDCTPtr: PDCTScalar;
-  CurDCT: TDCT;
   psnr: TFloat;
 begin
-  Encoder.ComputeCpnPixelsPsyVisFeatures(ACpnPixels, pvsWeightedDCT, cColorCpns, CurDCT);
-
   Result := MaxInt;
   state.Error := MaxInt;
   state.Y := MaxInt;
@@ -1306,7 +1455,7 @@ begin
     yx := oy * (Encoder.FScreenWidth - cTileWidth + 1) + state.oxmn;
     PrevDCTPtr := ADCTs[yx];
 
-    CribbleEuclideanDCTPtr_asm(CurDCT, PrevDCTPtr, @state, oy);
+    CribbleEuclideanDCTPtr_asm(ADCT, PrevDCTPtr, @state, oy);
   end;
 
   psnr := EuclideanToPSNR(state.Error);
@@ -1315,23 +1464,20 @@ begin
   begin
     ATMI^.IsPredicted := True;
     ATMI^.PSNR := psnr;
-    ATMI^.PredictedY := state.Y - ADY;
-    ATMI^.PredictedX := state.X - ADX;
-    ATMI^.PredictedBackBufferOffset := ABackBufferOffset;
+    ATMI^.Attrs.MotionY := state.Y - ADY;
+    ATMI^.Attrs.MotionX := state.X - ADX;
+    ATMI^.Attrs.MotionBackBufferOffset := ABackBufferOffset;
     Result := state.Error;
   end;
 end;
 
-function TFrame.PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ACpnPixels: TCpnPixels; const ADCTs: TDCTDynArray): Integer;
+function TFrame.PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Integer;
 var
   oy, ox, oymn, oymx, oxmn, oxmx, yx, bestX, bestY: Integer;
   PSNRAcc: TFloat;
   PSNRIdx, PSNRCnt, err: Cardinal;
   PrevDCTPtr: PDCTScalar;
-  CurDCT: TDCT;
 begin
-  Encoder.ComputeCpnPixelsPsyVisFeatures(ACpnPixels, pvsWeightedDCT, cColorCpns, CurDCT);
-
   GetPredictExtents(ARadius, ADY, ADX, oxmn, oxmx, oymn, oymx);
 
   Result := MaxInt;
@@ -1354,7 +1500,7 @@ begin
 
       PrevDCTPtr := ADCTs[yx];
 
-      err := CompareEuclideanDCTPtr_asm(CurDCT, PrevDCTPtr);
+      err := CompareEuclideanDCTPtr_asm(ADCT, PrevDCTPtr);
 
       if err < Result then
       begin
@@ -1373,38 +1519,11 @@ begin
 
   ATMI^.IsPredicted := True;
   ATMI^.PSNR := PSNRAcc / PSNRCnt;
-  ATMI^.PredictedY := bestY - ADY;
-  ATMI^.PredictedX := bestX - ADX;
+  ATMI^.Attrs.MotionY := bestY - ADY;
+  ATMI^.Attrs.MotionX := bestX - ADX;
 end;
 
-procedure TFrame.PredictMotion(ARadius, ABackBufferOffset: Integer; const ABackBuffer: TIntegerDynArray2; var ADCTs: TDCTDynArray);
-
-  procedure DoDCTs(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
-  var
-    x, yx: Integer;
-    DCTTile: PTile;
-    CpnPixels: TCpnPixels;
-  begin
-    if not InRange(AIndex, 0, Encoder.FScreenHeight - cTileWidth) then
-      Exit;
-
-    yx := AIndex * (Encoder.FScreenWidth - cTileWidth + 1);
-
-    DCTTile := TTile.New(True, False);
-    try
-      for x := 0 to Encoder.FScreenWidth - cTileWidth do
-      begin
-        DCTTile^.CopyRGBPixels(ABackBuffer, AIndex, x);
-
-        Encoder.ConvertToCpnPixels(DCTTile^, False, False, False, False, nil, CpnPixels);
-        Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsWeightedDCT, cColorCpns, ADCTs[yx]);
-
-        Inc(yx);
-      end;
-    finally
-      TTile.Dispose(DCTTile);
-    end;
-  end;
+procedure TFrame.Predict(ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBuffer);
 
   procedure DoXY(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
@@ -1412,6 +1531,7 @@ procedure TFrame.PredictMotion(ARadius, ABackBufferOffset: Integer; const ABackB
     TMI: PTileMapItem;
     FrameTile: PTile;
     CurCpnPixels: TCpnPixels;
+    CurDCT: TDCT;
   begin
     if not InRange(AIndex, 0, Encoder.FTileMapSize - 1) then
       Exit;
@@ -1422,14 +1542,21 @@ procedure TFrame.PredictMotion(ARadius, ABackBufferOffset: Integer; const ABackB
     FrameTile := FrameTiles[AIndex];
 
     Encoder.ConvertToCpnPixels(FrameTile^, False, False, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, nil, CurCpnPixels);
+    Encoder.ComputeCpnPixelsPsyVisFeatures(CurCpnPixels, pvsWeightedDCT, cColorCpns, CurDCT);
 
     dx := sx shl cTileWidthBits;
     dy := sy shl cTileWidthBits;
 
     if ABackBufferOffset = 0 then
-      PredictTileIntra(ARadius, dy, dx, TMI, CurCpnPixels, ADCTs)
+    begin
+      PredictTileIntra(ARadius, dy, dx, TMI, CurDCT, ADCTBuffer.GetBuffer)
+    end
     else
-      PredictTileMotion(ARadius, ABackBufferOffset, dy, dx, TMI, CurCpnPixels, ADCTs);
+    begin
+      if ABackBufferOffset = CGTMBlendBufferCount then
+        PredictTileBlending(dy, dx, TMI, CurDCT, ADCTBuffer);
+      PredictTileMotion(ARadius, ABackBufferOffset, dy, dx, TMI, CurDCT, ADCTBuffer.GetBuffer(-ABackBufferOffset));
+    end;
   end;
 
 begin
@@ -1441,7 +1568,6 @@ begin
 
   Dec(ARadius);
 
-  ProcThreadPool.DoParallelLocalProc(@DoDCTs, 0, Encoder.FScreenHeight - cTileWidth);
   ProcThreadPool.DoParallelLocalProc(@DoXY, 0, Encoder.FTileMapSize - 1);
 end;
 
@@ -1588,7 +1714,7 @@ begin
   end;
 end;
 
-procedure TFrame.DirectBlit(const AFrameBuffer: TIntegerDynArray2);
+procedure TFrame.DirectBlit(const ABuffer: TIntegerDynArray2);
 
   procedure DoBlit(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
@@ -1606,7 +1732,7 @@ procedure TFrame.DirectBlit(const AFrameBuffer: TIntegerDynArray2);
       dx := sx shl cTileWidthBits;
 
       FrameTile := FrameTiles[yx];
-      FrameTile^.BlitRGBPixels(AFrameBuffer, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, dy, dx);
+      FrameTile^.BlitRGBPixels(ABuffer, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, dy, dx);
 
       Inc(yx);
     end;
@@ -1877,11 +2003,11 @@ var
     begin
       // draw fb (motion predicted tile)
 
-      BackBuf := AFrameBuffer.GetBuffer(-TMI^.PredictedBackBufferOffset);
+      BackBuf := AFrameBuffer.GetBuffer(-TMI^.Attrs.MotionBackBufferOffset);
       FrontBuf := AFrameBuffer.GetBuffer;
       for ty := 0 to cTileWidth - 1 do
       begin
-        Move(BackBuf[dy + TMI^.PredictedY, dx + TMI^.PredictedX], FrontBuf[dy, dx], cTileWidth * SizeOf(Integer));
+        Move(BackBuf[dy + TMI^.Attrs.MotionY, dx + TMI^.Attrs.MotionX], FrontBuf[dy, dx], cTileWidth * SizeOf(Integer));
         Inc(dy);
       end;
     end
@@ -2195,7 +2321,7 @@ var
   isKFFF: Boolean;
   Frame: TFrame;
   FrameBuffer: TFrameBuffer;
-  DCTs: TDCTDynArray;
+  DCTBuffer: TDCTBuffer;
 begin
   if (Length(FFrames) = 0) or (FMotionPredictRadius <= 0) then
     Exit;
@@ -2203,9 +2329,8 @@ begin
   ProgressRedraw(0, '', esPredictMotion);
 
   FrameBuffer := TFrameBuffer.Create(FMotionPredictMaxBufferedFrames + 1, FScreenHeight, FScreenWidth);
+  DCTBuffer := TDCTBuffer.Create(FMotionPredictMaxBufferedFrames, (FScreenHeight - cTileWidth + 1) * (FScreenWidth - cTileWidth + 1));
   try
-    SetLength(DCTs, (FScreenHeight - cTileWidth + 1) * (FScreenWidth - cTileWidth + 1));
-
     for frmIdx := 0 to High(FFrames) do
     begin
       Frame := FFrames[frmIdx];
@@ -2218,14 +2343,21 @@ begin
         Frame.DirectBlit(FrameBuffer.GetBuffer);
 
         if isKFFF then
-          Frame.PredictMotion(FMotionPredictRadius, 0, FrameBuffer.GetBuffer, DCTs)
+        begin
+          Frame.PrepareDCTs(DCTBuffer.GetBuffer, FrameBuffer.GetBuffer);
+          Frame.Predict(FMotionPredictRadius, 0, DCTBuffer)
+        end
         else
+        begin
           for iBuf := 1 to Min(FMotionPredictMaxBufferedFrames, frmRelIdx) do
-            Frame.PredictMotion(FMotionPredictRadius, iBuf, FrameBuffer.GetBuffer(-iBuf), DCTs);
+            Frame.Predict(FMotionPredictRadius, iBuf, DCTBuffer);
+          Frame.PrepareDCTs(DCTBuffer.GetBuffer, FrameBuffer.GetBuffer);
+        end;
       finally
         Frame.ReleaseFrameTiles;
       end;
 
+      DCTBuffer.AdvanceFrame;
       FrameBuffer.AdvanceFrame;
 
       Write(frmIdx + 1:8, ' / ', Length(FFrames):8, #13);
@@ -2233,6 +2365,7 @@ begin
 
     ProgressRedraw(1, 'PredictMotion');
   finally
+    DCTBuffer.Free;
     FrameBuffer.Free;
   end;
 end;
@@ -2243,20 +2376,20 @@ var
   isKFFF: Boolean;
   Frame: TFrame;
   FrameBuffer: TFrameBuffer;
-  DCTs: TDCTDynArray;
+  DCTBuffer: TDCTBuffer;
 begin
   if Length(FFrames) = 0 then
     Exit;
 
   ProgressRedraw(0, '', esReconstruct);
 
-  SetLength(DCTs, (FScreenHeight - cTileWidth + 1) * (FScreenWidth - cTileWidth + 1));
   FKeyFramesLeft := Length(FKeyFrames);
 
   PrepareReconstruct;
   ProgressRedraw(1, 'PrepareReconstruct', esReconstruct);
 
   FrameBuffer := TFrameBuffer.Create(FMotionPredictMaxBufferedFrames + 1, FScreenHeight, FScreenWidth);
+  DCTBuffer := TDCTBuffer.Create(FMotionPredictMaxBufferedFrames, (FScreenHeight - cTileWidth + 1) * (FScreenWidth - cTileWidth + 1));
   try
     for frmIdx := 0 to High(FFrames) do
     begin
@@ -2268,19 +2401,24 @@ begin
       Frame.AcquireFrameTiles;
       try
         Frame.ResetTileMap(True);
+
         if not isKFFF then
           for iBuf := 1 to Min(FMotionPredictMaxBufferedFrames, frmRelIdx) do
-            Frame.PredictMotion(FMotionPredictRadius, iBuf, FrameBuffer.GetBuffer(-iBuf), DCTs);
+            Frame.Predict(FMotionPredictRadius, iBuf, DCTBuffer);
+
         Frame.Reconstruct(FMotionPredictRadius, FrameBuffer);
+        Frame.PrepareDCTs(DCTBuffer.GetBuffer, FrameBuffer.GetBuffer);
       finally
         Frame.ReleaseFrameTiles;
       end;
 
+      DCTBuffer.AdvanceFrame;
       FrameBuffer.AdvanceFrame;
 
       Write(frmIdx + 1:8, ' / ', Length(FFrames):8, #13);
     end;
   finally
+    DCTBuffer.Free;
     FrameBuffer.Free;
     FinishReconstruct;
   end;
@@ -3941,7 +4079,10 @@ begin
 
         if TMI^.IsPredicted and FRenderPredicted then
         begin
-          TempTile^.CopyRGBPixels(FRenderFrameBuffer.GetBuffer(-TMI^.PredictedBackBufferOffset), (sy shl cTileWidthBits) + TMI^.PredictedY, (sx shl cTileWidthBits) + TMI^.PredictedX);
+          TempTile^.CopyRGBPixels(
+            FRenderFrameBuffer.GetBuffer(-TMI^.Attrs.MotionBackBufferOffset),
+            (sy shl cTileWidthBits) + TMI^.Attrs.MotionY,
+            (sx shl cTileWidthBits) + TMI^.Attrs.MotionX);
           DrawTile(FRenderFrameBuffer.GetBuffer, nil, TempTile, sy, sx, False, False, True)
         end
         else if InRange(TMI^.TileIdx, 0, High(Tiles)) then
@@ -4012,9 +4153,9 @@ begin
             if TMI^.IsPredicted then
             begin
               off := cTileWidth div 2;
-              siz := Abs(TMI^.PredictedX) + Abs(TMI^.PredictedY);
+              siz := Abs(TMI^.Attrs.MotionX) + Abs(TMI^.Attrs.MotionY);
 
-              if TMI^.PredictedBackBufferOffset > 1 then
+              if TMI^.Attrs.MotionBackBufferOffset > 1 then
               begin
                 col := Max(0, $c0 - siz);
                 col := ToRGB(col, col, $ff);
@@ -4036,7 +4177,7 @@ begin
               begin
                 canvas.Line(
                   (sx shl cTileWidthBits) + off, (sy shl cTileWidthBits) + off,
-                  (sx shl cTileWidthBits) + TMI^.PredictedX + off, (sy shl cTileWidthBits) + TMI^.PredictedY + off);
+                  (sx shl cTileWidthBits) + TMI^.Attrs.MotionX + off, (sy shl cTileWidthBits) + TMI^.Attrs.MotionY + off);
               end;
             end;
           end;
@@ -5426,8 +5567,8 @@ var
     begin
       DivMod(i, FTileMapWidth, sy, sx);
       frm.TileMap[sy, sx].IsPredicted := True;
-      frm.TileMap[sy, sx].PredictedX := 0;
-      frm.TileMap[sy, sx].PredictedY := 0;
+      frm.TileMap[sy, sx].Attrs.MotionX := 0;
+      frm.TileMap[sy, sx].Attrs.MotionY := 0;
     end;
     tmPos += SkipCount;
   end;
@@ -5547,9 +5688,9 @@ begin
 
             TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
 
-            TMI^.PredictedX := (CommandData and 31) - (CommandData and 32);
-            TMI^.PredictedY := ((CommandData shr 6) and 31) - ((CommandData shr 6) and 32);
-            TMI^.PredictedBackBufferOffset := 1;
+            TMI^.Attrs.MotionX := (CommandData and 31) - (CommandData and 32);
+            TMI^.Attrs.MotionY := ((CommandData shr 6) and 31) - ((CommandData shr 6) and 32);
+            TMI^.Attrs.MotionBackBufferOffset := 1;
             TMI^.IsPredicted := True;
 
             Inc(tmPos);
@@ -5562,9 +5703,9 @@ begin
 
             TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
 
-            TMI^.PredictedX := ShortInt(ReadByte);
-            TMI^.PredictedY := ShortInt(ReadByte);
-            TMI^.PredictedBackBufferOffset := CommandData + 1;
+            TMI^.Attrs.MotionX := ShortInt(ReadByte);
+            TMI^.Attrs.MotionY := ShortInt(ReadByte);
+            TMI^.Attrs.MotionBackBufferOffset := CommandData + 1;
             TMI^.IsPredicted := True;
 
             Inc(tmPos);
@@ -5646,17 +5787,17 @@ var
   begin
     if TMI.IsPredicted then
     begin
-      isLongOffsets := not InRange(TMI.PredictedX, -32, 31) or not InRange(TMI.PredictedY, -32, 31) or (TMI.PredictedBackBufferOffset > 1);
+      isLongOffsets := not InRange(TMI.Attrs.MotionX, -32, 31) or not InRange(TMI.Attrs.MotionY, -32, 31) or (TMI.Attrs.MotionBackBufferOffset > 1);
 
       if isLongOffsets then
       begin
-        DoCmd(gtPredictedTileLongOffsets, TMI.PredictedBackBufferOffset - 1);
-        DoByte(PByte(@TMI.PredictedX)^);
-        DoByte(PByte(@TMI.PredictedY)^);
+        DoCmd(gtPredictedTileLongOffsets, TMI.Attrs.MotionBackBufferOffset - 1);
+        DoByte(PByte(@TMI.Attrs.MotionX)^);
+        DoByte(PByte(@TMI.Attrs.MotionY)^);
       end
       else
       begin
-        attrs := (PByte(@TMI.PredictedX)^ and 63) or ((PByte(@TMI.PredictedY)^ and 63) shl 6);
+        attrs := (PByte(@TMI.Attrs.MotionX)^ and 63) or ((PByte(@TMI.Attrs.MotionY)^ and 63) shl 6);
 
         DoCmd(gtPredictedTileShortOffsets, attrs);
       end;
