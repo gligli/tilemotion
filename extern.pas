@@ -190,8 +190,11 @@ procedure yakmo_load_train_data_weighted(ay: PYakmo; rowCount: Cardinal; colCoun
 procedure yakmo_train_on_data(ay: PYakmo; pointToCluster: PInteger); stdcall; external 'yakmo.dll';
 procedure yakmo_get_centroids(ay: PYakmo; centroids: PPDouble); stdcall; external 'yakmo.dll';
 
+function GetActiveProcessorCount(GroupNumber: Word): DWORD; stdcall; external 'kernel32.dll';
+
 const
   CRandomSeed = $42381337;
+  ALL_PROCESSOR_GROUPS = High(Word);
 
 implementation
 
@@ -850,11 +853,8 @@ begin
   end;
 end;
 
-var
-  SystemInfo: SYSTEM_INFO;
 initialization
   GetLocaleFormatSettings(LOCALE_INVARIANT, GInvariantFormatSettings);
-  GetSystemInfo(SystemInfo);
-  GNumberOfProcessors := SystemInfo.dwNumberOfProcessors;
+  GNumberOfProcessors := GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
 end.
 
