@@ -180,6 +180,7 @@ function YUVToRGB(y, u, v, scl: TFloat): Integer;
 function lerp(x, y, alpha: Double): Double; inline;
 function ilerp(x, y, alpha, maxAlpha: Integer): Integer; inline;
 function revlerp(x, r, alpha: Double): Double; inline;
+function BlendRGB(x, y, alphax, alphay: Integer; shift: Byte): Integer;
 function Posterize(v: Byte; cvt: Integer): Byte; inline;
 function PosterizeBpc(v, bpc: Byte): Byte; inline;
 function CompareEuclideanDCTPtr(pa, pb: PDCTScalar): Cardinal; overload;
@@ -535,6 +536,21 @@ end;
 function revlerp(x, r, alpha: Double): Double; inline;
 begin
   Result := x + (r - x) / alpha;
+end;
+
+function BlendRGB(x, y, alphax, alphay: Integer; shift: Byte): Integer;
+var
+  r1, g1, b1: Integer;
+  r2, g2, b2: Integer;
+begin
+  FromRGB(x, r1, g1, b1);
+  FromRGB(y, r2, g2, b2);
+
+  r1 := (r1 * alphax + r2 * alphay) shr shift;
+  g1 := (g1 * alphax + g2 * alphay) shr shift;
+  b1 := (b1 * alphax + b2 * alphay) shr shift;
+
+  Result := ToRGB(r1, g1, b1);
 end;
 
 function Posterize(v: Byte; cvt: Integer): Byte; inline;
