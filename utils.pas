@@ -550,6 +550,10 @@ begin
   g1 := (g1 * alphax + g2 * alphay) shr shift;
   b1 := (b1 * alphax + b2 * alphay) shr shift;
 
+  r1 := EnsureRange(r1, 0, High(Byte));
+  g1 := EnsureRange(g1, 0, High(Byte));
+  b1 := EnsureRange(b1, 0, High(Byte));
+
   Result := ToRGB(r1, g1, b1);
 end;
 

@@ -704,7 +704,7 @@ end;
 
 function TTileMapItemHelper.GetIsSmoothed: Boolean;
 begin
-  Result := IsPredicted and (Attrs.MotionX = 0) and (Attrs.MotionY = 0);
+  Result := IsPredicted and not IsBlended and (Attrs.MotionX = 0) and (Attrs.MotionY = 0);
 end;
 
 function TTileMapItemHelper.GetVMirror: Boolean;
@@ -1395,59 +1395,47 @@ end;
 
 function TFrame.PredictTileBlending(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; ADCTBuffer: TDCTBuffer): Integer;
 var
-  i, term, bm1, bm2, yx: Integer;
-  fm1, fm2, psnr: TFloat;
-  fcp: array[0 .. 1] of ArbFloat;
-  prev: array[0 .. cTileDCTSize * 2 - 1] of ArbFloat;
-  plain: array[0 .. cTileDCTSize - 1] of ArbFloat;
-  blended: TDCT;
+  i, bm1, bm2, yx, err, bestM1, bestM2: Integer;
+  psnr: TFloat;
   prevDCTM1, prevDCTM2: TDCT;
 begin
   Result := MaxInt;
+  bestM1 := MaxInt;
+  bestM2 := MaxInt;
 
   yx := ADY * (Encoder.FScreenWidth - cTileWidth + 1) + ADX;
 
   prevDCTM1 := ADCTBuffer.GetBuffer(-1)[yx];
   prevDCTM2 := ADCTBuffer.GetBuffer(-2)[yx];
 
-  for i := 0 to cTileDCTSize - 1 do
-  begin
-    prev[i * 2 + 0] := prevDCTM1[i];
-    prev[i * 2 + 1] := prevDCTM2[i];
-    plain[i] := ADCT[i];
-  end;
-
-  slegls(prev[0], cTileDCTSize, 2, 2, plain[0], fcp[0], term);
-  if term = 1 then
-  begin
-    bm1 := EnsureRange(round(fcp[0] * CGTMBlendWeightMax), 0, CGTMBlendWeightMax);
-    fm1 := bm1 * (1.0 / CGTMBlendWeightMax);
-
-    // try to compensate for rounding to 64 levels by sending rounding error to other parameter
-
-    fm2 := fcp[1] + fcp[0] - fm1;
-    bm2 := EnsureRange(round(fm2 * CGTMBlendWeightMax), 0, CGTMBlendWeightMax);
-    fm2 := bm2 * (1.0 / CGTMBlendWeightMax);
-
-    for i := 0 to cTileDCTSize - 1 do
-      blended[i] := SarLongint(prevDCTM1[i] * bm1 + prevDCTM2[i] * bm2, CGTMBlendWeightShift);
-
-    Result := CompareEuclideanDCTPtr_asm(ADCT, blended);
-
-    psnr := EuclideanToPSNR(Result);
-
-    if not ATMI^.IsPredicted or (psnr > ATMI^.PSNR) then
+  for bm2 := 0 to CGTMBlendWeightMax do
+    for bm1 := 0 to CGTMBlendWeightMax do
     begin
-      ATMI^.IsPredicted := True;
-      ATMI^.IsBlended := True;
-      ATMI^.PSNR := psnr;
-      ATMI^.Attrs.BlendWeightM1 := bm1;
-      ATMI^.Attrs.BlendWeightM2 := bm2;
-    end
-    else
-    begin
-      Result := MaxInt;
+      err := 0;
+      for i := 0 to cTileDCTSize - 1 do
+         err += Sqr(ADCT[i] - SarLongint(prevDCTM1[i] * bm1 + prevDCTM2[i] * bm2, CGTMBlendWeightShift));
+
+      if err < Result then
+      begin
+        Result := err;
+        bestM1 := bm1;
+        bestM2 := bm2;
+      end;
     end;
+
+  psnr := EuclideanToPSNR(Result);
+
+  if not ATMI^.IsPredicted or (psnr > ATMI^.PSNR) then
+  begin
+    ATMI^.IsPredicted := True;
+    ATMI^.IsBlended := True;
+    ATMI^.PSNR := psnr;
+    ATMI^.Attrs.BlendWeightM1 := bestM1;
+    ATMI^.Attrs.BlendWeightM2 := bestM2;
+  end
+  else
+  begin
+    Result := MaxInt;
   end;
 end;
 
