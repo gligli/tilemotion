@@ -152,8 +152,8 @@ type
   TDCTDynArray2 = array of TDCTDynArray;
 
 const
-  cYUVScale = -Low(TDCTScalar) / ((1 shl cBitsPerComp) * Sqr(cTileWidth));
-  cBestPSNR = 20.0 * Ln((1 shl cBitsPerComp) * cYUVScale - 1) / Ln(10.0);
+  cDCTScale = 1;//-Low(TDCTScalar) / ((1 shl cBitsPerComp) * Sqr(cTileWidth));
+  cBestPSNR = 20.0 * Ln((1 shl cBitsPerComp) * cDCTScale - 1) / Ln(10.0);
 
 procedure SpinEnter(Lock: PSpinLock); assembler;
 procedure SpinLeave(Lock: PSpinLock); assembler;
@@ -166,7 +166,7 @@ function SwapRB(c: Integer): Integer; inline;
 function ToRGB(r, g, b: Byte): Integer; inline;
 procedure FromRGB(col: Integer; out r, g, b: Integer); inline; overload;
 procedure FromRGB(col: Integer; out r, g, b: Byte); inline; overload;
-function ToLuma(r, g, b: Byte): Integer; inline;
+function ToLuma(r, g, b: Integer): Integer; inline;
 function ToBW(col: Integer): Integer;
 function HSVToRGB(h, s, v: Byte): Integer;
 procedure RGBToHSV(col: Integer; out h, s, v: Byte); overload;
@@ -181,6 +181,7 @@ function lerp(x, y, alpha: Double): Double; inline;
 function ilerp(x, y, alpha, maxAlpha: Integer): Integer; inline;
 function revlerp(x, r, alpha: Double): Double; inline;
 function BlendRGB(x, y, alphax, alphay: Integer; shift: Byte): Integer;
+function InsertRGB(col: Integer; value, cpn: Integer): Integer;
 function Posterize(v: Byte; cvt: Integer): Byte; inline;
 function PosterizeBpc(v, bpc: Byte): Byte; inline;
 function CompareEuclideanDCTPtr(pa, pb: PDCTScalar): Cardinal; overload;
@@ -289,7 +290,7 @@ begin
   b := (col shr 16) and $ff;
 end;
 
-function ToLuma(r, g, b: Byte): Integer; inline;
+function ToLuma(r, g, b: Integer): Integer; inline;
 begin
   Result := r * cRedMul + g * cGreenMul + b * cBlueMul;
 end;
@@ -555,6 +556,14 @@ begin
   b1 := EnsureRange(b1, 0, High(Byte));
 
   Result := ToRGB(r1, g1, b1);
+end;
+
+function InsertRGB(col: Integer; value, cpn: Integer): Integer;
+var
+  mask: Integer;
+begin
+  mask := -1 xor (((1 shl cBitsPerComp) - 1) shl (cpn * cBitsPerComp));
+  Result := col and mask or (value shl (cpn * cBitsPerComp));
 end;
 
 function Posterize(v: Byte; cvt: Integer): Byte; inline;

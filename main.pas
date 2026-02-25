@@ -27,26 +27,19 @@ type
     chkPredicted: TCheckBox;
     cbxScaling: TComboBox;
     cbxEndStep: TComboBox;
-    cbxPalCount: TComboBox;
     cbxStartStep: TComboBox;
-    cbxYilMix: TComboBox;
-    cbxPalSize: TComboBox;
     chkDitheredO: TCheckBox;
     chkGamma: TCheckBox;
     chkMirrored: TCheckBox;
     chkPlay: TCheckBox;
-    chkUseTK: TCheckBox;
     edInput: TEdit;
     edOutput: TEdit;
     From: TLabel;
     imgDest: TImage;
-    imgPalette: TImage;
     imgSource: TImage;
     imgTiles: TImage;
     Label1: TLabel;
     Label10: TLabel;
-    Label11: TLabel;
-    Label12: TLabel;
     Label13: TLabel;
     Label18: TLabel;
     Label15: TLabel;
@@ -77,7 +70,6 @@ type
     pnLbl: TPanel;
     rbTileLimit: TRadioButton;
     rbPSNR: TRadioButton;
-    sbPalette: TScrollBox;
     sdGTM: TSaveDialog;
     sdSettings: TSaveDialog;
     seMaxCores: TSpinEdit;
@@ -99,7 +91,6 @@ type
     tsInput: TTabSheet;
     tsOutput: TTabSheet;
     Label5: TLabel;
-    Label8: TLabel;
     lblCorrel: TLabel;
     MenuItem2: TMenuItem;
     MenuItem3: TMenuItem;
@@ -109,15 +100,12 @@ type
     MenuItem1: TMenuItem;
     pmProcesses: TPopupMenu;
     PopupMenu1: TPopupMenu;
-    sedPalIdx: TSpinEdit;
     IdleTimer: TIdleTimer;
     tbFrame: TTrackBar;
 
     // processes
     procedure btnPredictMotionClick(Sender: TObject);
-    procedure btnDitherClick(Sender: TObject);
     procedure btnGlobalLoadClick(Sender: TObject);
-    procedure btnPreparePalettesClick(Sender: TObject);
     procedure btnClusterClick(Sender: TObject);
     procedure btnReconstructClick(Sender: TObject);
     procedure btnReindexClick(Sender: TObject);
@@ -134,12 +122,8 @@ type
     procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure FormKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure IdleTimerTimer(Sender: TObject);
-    procedure imgContextPopup(Sender: TObject; MousePos: TPoint; var Handled: Boolean);
-    procedure imgPaletteClick(Sender: TObject);
     procedure btnGeneratePNGsInputClick(Sender: TObject);
     procedure imgPaintBackground(ASender: TObject; ACanvas: TCanvas; ARect: TRect);
-    procedure imgPaletteContextPopup(Sender: TObject; MousePos: TPoint; var Handled: Boolean);
-    procedure imgPaletteMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
     procedure imgTilesMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
     procedure imgTilesMouseWheelDown(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
     procedure imgTilesMouseWheelUp(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
@@ -205,12 +189,6 @@ begin
   UpdateVideo(nil);
 end;
 
-procedure TMainForm.btnPreparePalettesClick(Sender: TObject);
-begin
-  FTilingEncoder.Run(esPreparePalettes);
-  UpdateVideo(nil);
-end;
-
 procedure TMainForm.btnReconstructClick(Sender: TObject);
 begin
   FTilingEncoder.Run(esReconstruct);
@@ -238,12 +216,6 @@ end;
 procedure TMainForm.btnPredictMotionClick(Sender: TObject);
 begin
   FTilingEncoder.Run(esPredictMotion);
-  UpdateVideo(nil);
-end;
-
-procedure TMainForm.btnDitherClick(Sender: TObject);
-begin
-  FTilingEncoder.Run(esDither);
   UpdateVideo(nil);
 end;
 
@@ -280,32 +252,6 @@ begin
   ACanvas.Brush.Color := clBlack;
   ACanvas.Brush.Style := bsSolid;
   ACanvas.Clear;
-end;
-
-procedure TMainForm.imgPaletteContextPopup(Sender: TObject; MousePos: TPoint; var Handled: Boolean);
-begin
-  if sedPalIdx.Value >= 0 then
-  begin
-    sedPalIdx.Value := -1;
-    Handled := True;
-  end;
-end;
-
-procedure TMainForm.imgPaletteMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
-var
-  P: TPoint;
-  palIdx, useCount: Integer;
-begin
-  P := imgPalette.ScreenToClient(Mouse.CursorPos);
-  palIdx := iDivDef(P.Y * FTilingEncoder.PaletteCount, imgPalette.Height, 0);
-
-  useCount := -1;
-  if InRange(FTilingEncoder.RenderFrameIndex, 0, High(FTilingEncoder.Frames)) and
-      Assigned(FTilingEncoder.Frames[FTilingEncoder.RenderFrameIndex].PKeyFrame) and
-      InRange(palIdx, 0, High(FTilingEncoder.Palettes)) then
-    useCount := FTilingEncoder.Palettes[palIdx].UseCount;
-
-  llPalTileDesc.Caption := Format('Palette #: %3d, UseCount: %6d', [palIdx, useCount]);
 end;
 
 procedure TMainForm.imgTilesMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
@@ -418,12 +364,6 @@ begin
   if OkStep(esReduce) then
     btnClusterClick(nil);
 
-  if OkStep(esPreparePalettes) then
-    btnPreparePalettesClick(nil);
-
-  if OkStep(esDither) then
-    btnDitherClick(nil);
-
   if OkStep(esReconstruct) then
     btnReconstructClick(nil);
 
@@ -460,7 +400,6 @@ begin
   edOutput.Text := ExtractFilePath(Application.ExeName) + 'debug.gtm';
   seFrameCount.Value := IfThen(seFrameCount.Value >= 12, IfThen(seFrameCount.Value = 12, 48, 2), 12);
   cbxScaling.ItemIndex := 4;
-  cbxPalCount.Text := '256';
   cbxMPRadius.Text := '128';
 
   FTilingEncoder.Test;
@@ -474,7 +413,6 @@ begin
   edOutput.Text :=  ExtractFilePath(Application.ExeName) + 'debug.gtm';
   seFrameCount.Value := IfThen(seFrameCount.Value >= 12, IfThen(seFrameCount.Value = 12, 24, 2), 12);
   cbxScaling.ItemIndex := 2;
-  cbxPalCount.Text := '256';
   cbxMPRadius.Text := '128';
 
   FTilingEncoder.Test;
@@ -554,30 +492,6 @@ begin
   end;
 end;
 
-procedure TMainForm.imgContextPopup(Sender: TObject; MousePos: TPoint; var Handled: Boolean);
-var
-  pt: TPoint;
-begin
-  pt := TImage(Sender).ScreenToClient(Mouse.CursorPos);
-
-  pt.X -= (TImage(Sender).Width - FTilingEncoder.ScreenWidth) div 2;
-  pt.Y -= (TImage(Sender).Height - FTilingEncoder.ScreenHeight) div 2;
-
-  Handled := InRange(pt.X, 0, FTilingEncoder.ScreenWidth - 1) and InRange(pt.Y, 0, FTilingEncoder.ScreenHeight - 1) and (sedPalIdx.Value >= 0);
-
-  if Handled then
-    sedPalIdx.Value := -1;
-end;
-
-procedure TMainForm.imgPaletteClick(Sender: TObject);
-var
-  P: TPoint;
-begin
-  P := imgPalette.ScreenToClient(Mouse.CursorPos);
-  sedPalIdx.Value := iDivDef(P.Y * FTilingEncoder.PaletteCount, imgPalette.Height, 0);
-  FTilingEncoder.RenderPaletteIndex := sedPalIdx.Value;
-end;
-
 procedure TMainForm.seMaxTilesEditingDone(Sender: TObject);
 begin
   FTilingEncoder.GlobalTilingTileCount := seMaxTiles.Value;
@@ -599,7 +513,6 @@ begin
 
   imgSource.Picture.Bitmap := FTilingEncoder.InputBitmap;
   imgDest.Picture.Bitmap := FTilingEncoder.OutputBitmap;
-  imgPalette.Picture.Bitmap := FTilingEncoder.PaletteBitmap;
   imgTiles.Picture.Bitmap := FTilingEncoder.TilesBitmap;
 
   pnLbl.Caption := FTilingEncoder.RenderTitleText;
@@ -625,8 +538,6 @@ begin
     FTilingEncoder.OutputFileName := edOutput.Text;
     FTilingEncoder.StartFrame := seStartFrame.Value;
     FTilingEncoder.FrameCountSetting := seFrameCount.Value;
-    FTilingEncoder.PaletteCount := StrToIntDef(cbxPalCount.Text, 1);
-    FTilingEncoder.PaletteSize := StrToIntDef(cbxPalSize.Text, 2);
     FTilingEncoder.Scaling := StrToFloatDef(cbxScaling.Text, 1.0, InvariantFormatSettings);
 
     FTilingEncoder.RenderPlaying := chkPlay.Checked;
@@ -635,7 +546,6 @@ begin
     FTilingEncoder.RenderMirrored := chkMirrored.Checked;
     FTilingEncoder.RenderOutputDithered := chkDitheredO.Checked;
     FTilingEncoder.RenderUseGamma := chkGamma.Checked;
-    FTilingEncoder.RenderPaletteIndex := sedPalIdx.Value;
     FTilingEncoder.RenderTilePage := sePage.Value;
     FTilingEncoder.RenderGammaValue := seVisGamma.Value;
 
@@ -644,12 +554,6 @@ begin
     FTilingEncoder.GlobalTilingUseTargetPSNR := rbPSNR.Checked;
     FTilingEncoder.GlobalTilingTargetPSNR := sePSNR.Value;
     FTilingEncoder.GlobalTilingQualityBasedTileCount := seQbTiles.Value;
-
-    FTilingEncoder.DitheringMode := TPsyVisMode(cbxDitheringMode.ItemIndex);
-    FTilingEncoder.DitheringYliluoma2MixedColors := StrToIntDef(cbxYilMix.Text, 1);
-    FTilingEncoder.DitheringUseThomasKnoll := chkUseTK.Checked;
-
-    FTilingEncoder.FrameTilingExtendedPaletteUsage := chkFTEPU.Checked;
 
     FTilingEncoder.ShotTransMinSecondsPerKF := seShotTransMinSecondsPerKF.Value;
     FTilingEncoder.ShotTransMaxSecondsPerKF := seShotTransMaxSecondsPerKF.Value;
@@ -666,12 +570,10 @@ begin
 
     FTilingEncoder.MaxThreadCount := seMaxCores.Value;
 
-    sedPalIdx.MaxValue := FTilingEncoder.PaletteCount - 1;
     imgSource.Stretch := chkStretch.State in [cbGrayed, cbChecked];
     imgDest.Stretch := imgSource.Stretch;
     imgSource.Proportional := chkStretch.State = cbGrayed;
     imgDest.Proportional := imgSource.Proportional;
-    imgPalette.Height := Min(High(Word) + 1, FTilingEncoder.PaletteCount * cTileWidth);
     sePSNR.Enabled := rbPSNR.Checked;
     seQbTiles.Enabled := rbTileLimit.Checked;
     seMaxTiles.Enabled := rbTileLimit.Checked;
@@ -705,9 +607,6 @@ begin
    seFrameCount.Value := FTilingEncoder.FrameCountSetting;
    cbxScaling.Text := FloatToStr(FTilingEncoder.Scaling);
 
-   cbxPalSize.Text := IntToStr(FTilingEncoder.PaletteSize);
-   cbxPalCount.Text := IntToStr(FTilingEncoder.PaletteCount);
-
    cbxMPRadius.Text := IntToStr(FTilingEncoder.MotionPredictRadius);
 
    rbPSNR.Checked := FTilingEncoder.GlobalTilingUseTargetPSNR;
@@ -715,12 +614,6 @@ begin
    sePSNR.Value := FTilingEncoder.GlobalTilingTargetPSNR;
    seMaxTiles.Value := FTilingEncoder.GlobalTilingTileCount;
    seQbTiles.Value := FTilingEncoder.GlobalTilingQualityBasedTileCount;
-
-   cbxDitheringMode.ItemIndex := Ord(FTilingEncoder.DitheringMode);
-   chkUseTK.Checked := FTilingEncoder.DitheringUseThomasKnoll;
-   cbxYilMix.Text := IntToStr(FTilingEncoder.DitheringYliluoma2MixedColors);
-
-   chkFTEPU.Checked := FTilingEncoder.FrameTilingExtendedPaletteUsage;
 
    seVisGamma.Value := FTilingEncoder.RenderGammaValue;
    seMaxCores.Value := FTilingEncoder.MaxThreadCount;
