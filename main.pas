@@ -28,7 +28,6 @@ type
     cbxScaling: TComboBox;
     cbxEndStep: TComboBox;
     cbxStartStep: TComboBox;
-    chkDitheredO: TCheckBox;
     chkGamma: TCheckBox;
     chkMirrored: TCheckBox;
     chkPlay: TCheckBox;
@@ -544,7 +543,6 @@ begin
     FTilingEncoder.RenderFrameIndex := Max(0, tbFrame.Position);
     FTilingEncoder.RenderPredicted := chkPredicted.Checked;
     FTilingEncoder.RenderMirrored := chkMirrored.Checked;
-    FTilingEncoder.RenderOutputDithered := chkDitheredO.Checked;
     FTilingEncoder.RenderUseGamma := chkGamma.Checked;
     FTilingEncoder.RenderTilePage := sePage.Value;
     FTilingEncoder.RenderGammaValue := seVisGamma.Value;
@@ -572,8 +570,10 @@ begin
 
     imgSource.Stretch := chkStretch.State in [cbGrayed, cbChecked];
     imgDest.Stretch := imgSource.Stretch;
+    imgTiles.Stretch := imgSource.Stretch;
     imgSource.Proportional := chkStretch.State = cbGrayed;
     imgDest.Proportional := imgSource.Proportional;
+    imgTiles.Proportional := imgSource.Proportional;
     sePSNR.Enabled := rbPSNR.Checked;
     seQbTiles.Enabled := rbTileLimit.Checked;
     seMaxTiles.Enabled := rbTileLimit.Checked;

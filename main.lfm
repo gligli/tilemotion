@@ -2,7 +2,7 @@ object MainForm: TMainForm
   Left = 394
   Height = 640
   Top = 181
-  Width = 1024
+  Width = 1023
   HorzScrollBar.Increment = 128
   HorzScrollBar.Page = 1
   HorzScrollBar.Tracking = True
@@ -15,7 +15,7 @@ object MainForm: TMainForm
   AutoScroll = True
   Caption = 'GliGli''s TileMotion encoder'
   ClientHeight = 640
-  ClientWidth = 1024
+  ClientWidth = 1023
   DoubleBuffered = True
   KeyPreview = True
   ParentDoubleBuffered = False
@@ -30,7 +30,7 @@ object MainForm: TMainForm
     Left = 0
     Height = 27
     Top = 586
-    Width = 1026
+    Width = 1025
     Max = 0
     PageSize = 1
     Position = 0
@@ -66,18 +66,18 @@ object MainForm: TMainForm
     OnChange = UpdateVideo
   end
   object chkGamma: TCheckBox
-    Left = 480
+    Left = 272
     Height = 19
     Top = 615
     Width = 62
     Anchors = [akLeft, akBottom]
     AutoSize = False
     Caption = 'Gamma'
-    TabOrder = 11
+    TabOrder = 10
     OnChange = UpdateVideo
   end
   object lblCorrel: TLabel
-    Left = 944
+    Left = 943
     Height = 15
     Top = 617
     Width = 75
@@ -88,7 +88,7 @@ object MainForm: TMainForm
     ParentColor = False
   end
   object Label5: TLabel
-    Left = 785
+    Left = 784
     Height = 15
     Top = 617
     Width = 157
@@ -100,16 +100,16 @@ object MainForm: TMainForm
     Left = 0
     Height = 548
     Top = 40
-    Width = 1028
-    ActivePage = tsSettings
+    Width = 1027
+    ActivePage = tsTilesPal
     Anchors = [akTop, akLeft, akRight, akBottom]
-    TabIndex = 0
+    TabIndex = 3
     TabOrder = 5
     OnChange = UpdateVideo
     object tsSettings: TTabSheet
       Caption = 'Settings'
       ClientHeight = 520
-      ClientWidth = 1020
+      ClientWidth = 1019
       ParentBiDiMode = False
       PopupMenu = pmProcesses
       object edOutput: TEdit
@@ -447,12 +447,12 @@ object MainForm: TMainForm
     object tsInput: TTabSheet
       Caption = 'Input'
       ClientHeight = 520
-      ClientWidth = 1020
+      ClientWidth = 1019
       object imgSource: TImage
         Left = 0
         Height = 520
         Top = 0
-        Width = 1020
+        Width = 1019
         AntialiasingMode = amOff
         Align = alClient
         Center = True
@@ -464,12 +464,12 @@ object MainForm: TMainForm
     object tsOutput: TTabSheet
       Caption = 'Output (F12)'
       ClientHeight = 520
-      ClientWidth = 1020
+      ClientWidth = 1019
       object imgDest: TImage
         Left = 0
         Height = 520
         Top = 0
-        Width = 1020
+        Width = 1019
         AntialiasingMode = amOff
         Align = alClient
         AutoSize = True
@@ -482,12 +482,12 @@ object MainForm: TMainForm
     object tsTilesPal: TTabSheet
       Caption = 'Palettes / Tiles'
       ClientHeight = 520
-      ClientWidth = 1020
+      ClientWidth = 1019
       object sePage: TSpinEdit
-        Left = 136
+        Left = 149
         Height = 23
-        Top = 32
-        Width = 128
+        Top = 8
+        Width = 94
         MaxValue = 10000
         TabOrder = 0
         OnChange = UpdateVideo
@@ -495,27 +495,29 @@ object MainForm: TMainForm
       object Label6: TLabel
         Left = 4
         Height = 15
-        Top = 36
+        Top = 12
         Width = 48
         Caption = 'Tile page'
         ParentColor = False
       end
       object llPalTileDesc: TPanel
-        Left = 4
+        Left = 396
         Height = 18
-        Top = 8
-        Width = 260
+        Top = 11
+        Width = 615
+        Anchors = [akTop, akLeft, akRight]
         BevelOuter = bvLowered
         ParentColor = False
         TabOrder = 1
       end
       object imgTiles: TImage
-        Left = 272
-        Height = 505
-        Top = 8
-        Width = 739
+        Left = 4
+        Height = 473
+        Top = 40
+        Width = 1006
         AntialiasingMode = amOff
         Anchors = [akTop, akLeft, akRight, akBottom]
+        Center = True
         PopupMenu = pmProcesses
         Stretch = True
         OnMouseMove = imgTilesMouseMove
@@ -575,13 +577,13 @@ object MainForm: TMainForm
     Left = 400
     Height = 16
     Top = 12
-    Width = 581
+    Width = 580
     Anchors = [akTop, akLeft, akRight]
     Smooth = True
     TabOrder = 4
   end
   object lblPct: TLabel
-    Left = 977
+    Left = 976
     Height = 15
     Top = 13
     Width = 39
@@ -595,11 +597,11 @@ object MainForm: TMainForm
     Left = 400
     Height = 18
     Top = 40
-    Width = 619
+    Width = 615
     Anchors = [akTop, akLeft, akRight]
     BevelInner = bvLowered
     BevelOuter = bvNone
-    TabOrder = 13
+    TabOrder = 12
   end
   object btnPM: TButton
     Left = 80
@@ -612,18 +614,6 @@ object MainForm: TMainForm
     PopupMenu = pmProcesses
     TabOrder = 1
     OnClick = btnPMClick
-  end
-  object chkDitheredO: TCheckBox
-    Left = 272
-    Height = 19
-    Top = 615
-    Width = 63
-    Anchors = [akLeft, akBottom]
-    Caption = 'Dithered'
-    Checked = True
-    State = cbChecked
-    TabOrder = 10
-    OnChange = UpdateVideo
   end
   object chkPredicted: TCheckBox
     Left = 184
@@ -638,14 +628,14 @@ object MainForm: TMainForm
     OnChange = UpdateVideo
   end
   object chkStretch: TCheckBox
-    Left = 560
+    Left = 352
     Height = 19
     Top = 615
     Width = 68
     AllowGrayed = True
     Anchors = [akLeft, akBottom]
     Caption = 'Stretched'
-    TabOrder = 12
+    TabOrder = 11
     OnChange = UpdateVideo
   end
   object IdleTimer: TIdleTimer

@@ -145,6 +145,10 @@ type
   TEvalFunc = function(const arg: TDoubleDynArray; data: Pointer): Double of object;
   TGRSEvalFunc = function(x: Double; Data: Pointer): Double of object;
 
+  TGRSResult = record
+    X, Y: Double;
+  end;
+
   TDCTScalar = SmallInt;
   PDCTScalar = ^TDCTScalar;
   TDCT = array[0 .. cTileDCTSize - 1] of TDCTScalar;
@@ -198,8 +202,7 @@ procedure CribbleEuclideanDCTPtr_asm(cur_rcx: PDCTScalar; prev_rdx: PDCTScalar; 
 generic function DCTInner<T>(pCpn, pLut: T; count: Integer): Double;
 function DCTInner_asm(pCpn_rcx, pLut_rdx: PFloat): Double; register; assembler;
 function EqualQualityTileCount(tileCount: Double): Integer;
-function GoldenRatioSearch(Func: TGRSEvalFunc; MinX, MaxX: Double; ObjectiveY: Double;
-  EpsilonX, EpsilonY: Double; Data: Pointer): Double;
+function GoldenRatioSearch(Func: TGRSEvalFunc; MinX, MaxX: Double; ObjectiveY: Double; EpsilonX, EpsilonY: Double; Data: Pointer): TGRSResult;
 function EuclideanToPSNR(AEuclidean: Cardinal): Double;
 function PSNRToEuclidean(APSNR: Double): Cardinal;
 
@@ -1203,14 +1206,14 @@ begin
 end;
 
 
-function GoldenRatioSearch(Func: TGRSEvalFunc; MinX, MaxX: Double; ObjectiveY: Double;
-  EpsilonX, EpsilonY: Double; Data: Pointer): Double;
+function GoldenRatioSearch(Func: TGRSEvalFunc; MinX, MaxX: Double; ObjectiveY: Double; EpsilonX, EpsilonY: Double; Data: Pointer): TGRSResult;
 var
   x, y: Double;
 begin
   if SameValue(MinX, MaxX, EpsilonX) then
   begin
-    Result := MinX;
+    Result.X := MinX;
+    Result.Y := Func(MinX, Data);
     Exit;
   end;
 
@@ -1229,7 +1232,8 @@ begin
     GreaterThanValue:
       Result := GoldenRatioSearch(Func, MinX, x, ObjectiveY, EpsilonX, EpsilonY, Data);
   else
-      Result := x;
+      Result.X := x;
+      Result.Y := y;
   end;
 end;
 
