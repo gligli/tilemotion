@@ -467,8 +467,9 @@ type
     procedure LoadInputVideo;
     procedure FindKeyFrames(AManualMode: Boolean);
 
-    function GRTileCountFromPSNR(x: Double; Data: Pointer): Double;
+    function GRPSNR(x: Double; Data: Pointer): Double;
     function SolveTileCount(ATileCount: Integer): Integer;
+    function SolveAvgPSNR(AAvgPSNR: Double): Integer;
     procedure TransferTiles(ATileCount: Integer);
 
     procedure PrepareReconstruct;
@@ -1910,8 +1911,6 @@ begin
 end;
 
 procedure TTilingEncoder.Reduce;
-var
-  globalTileCount: Integer;
 begin
   if Length(FFrames) = 0 then
     Exit;
@@ -1919,17 +1918,13 @@ begin
   ProgressRedraw(0, '', esReduce);
 
   if FGlobalTilingUseTargetPSNR then
-  begin
-    globalTileCount := round(GRTileCountFromPSNR(FGlobalTilingTargetPSNR, nil));
-  end
+    SolveAvgPSNR(FGlobalTilingTargetPSNR)
   else
-  begin
-    globalTileCount := SolveTileCount(FGlobalTilingTileCount);
-  end;
+    SolveTileCount(FGlobalTilingTileCount);
 
   ProgressRedraw(1, 'SolveTileCount');
 
-  TransferTiles(globalTileCount);
+  TransferTiles(GetUnpredictedTileCount);
   MakeTilesUnique;
   ReindexTiles;
 
@@ -3180,7 +3175,7 @@ procedure TTilingEncoder.Render;
   end;
 
 var
-  i, j, sx, sy, globalTileCount, col, off, siz, iCpn: Integer;
+  i, sx, sy, globalTileCount, col, off, siz, iCpn: Integer;
   hmir, vmir: Boolean;
   tidx: Int64;
   q: Double;
@@ -3521,8 +3516,8 @@ begin
   MotionPredictRadius := 32;
   MotionPredictMaxBufferedFrames := 3;
 
-  GlobalTilingUseTargetPSNR := False;
-  GlobalTilingTargetPSNR := 20.0;
+  GlobalTilingUseTargetPSNR := True;
+  GlobalTilingTargetPSNR := 30.0;
   GlobalTilingQualityBasedTileCount := 3.0;
   GlobalTilingTileCount := 0; // after GlobalTilingQualityBasedTileCount because has priority
 
@@ -3724,13 +3719,14 @@ begin
     Inc(Result, FFrames[frmIdx].GetUnpredictedTileCount);
 end;
 
-function TTilingEncoder.GRTileCountFromPSNR(x: Double; Data: Pointer): Double;
+function TTilingEncoder.GRPSNR(x: Double; Data: Pointer): Double;
 var
-  OnKFFirstFrame: PBoolean absolute Data;
   frmIdx, sy, sx, unpredictedTileCount: Integer;
+  meanPSNR: Double;
   Frame: TFrame;
   TMI: PTileMapItem;
 begin
+  meanPSNR := 0.0;
   unpredictedTileCount := 0;
   for frmIdx := 0 to High(FFrames) do
   begin
@@ -3744,11 +3740,19 @@ begin
         // trim bad (unfit) PSNRs
         TMI^.IsPredicted := TMI^.PSNR > x;
 
+        meanPSNR += IfThen(TMI^.IsPredicted, TMI^.PSNR, cBestPSNR);
         inc(unpredictedTileCount, Ord(not TMI^.IsPredicted));
       end;
   end;
 
-  Result := unpredictedTileCount;
+  meanPSNR /= Length(FFrames) * FTileMapSize;
+
+  WriteLn('Threshold: ', x:9:3, ', Mean PSNR: ', meanPSNR:9:3, ', TileCount: ', unpredictedTileCount:8);
+
+  if Assigned(Data) then
+    Result := unpredictedTileCount
+  else
+    Result := meanPSNR;
 end;
 
 function TTilingEncoder.SolveTileCount(ATileCount: Integer): Integer;
@@ -3756,7 +3760,12 @@ var
   err: Double;
 begin
   err := Max(0.5, ATileCount * 0.001);
-  Result := Round(GoldenRatioSearch(@GRTileCountFromPSNR, 0.0, cBestPSNR, ATileCount - err, cPsyVEpsilon, err, nil).Y);
+  Result := Round(GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, ATileCount - err, cPsyVEpsilon, err, Pointer(True)).Y);
+end;
+
+function TTilingEncoder.SolveAvgPSNR(AAvgPSNR: Double): Integer;
+begin
+  Result := Round(GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, AAvgPSNR, cPsyVEpsilon, 0.01, Pointer(False)).Y);
 end;
 
 procedure TTilingEncoder.TransferTiles(ATileCount: Integer);

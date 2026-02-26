@@ -1212,7 +1212,7 @@ begin
 
   y := Func(x, Data);
 
-  WriteLn('X: ', x:15:6, ' Y: ', y:15:6, ' Mini: ', MinX:15:6, ' Maxi: ', MaxX:15:6);
+  //WriteLn('X: ', x:15:6, ' Y: ', y:15:6, ' Mini: ', MinX:15:6, ' Maxi: ', MaxX:15:6);
 
   case CompareValue(y, ObjectiveY, EpsilonY) of
     LessThanValue:
