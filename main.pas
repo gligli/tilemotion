@@ -21,6 +21,7 @@ type
     btnRunAll: TButton;
     btnPM: TButton;
     cbxMPRadius: TComboBox;
+    chkJPEG: TCheckBox;
     chkStretch: TCheckBox;
     chkPredicted: TCheckBox;
     cbxScaling: TComboBox;
@@ -37,9 +38,11 @@ type
     imgTiles: TImage;
     Label1: TLabel;
     Label10: TLabel;
+    Label11: TLabel;
     Label13: TLabel;
     Label18: TLabel;
     Label15: TLabel;
+    lblJPEG: TLabel;
     lblMaxCores: TLabel;
     Label20: TLabel;
     Label22: TLabel;
@@ -47,6 +50,7 @@ type
     Label6: TLabel;
     lblPct: TLabel;
     llPalTileDesc: TPanel;
+    MenuItem5: TMenuItem;
     miGeneratePNGsOutput: TMenuItem;
     miGeneratePNGsInput: TMenuItem;
     miGenerateY4MOutput: TMenuItem;
@@ -81,6 +85,7 @@ type
     sePage: TSpinEdit;
     seStartFrame: TSpinEdit;
     seShotTransMinSecondsPerKF: TFloatSpinEdit;
+    tbJPEG: TTrackBar;
     tsTilesPal: TTabSheet;
     To1: TLabel;
     tsSettings: TTabSheet;
@@ -123,6 +128,7 @@ type
     procedure imgTilesMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
     procedure imgTilesMouseWheelDown(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
     procedure imgTilesMouseWheelUp(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
+    procedure btnJPEGClick(Sender: TObject);
     procedure miGeneratePNGsOutputClick(Sender: TObject);
     procedure miGenerateY4MInputClick(Sender: TObject);
     procedure miGenerateY4MOutputClick(Sender: TObject);
@@ -211,13 +217,19 @@ end;
 
 procedure TMainForm.btnPredictMotionClick(Sender: TObject);
 begin
-  FTilingEncoder.Run(esPredictMotion);
+  FTilingEncoder.Run(esPredict);
   UpdateVideo(nil);
 end;
 
 procedure TMainForm.btnReindexClick(Sender: TObject);
 begin
   FTilingEncoder.Run(esReindex);
+  UpdateVideo(nil);
+end;
+
+procedure TMainForm.btnJPEGClick(Sender: TObject);
+begin
+  FTilingEncoder.Run(esJPEG);
   UpdateVideo(nil);
 end;
 
@@ -354,7 +366,7 @@ begin
   if OkStep(esLoad) then
     btnGlobalLoadClick(nil);
 
-  if OkStep(esPredictMotion) then
+  if OkStep(esPredict) then
     btnPredictMotionClick(nil);
 
   if OkStep(esReduce) then
@@ -365,6 +377,9 @@ begin
 
   if OkStep(esReindex) then
     btnReindexClick(nil);
+
+  if OkStep(esJPEG) then
+    btnJPEGClick(nil);
 
   if OkStep(esSave) then
     btnSaveClick(nil);
@@ -541,6 +556,7 @@ begin
     FTilingEncoder.RenderPredicted := chkPredicted.Checked;
     FTilingEncoder.RenderMirrored := chkMirrored.Checked;
     FTilingEncoder.RenderUseGamma := chkGamma.Checked;
+    FTilingEncoder.RenderUseJPEG := chkJPEG.Checked;
     FTilingEncoder.RenderTilePage := sePage.Value;
     FTilingEncoder.RenderGammaValue := seVisGamma.Value;
 
@@ -553,6 +569,8 @@ begin
     FTilingEncoder.ShotTransMinSecondsPerKF := seShotTransMinSecondsPerKF.Value;
     FTilingEncoder.ShotTransMaxSecondsPerKF := seShotTransMaxSecondsPerKF.Value;
     FTilingEncoder.ShotTransCorrelLoThres := seShotTransCorrelLoThres.Value;
+
+    FTilingEncoder.JPEGQuality := tbJPEG.Position;
 
     if pcPages.ActivePage = tsInput then
       FTilingEncoder.RenderPage := rpInput
@@ -574,6 +592,7 @@ begin
     sePSNR.Enabled := rbPSNR.Checked;
     seQbTiles.Enabled := rbTileLimit.Checked;
     seMaxTiles.Enabled := rbTileLimit.Checked;
+    lblJPEG.Caption := IntToStr(FTilingEncoder.JPEGQuality);
   finally
     Screen.Cursor := prevCursor;
   end;
@@ -618,6 +637,8 @@ begin
    seShotTransMinSecondsPerKF.Value := FTilingEncoder.ShotTransMinSecondsPerKF;
    seShotTransMaxSecondsPerKF.Value := FTilingEncoder.ShotTransMaxSecondsPerKF;
    seShotTransCorrelLoThres.Value := FTilingEncoder.ShotTransCorrelLoThres;
+
+   tbJPEG.Position := FTilingEncoder.JPEGQuality;
   finally
     FLockChanges := False;
   end;
