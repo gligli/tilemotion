@@ -320,7 +320,6 @@ type
     procedure LogPSNR;
 
     function GetUnpredictedTileCount: Integer;
-    function Reduce(AStartTile, ATileCount: Integer): Integer;
 
     constructor Create(AParent: TTilingEncoder; AIndex, AStartFrame, AEndFrame: Integer);
     destructor Destroy; override;
@@ -438,7 +437,7 @@ type
     generic procedure DeWaveletGS<T, PT>(wl: PT; pic: PT; dx, dy, depth: longint);
 
     procedure ConvertToCpnPixels(const ATile: TTile; VMirror, HMirror: Boolean; out ACpnPixel: TCpnPixels); inline;
-    procedure ComputeCpnPixelsPsyVisFeatures(const ACpnPixels: TCpnPixels; Mode: TPsyVisMode; ColorCpn: Integer; ADCT: PDCTScalar); inline;
+    procedure ComputePsyVisFeatures(const ACpnPixels: TCpnPixels; Mode: TPsyVisMode; ColorCpn: Integer; ADCT: PDCTScalar); inline;
 
     procedure ComputeTileCpnPsyVisFeatures(const ATile: TTile; Mode: TPsyVisMode; VMirror, HMirror: Boolean; ColorCpn: Integer; ADCT: PDouble); inline;
     procedure ComputeInvTileCpnPsyVisFeatures(DCT: PDouble; Mode: TPsyVisMode; ColorCpn: Integer; var ATile: TTile);
@@ -460,6 +459,8 @@ type
 
     function GRTileCountFromPSNR(x: Double; Data: Pointer): Double;
     function SolveTileCount(ATileCount: Integer; AOnKFFirstFrame: Boolean): Integer;
+    procedure TransferTiles(ATileCount: Integer; AOnKFFirstFrame: Boolean);
+    function ReduceTiles(ATileCount: Integer): Integer;
 
     procedure PrepareReconstruct;
     procedure FinishReconstruct;
@@ -468,7 +469,7 @@ type
     procedure MakeTilesUnique;
     procedure InitMergeTiles;
     procedure FinishMergeTiles;
-    procedure MergeTiles(const TileIndexes: array of Int64; TileCount: Integer; BestIdx: Int64);
+    procedure MergeTiles(const TileIndexes: TIntegerDynArray; TileCount: Integer; BestIdx: Int64);
 
     procedure LoadStream(AStream: TStream);
     procedure SaveStream(AStream: TStream);
@@ -788,14 +789,19 @@ begin
     AArray[i] := PTile(PByte(AArray[i]) + (data - PByte(smallest)));
 
   // init new pointers
-  FillChar(AArray[prevLen]^, size * (ANewX - prevLen + 1), 0);
+  Inc(data, size * prevLen);
+  for i := prevLen to ANewX - 1 do
+  begin
+    AArray[i] := PTile(data);
+    FillChar(AArray[i]^, size, 0);
+    Inc(data, size);
+  end;
 end;
 
 class function TTileHelper.New: PTile;
 begin
   Result := AllocMem(SizeOf(TTile));
   FillByte(Result^, SizeOf(TTile), 0);
-  FillDWord(Result^.RGBPixels[0, 0], sqr(cTileWidth), 0);
 end;
 
 class procedure TTileHelper.Dispose(var ATile: PTile);
@@ -940,135 +946,6 @@ begin
   Result := 0;
   for frmIdx := StartFrame to EndFrame do
     Inc(Result, Encoder.FFrames[frmIdx].GetUnpredictedTileCount);
-end;
-
-function TKeyFrame.Reduce(AStartTile, ATileCount: Integer): Integer;
-var
-  YakmoDataset: TSingleDynArray2;
-  FTToDSIdx: TIntegerDynArray2;
-  DatasetCurFrameStart: Integer;
-  CurFrame: TFrame;
-
-  procedure DoDCT(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
-  var
-    iCpn, iDCT, ftIdx: Integer;
-    Tile: PTile;
-    DCTDouble: array[0 .. sqr(cTileWidth) - 1] of Double;
-  begin
-    if not InRange(AIndex, 0, Encoder.FTileMapSize - 1) then
-      Exit;
-
-    ftIdx := FTToDSIdx[CurFrame.Index - StartFrame, AIndex];
-    Tile := CurFrame.FrameTiles[ftIdx];
-    Assert(Tile^.Active);
-
-    for iCpn := 0 to cColorCpns - 1 do
-    begin
-      Encoder.ComputeTileCpnPsyVisFeatures(Tile^, pvsWeightedDCT, False, False, iCpn, DCTDouble);
-      for iDCT := 0 to sqr(cTileWidth) - 1 do
-        YakmoDataset[DatasetCurFrameStart + AIndex * cColorCpns + iCpn, iDCT] := DCTDouble[iDCT];
-    end;
-  end;
-
-var
-  DSLen, frmIdx, nbTiles, iCluster, iDS, iDCT, sy, sx, frameTileCount: Integer;
-
-  TMI: PTileMapItem;
-  Tile: PTile;
-  Yakmo: PYakmoSingle;
-
-  YakmoCentroids: TSingleDynArray2;
-  YakmoClusters: TIntegerDynArray;
-  DCTDouble: array[0 .. sqr(cTileWidth) - 1] of Double;
-begin
-  SetLength(FTToDSIdx, FrameCount);
-
-  DSLen := 0;
-  for frmIdx := StartFrame to EndFrame do
-  begin
-    CurFrame := Encoder.FFrames[frmIdx];
-
-    frameTileCount := CurFrame.GetUnpredictedTileCount;
-    SetLength(FTToDSIdx[frmIdx - StartFrame], frameTileCount);
-
-    Inc(DSLen, frameTileCount * cColorCpns);
-
-    frameTileCount := 0;
-    for sy := 0 to Encoder.FTileMapHeight - 1 do
-      for sx := 0 to Encoder.FTileMapWidth - 1 do
-      begin
-        TMI := @CurFrame.TileMap[sy, sx];
-
-        if not TMI^.IsPredicted then
-        begin
-          FTToDSIdx[frmIdx - StartFrame, frameTileCount] := sy * Encoder.FTileMapWidth + sx;
-          Inc(frameTileCount);
-        end;
-      end;
-
-    Assert(Length(FTToDSIdx[frmIdx - StartFrame]) = frameTileCount);
-  end;
-
-  SetLength(YakmoDataset, DSLen, Sqr(cTileWidth));
-
-  // compute key frame frame tiles DCT
-
-  DatasetCurFrameStart := 0;
-  for frmIdx := StartFrame to EndFrame do
-  begin
-    CurFrame := Encoder.FFrames[frmIdx];
-
-    CurFrame.AcquireFrameTiles;
-    try
-      frameTileCount := Length(FTToDSIdx[frmIdx - StartFrame]);
-
-      ProcThreadPool.DoParallelLocalProc(@DoDCT, 0, frameTileCount - 1);
-
-      DatasetCurFrameStart += frameTileCount * cColorCpns;
-
-      Write((frmIdx - StartFrame) + 1:8, ' / ', FrameCount:8, #13);
-    finally
-      CurFrame.ReleaseFrameTiles;
-    end;
-  end;
-  WriteLn;
-
-  // use Yakmo KMeans to reduce tile count
-
-  nbTiles := min(ATileCount, DSLen);
-
-  SetLength(YakmoClusters, DSLen);
-  SetLength(YakmoCentroids, nbTiles, sqr(cTileWidth));
-
-  Yakmo := yakmo_single_create(nbTiles, 1, cYakmoMaxIterations, 1, 0, 0, 1);
-  try
-    yakmo_set_num_threads(Encoder.MaxThreadCount);
-
-    yakmo_single_load_train_data(Yakmo, Length(YakmoDataset), sqr(cTileWidth), PPSingle(@YakmoDataset[0]));
-    yakmo_single_train_on_data(Yakmo, @YakmoClusters[0]);
-    yakmo_single_get_centroids(Yakmo, PPSingle(@YakmoCentroids[0]));
-  finally
-    yakmo_single_destroy(Yakmo);
-  end;
-
-  // store centroid tiles
-
-  for iCluster := 0 to High(YakmoCentroids) do
-  begin
-    Tile := Encoder.FTiles[AStartTile + iCluster];
-
-    Tile^.Active := True;
-    for iDS := 0 to High(YakmoClusters) do
-      if YakmoClusters[iDS] = iCluster then
-        Inc(Tile^.UseCount);
-
-    for iDCT := 0 to sqr(cTileWidth) - 1 do
-      DCTDouble[iDCT] := NanDef(YakmoCentroids[iCluster, iDCT], 0.0);
-
-    Encoder.ComputeInvTileCpnPsyVisFeatures(DCTDouble, pvsWeightedDCT, 0, Tile^);
-  end;
-
-  Result := nbTiles;
 end;
 
 { TFrameBuffer }
@@ -1272,7 +1149,7 @@ procedure TFrame.PrepareDCTs(const ADCTs: TDCTDynArray; const ABuffer: TIntegerD
         DCTTile^.CopyRGBPixels(ABuffer, AIndex, x);
 
         Encoder.ConvertToCpnPixels(DCTTile^, False, False, CpnPixels);
-        Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsWeightedDCT, -1, ADCTs[yx]);
+        Encoder.ComputePsyVisFeatures(CpnPixels, pvsWeightedDCT, -1, ADCTs[yx]);
 
         Inc(yx);
       end;
@@ -1442,7 +1319,7 @@ procedure TFrame.Predict(ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBu
     FrameTile := FrameTiles[AIndex];
 
     Encoder.ConvertToCpnPixels(FrameTile^, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, CurCpnPixels);
-    Encoder.ComputeCpnPixelsPsyVisFeatures(CurCpnPixels, pvsWeightedDCT, -1, CurDCT);
+    Encoder.ComputePsyVisFeatures(CurCpnPixels, pvsWeightedDCT, -1, CurDCT);
 
     dx := sx shl cTileWidthBits;
     dy := sy shl cTileWidthBits;
@@ -1647,7 +1524,6 @@ end;
 
 procedure TFrame.Reconstruct(ARadius: Integer; AFrameBuffer: TFrameBuffer);
 const
-  cEpuKnnK = 64;
   cPSNREpsilon = 1.0;
 var
   DS: PTilingDataset;
@@ -1655,7 +1531,6 @@ var
   procedure DoXY(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
     sx, sy, dx, dy, ty, tx, iCpn: Integer;
-    infiniteErr: Boolean;
     knnErr: array[0 .. cColorCpns - 1] of Cardinal;
     knnPSNR, mpPSNR: TFloat;
 
@@ -1678,7 +1553,7 @@ var
 
     FrameTile := FrameTiles[AIndex];
     Encoder.ConvertToCpnPixels(FrameTile^, False, False, FTCpnPixels);
-    Encoder.ComputeCpnPixelsPsyVisFeatures(FTCpnPixels, pvsWeightedDCT, -1, FTDCT);
+    Encoder.ComputePsyVisFeatures(FTCpnPixels, pvsWeightedDCT, -1, FTDCT);
 
     // redo motion prediction (account for palette)
 
@@ -1963,9 +1838,8 @@ end;
 
 procedure TTilingEncoder.Reduce;
 var
-  kfIdx, startTile, kfffTileCount, actualTileCount, globalTileCount: Integer;
+  kfffTileCount, globalTileCount: Integer;
   OnKFFirstFrame: Boolean;
-  KF: TKeyFrame;
 begin
   if Length(FFrames) = 0 then
     Exit;
@@ -1989,6 +1863,13 @@ begin
 
   ProgressRedraw(1, 'KFFirstFramesSolveTileCount');
 
+  TTile.Array1DDispose(FTiles);
+  TransferTiles(kfffTileCount, OnKFFirstFrame);
+  kfffTileCount := ReduceTiles(kfffTileCount);
+  ReindexTiles;
+
+  ProgressRedraw(2, 'KFFirstFramesReduce');
+
   OnKFFirstFrame := False;
   if FGlobalTilingUseTargetPSNR then
   begin
@@ -1999,33 +1880,16 @@ begin
     // subtract what was used for key frames first frames
     globalTileCount := FGlobalTilingTileCount - kfffTileCount;
 
-    globalTileCount := SolveTileCount(globalTileCount, OnKFFirstFrame) + kfffTileCount;
+    globalTileCount := SolveTileCount(globalTileCount, OnKFFirstFrame);
   end;
 
   ProgressRedraw(2, 'SolveTileCount');
 
-  if Assigned(FTiles) then
-    TTile.Array1DDispose(FTiles);
-  FTiles := TTile.Array1DNew(globalTileCount);
-
-  startTile := 0;
-  for kfIdx := 0 to High(FKeyFrames) do
-  begin
-    KF := FKeyFrames[kfIdx];
-
-    actualTileCount := KF.Reduce(startTile, KF.GetUnpredictedTileCount);
-
-    startTile += actualTileCount;
-
-    WriteLn('KF: ', KF.StartFrame:8, ' TileCount: ', actualTileCount:8);
-  end;
-
-  ProgressRedraw(3, 'Reduce');
-
-  MakeTilesUnique;
+  TransferTiles(globalTileCount, OnKFFirstFrame);
+  ReduceTiles(kfffTileCount + globalTileCount);
   ReindexTiles;
 
-  ProgressRedraw(4, 'ReindexTiles');
+  ProgressRedraw(3, 'Reduce');
 end;
 
 procedure TTilingEncoder.PredictMotion;
@@ -2808,7 +2672,7 @@ begin
     end;
 end;
 
-procedure TTilingEncoder.ComputeCpnPixelsPsyVisFeatures(const ACpnPixels: TCpnPixels; Mode: TPsyVisMode; ColorCpn: Integer; ADCT: PDCTScalar);
+procedure TTilingEncoder.ComputePsyVisFeatures(const ACpnPixels: TCpnPixels; Mode: TPsyVisMode; ColorCpn: Integer; ADCT: PDCTScalar);
 var
   u, v, cpn: Integer;
   z: Double;
@@ -2831,7 +2695,7 @@ begin
   		    z := DCTInner_asm(@ACpnPixels[cpn, 0, 0], pLut);
 
           if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
-            z *= cDCTWeights[0, v, u];
+            z *= cDCTWeights[v, u];
 
           pDCT[pSnake^] := Round(z);
           Inc(pLut, Sqr(cTileWidth));
@@ -2850,7 +2714,7 @@ begin
 		    z := DCTInner_asm(@ACpnPixels[ColorCpn, 0, 0], pLut);
 
         if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
-          z *= cDCTWeights[0, v, u];
+          z *= cDCTWeights[v, u];
 
         pDCT[pSnake^] := Round(z);
         Inc(pLut, Sqr(cTileWidth));
@@ -2888,7 +2752,7 @@ begin
         z := specialize DCTInner<PDouble>(@CpnPixelsDouble[0, 0, 0], pLut, 1);
 
         if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
-           z *= cDCTWeights[0, v, u];
+           z *= cDCTWeights[v, u];
 
         pDCT^ := z;
         Inc(pDCT);
@@ -2923,7 +2787,7 @@ begin
     begin
       d := DCT[cDCTSnake[i]];
       if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
-        pDCT^ := d / cDCTWeights[0, v, u]
+        pDCT^ := d / cDCTWeights[v, u]
       else
         pDCT^ := d;
       Inc(pDCT);
@@ -3779,7 +3643,7 @@ begin
   begin
     Frame := FFrames[frmIdx];
 
-    if Assigned(OnKFFirstFrame) and not (OnKFFirstFrame^ xor (frmIdx = Frame.PKeyFrame.StartFrame)) then
+    if Assigned(OnKFFirstFrame) and (OnKFFirstFrame^ xor (Frame.Index = Frame.PKeyFrame.StartFrame)) then
       Continue;
 
     for sy := 0 to FTileMapHeight - 1 do
@@ -3805,6 +3669,180 @@ begin
   Result := Round(GoldenRatioSearch(@GRTileCountFromPSNR, 0.0, cBestPSNR, ATileCount - err, cPsyVEpsilon, err, @AOnKFFirstFrame).Y);
 end;
 
+procedure TTilingEncoder.TransferTiles(ATileCount: Integer; AOnKFFirstFrame: Boolean);
+var
+  doneFrameCount: Integer;
+  newTIdx: Integer;
+
+  procedure DoTransfer(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  var
+    tIdx, sy, sx, ty, tx, iCpn: Integer;
+    rgb: array[0 .. cColorCpns - 1] of Byte;
+    Frame: TFrame;
+    Tile, FrameTile: PTile;
+    TMI: PTileMapItem;
+  begin
+    if not InRange(AIndex, 0, High(FFrames)) then
+      Exit;
+
+    Frame := FFrames[AIndex];
+
+    if AOnKFFirstFrame xor (Frame.Index = Frame.PKeyFrame.StartFrame) then
+      Exit;
+
+    Frame.AcquireFrameTiles;
+    try
+      for sy := 0 to FTileMapHeight - 1 do
+        for sx := 0 to FTileMapWidth - 1 do
+        begin
+          TMI := @Frame.TileMap[sy, sx];
+
+          if not TMI^.IsPredicted then
+          begin
+            tIdx := InterLockedExchangeAdd(newTIdx, cColorCpns);
+
+            FrameTile := Frame.FrameTiles[sy * FTileMapWidth + sx];
+            Assert(FrameTile^.Active);
+
+            for iCpn := 0 to cColorCpns - 1 do
+            begin
+              Tile := FTiles[tIdx];
+
+              for ty := 0 to cTileWidth - 1 do
+                for tx := 0 to cTileWidth - 1 do
+                begin
+                  FromRGB(FrameTile^.RGBPixels[ty, tx], rgb[0], rgb[1], rgb[2]);
+                  Tile^.RGBPixels[ty, tx] := rgb[iCpn];
+                end;
+
+              Tile^.Flags := FrameTile^.Flags;
+              Tile^.UseCount := 1;
+              TMI^.TileIdx[iCpn] := tIdx;
+              Inc(tIdx)
+            end;
+          end
+          else
+          begin
+            TMI^.ResetTileIdx;
+          end;
+        end;
+
+      Write(InterLockedIncrement(doneFrameCount):8, ' / ', Length(FFrames):8, #13);
+    finally
+      Frame.ReleaseFrameTiles;
+    end;
+  end;
+
+begin
+  WriteLn('TransferTiles ', ATileCount:8);
+
+  doneFrameCount := 0;
+  newTIdx := Length(FTiles);
+
+  if newTIdx > 0 then
+    TTile.Array1DRealloc(FTiles, newTIdx + ATileCount * cColorCpns)
+  else
+    FTiles := TTile.Array1DNew(ATileCount * cColorCpns);
+
+  ProcThreadPool.DoParallelLocalProc(@DoTransfer, 0, High(FFrames));
+
+  Assert(newTIdx = Length(FTiles));
+end;
+
+function TTilingEncoder.ReduceTiles(ATileCount: Integer): Integer;
+var
+  YakmoDataset: TSingleDynArray2;
+  YakmoWeights: TCardinalDynArray;
+
+  procedure DoDCT(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  var
+    iDCT: Integer;
+    Tile: PTile;
+    DCTDouble: array[0 .. sqr(cTileWidth) - 1] of Double;
+  begin
+    if not InRange(AIndex, 0, High(YakmoDataset)) then
+      Exit;
+
+    Tile := FTiles[AIndex];
+    Assert(Tile^.Active);
+
+    ComputeTileCpnPsyVisFeatures(Tile^, pvsWeightedDCT, False, False, 0, DCTDouble);
+    for iDCT := 0 to sqr(cTileWidth) - 1 do
+      YakmoDataset[AIndex, iDCT] := DCTDouble[iDCT];
+    YakmoWeights[AIndex] := Tile^.UseCount;
+  end;
+
+var
+  DSLen, iCluster, iDS, iDCT: Integer;
+  MergeTileCount: Integer;
+
+  Yakmo: PYakmoSingle;
+
+  YakmoCentroids: TSingleDynArray2;
+  YakmoClusters: TIntegerDynArray;
+  MergeTileIdxs: TIntegerDynArray;
+
+  DCTDouble: array[0 .. sqr(cTileWidth) - 1] of Double;
+begin
+  DSLen := Length(FTiles);
+
+  SetLength(YakmoDataset, DSLen, Sqr(cTileWidth));
+  SetLength(YakmoWeights, DSLen);
+
+  // compute key frame frame tiles DCT
+
+  ProcThreadPool.DoParallelLocalProc(@DoDCT, 0, DSLen - 1);
+
+  // use Yakmo KMeans to reduce tile count
+
+  Result := min(ATileCount, DSLen);
+
+  WriteLn('ReduceTiles ', Result:8);
+
+  SetLength(YakmoClusters, DSLen);
+  SetLength(YakmoCentroids, Result, sqr(cTileWidth));
+
+  Yakmo := yakmo_single_create(Result, 1, cYakmoMaxIterations, 1, 0, 0, 1);
+  try
+    yakmo_set_num_threads(MaxThreadCount);
+
+    yakmo_single_load_train_data_weighted(Yakmo, Length(YakmoDataset), sqr(cTileWidth), PPSingle(@YakmoDataset[0]), @YakmoWeights[0]);
+    yakmo_single_train_on_data(Yakmo, @YakmoClusters[0]);
+    yakmo_single_get_centroids(Yakmo, PPSingle(@YakmoCentroids[0]));
+  finally
+    yakmo_single_destroy(Yakmo);
+  end;
+
+  // store centroid tiles
+
+  InitMergeTiles;
+  try
+    SetLength(MergeTileIdxs, DSLen);
+
+    for iCluster := 0 to High(YakmoCentroids) do
+    begin
+      MergeTileCount := 0;
+      for iDS := 0 to High(YakmoClusters) do
+        if YakmoClusters[iDS] = iCluster then
+        begin
+          MergeTileIdxs[MergeTileCount] := iDS;
+          Inc(MergeTileCount);
+        end;
+
+      if MergeTileCount > 0 then
+      begin
+        for iDCT := 0 to sqr(cTileWidth) - 1 do
+          DCTDouble[iDCT] := NanDef(YakmoCentroids[iCluster, iDCT], 0.0);
+        ComputeInvTileCpnPsyVisFeatures(DCTDouble, pvsWeightedDCT, 0, FTiles[MergeTileIdxs[0]]^);
+
+        MergeTiles(MergeTileIdxs, MergeTileCount, MergeTileIdxs[0]);
+      end;
+    end;
+  finally
+    FinishMergeTiles;
+  end;
+end;
+
 procedure TTilingEncoder.PrepareReconstruct;
 var
   DS: PTilingDataset;
@@ -3821,7 +3859,7 @@ var
     Assert(T^.Active);
 
     ConvertToCpnPixels(T^, False, False, CpnPixels);
-    ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsWeightedDCT, 0, @DS^.Dataset[AIndex, 0]);
+    ComputePsyVisFeatures(CpnPixels, pvsWeightedDCT, 0, @DS^.Dataset[AIndex, 0]);
   end;
 
 var
@@ -3953,13 +3991,13 @@ end;
 
 procedure TTilingEncoder.MakeTilesUnique;
 var
-  i, pos, firstSameIdx: Int64;
+  i, pos, firstSameIdx: Integer;
   sortList: TFPList;
-  sameIdx: array of Int64;
+  sameIdx: TIntegerDynArray;
 
   procedure DoOneMerge;
   var
-    j: Int64;
+    j: Integer;
   begin
     if i - firstSameIdx >= 2 then
     begin
@@ -4008,10 +4046,10 @@ begin
   end;
 end;
 
-procedure TTilingEncoder.MergeTiles(const TileIndexes: array of Int64; TileCount: Integer; BestIdx: Int64);
+procedure TTilingEncoder.MergeTiles(const TileIndexes: TIntegerDynArray; TileCount: Integer; BestIdx: Int64);
 var
   i: Integer;
-  tidx: Int64;
+  tidx: Integer;
 begin
   if TileCount <= 0 then
     Exit;

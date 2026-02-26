@@ -115,7 +115,7 @@ procedure yakmo_get_centroids(ay: PYakmo; centroids: PPDouble); stdcall; externa
 function yakmo_single_create(k: Cardinal; restartCount: Cardinal; maxIter: Integer; initType: Integer; initSeed: Integer; doNormalize: Integer; isVerbose: Integer): PYakmoSingle; stdcall; external 'yakmo_single.dll' name 'yakmo_create';
 procedure yakmo_single_destroy(ay: PYakmoSingle); stdcall; external 'yakmo_single.dll' name 'yakmo_destroy';
 procedure yakmo_single_load_train_data(ay: PYakmoSingle; rowCount: Cardinal; colCount: Cardinal; dataset: PPSingle); stdcall; external 'yakmo_single.dll' name 'yakmo_load_train_data';
-procedure yakmo_single_load_train_data_weighted(ay: PYakmoSingle; rowCount: Cardinal; colCount: Cardinal; dataset: PPSingle; weights: PCardinal); stdcall; external 'yakmo.dll' name 'yakmo_load_train_data_weighted';
+procedure yakmo_single_load_train_data_weighted(ay: PYakmoSingle; rowCount: Cardinal; colCount: Cardinal; dataset: PPSingle; weights: PCardinal); stdcall; external 'yakmo_single.dll' name 'yakmo_load_train_data_weighted';
 procedure yakmo_single_train_on_data(ay: PYakmoSingle; pointToCluster: PInteger); stdcall; external 'yakmo_single.dll' name 'yakmo_train_on_data';
 procedure yakmo_single_get_centroids(ay: PYakmoSingle; centroids: PPSingle); stdcall; external 'yakmo_single.dll' name 'yakmo_get_centroids';
 
