@@ -79,7 +79,7 @@ const
 
   cRGBWeights: array[Boolean, 0 .. cColorCpns - 1] of Double = (
     (1.0, 1.0, 1.0),
-    (cRedMul / cRedMul, cGreenMul / cRedMul, cBlueMul / cRedMul)
+    (cRedMul / (cLumaDiv / 3), cGreenMul / (cLumaDiv / 3), cBlueMul / (cLumaDiv / 3))
   );
 
   cDCTUVRatio: array[0..7,0..7] of TFloat = (
@@ -145,8 +145,7 @@ type
   TDCTDynArray2 = array of TDCTDynArray;
 
 const
-  cDCTScale = 1;//-Low(TDCTScalar) / ((1 shl cBitsPerComp) * Sqr(cTileWidth));
-  cBestPSNR = 20.0 * Ln((1 shl cBitsPerComp) * cDCTScale - 1) / Ln(10.0);
+  cBestPSNR = 20.0 * Ln((1 shl cBitsPerComp) - 1) / Ln(10.0);
 
 procedure SpinEnter(Lock: PSpinLock); assembler;
 procedure SpinLeave(Lock: PSpinLock); assembler;
@@ -555,7 +554,7 @@ var
   mask: Integer;
 begin
   mask := -1 xor (((1 shl cBitsPerComp) - 1) shl (cpn shl cBitsPerCompBits));
-  Result := col and mask or (value shl (cpn shl cBitsPerCompBits));
+  Result := (col and mask) or (value shl (cpn shl cBitsPerCompBits));
 end;
 
 function Posterize(v: Byte; cvt: Integer): Byte; inline;

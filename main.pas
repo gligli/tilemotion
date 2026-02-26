@@ -559,7 +559,7 @@ begin
     else if pcPages.ActivePage = tsOutput then
       FTilingEncoder.RenderPage := rpOutput
     else if pcPages.ActivePage = tsTilesPal then
-      FTilingEncoder.RenderPage := rpTilesPalette
+      FTilingEncoder.RenderPage := rpTiles
     else
       FTilingEncoder.RenderPage := rpNone;
 
