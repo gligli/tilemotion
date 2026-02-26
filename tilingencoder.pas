@@ -147,13 +147,16 @@ type
   { TTileMapItem }
 
   TTileMapItem = packed record
+  type
+    TFlag = (tmfHMirrorC0, tmfVMirrorC0, tmfHMirrorC1, tmfVMirrorC1, tmfHMirrorC2, tmfVMirrorC2, tmfPredicted, tmfBlended);
+  public
     TileIdx: array[0 .. cColorCpns - 1] of Integer; // 4
     PSNR: TFloat; // 4
     Attrs: record case Boolean of // 3 * 1
       False: (MotionX, MotionY: ShortInt; MotionBackBufferOffset: Byte);
       True: (BlendWeightM1, BlendWeightM2, Dummy: Byte);
     end;
-    Flags: set of (tmfHMirror, tmfVMirror, tmfPredicted, tmfBlended); // 1
+    Flags: set of TFlag; // 1
   end;
 
 {$if SizeOf(TTileMapItem) <> 20}
@@ -168,16 +171,19 @@ type
   { TTileMapItemHelper }
 
   TTileMapItemHelper = record helper for TTileMapItem
+  const
+    CCpnToHMirror: array[0 .. cColorCpns - 1] of TTileMapItem.TFlag = (tmfHMirrorC0, tmfHMirrorC1, tmfHMirrorC2);
+    CCpnToVMirror: array[0 .. cColorCpns - 1] of TTileMapItem.TFlag = (tmfVMirrorC0, tmfVMirrorC1, tmfVMirrorC2);
   private
-    function GetHMirror: Boolean;
+    function GetHMirror(Cpn: Integer): Boolean;
     function GetIsBlended: Boolean;
     function GetIsSmoothed: Boolean;
-    function GetVMirror: Boolean;
-    procedure SetHMirror(AValue: Boolean);
+    function GetVMirror(Cpn: Integer): Boolean;
+    procedure SetHMirror(Cpn: Integer; AValue: Boolean);
     procedure SetIsBlended(AValue: Boolean);
-    procedure SetVMirror(AValue: Boolean);
     function GetIsPredicted: Boolean;
     procedure SetIsPredicted(AValue: Boolean);
+    procedure SetVMirror(Cpn: Integer; AValue: Boolean);
   public
     procedure ResetTileIdx;
     procedure Reset(AKeepMirrors: Boolean);
@@ -186,8 +192,8 @@ type
     property IsPredicted: Boolean read GetIsPredicted write SetIsPredicted;
     property IsBlended: Boolean read GetIsBlended write SetIsBlended;
     property IsSmoothed: Boolean read GetIsSmoothed;
-    property HMirror: Boolean read GetHMirror write SetHMirror;
-    property VMirror: Boolean read GetVMirror write SetVMirror;
+    property HMirror[Cpn: Integer]: Boolean read GetHMirror write SetHMirror;
+    property VMirror[Cpn: Integer]: Boolean read GetVMirror write SetVMirror;
   end;
 
   { TTilingDataset }
@@ -441,8 +447,8 @@ type
     function GetTileCount(AActiveOnly: Boolean): Integer;
     function GetFrameTileCount(AFrame: TFrame): Integer;
     function GetUnpredictedTileCount: Integer;
-    class function GetTileZoneSum(const ATile: TTile; x, y, w, h: Integer): Integer;
-    class procedure GetTileHVMirrorHeuristics(const ATile: TTile; out AHMirror, AVMirror: Boolean);
+    class function GetTileZoneSum(const ATile: TTile; ACpn, x, y, w, h: Integer): Integer;
+    class procedure GetTileHVMirrorHeuristics(const ATile: TTile; ACpn: Integer; out AHMirror, AVMirror: Boolean);
     class procedure HMirrorTile(var ATile: TTile);
     class procedure VMirrorTile(var ATile: TTile);
 
@@ -598,6 +604,14 @@ begin
     Flags -= [tmfPredicted];
 end;
 
+procedure TTileMapItemHelper.SetVMirror(Cpn: Integer; AValue: Boolean);
+begin
+  if AValue then
+    Flags += [CCpnToVMirror[Cpn]]
+  else
+    Flags -= [CCpnToVMirror[Cpn]];
+end;
+
 procedure TTileMapItemHelper.ResetTileIdx;
 begin
   FillChar(TileIdx, SizeOf(TileIdx), Byte(-1));
@@ -625,9 +639,9 @@ begin
     Result := Result and (TileIdx[iCpn] >= 0);
 end;
 
-function TTileMapItemHelper.GetHMirror: Boolean;
+function TTileMapItemHelper.GetHMirror(Cpn: Integer): Boolean;
 begin
-  Result := tmfHMirror in Flags;
+  Result := CCpnToHMirror[Cpn] in Flags;
 end;
 
 function TTileMapItemHelper.GetIsBlended: Boolean;
@@ -640,17 +654,17 @@ begin
   Result := IsPredicted and not IsBlended and (Attrs.MotionX = 0) and (Attrs.MotionY = 0);
 end;
 
-function TTileMapItemHelper.GetVMirror: Boolean;
+function TTileMapItemHelper.GetVMirror(Cpn: Integer): Boolean;
 begin
-  Result := tmfVMirror in Flags;
+  Result := CCpnToVMirror[Cpn] in Flags;
 end;
 
-procedure TTileMapItemHelper.SetHMirror(AValue: Boolean);
+procedure TTileMapItemHelper.SetHMirror(Cpn: Integer; AValue: Boolean);
 begin
   if AValue then
-    Flags += [tmfHMirror]
+    Flags += [CCpnToHMirror[Cpn]]
   else
-    Flags -= [tmfHMirror];
+    Flags -= [CCpnToHMirror[Cpn]];
 end;
 
 procedure TTileMapItemHelper.SetIsBlended(AValue: Boolean);
@@ -659,14 +673,6 @@ begin
     Flags += [tmfBlended]
   else
     Flags -= [tmfBlended];
-end;
-
-procedure TTileMapItemHelper.SetVMirror(AValue: Boolean);
-begin
-  if AValue then
-    Flags += [tmfVMirror]
-  else
-    Flags -= [tmfVMirror];
 end;
 
 { TFastPortableNetworkGraphic }
@@ -1467,9 +1473,9 @@ end;
 
 procedure TFrame.AsyncLoadFromImage;
 var
-  i: Integer;
+  i, iCpn: Integer;
   HMirror, VMirror: Boolean;
-  Tile: PTile;
+  FT: PTile;
   TMI: PTileMapItem;
   prevFrameICD: TFloatDynArray;
 begin
@@ -1491,22 +1497,27 @@ begin
 
   for i := 0 to Encoder.FTileMapSize - 1 do
   begin
-    Tile := FrameTiles[i];
+    FT := FrameTiles[i];
     TMI := @TileMap[i div Encoder.FTileMapWidth, i mod Encoder.FTileMapWidth];
 
-    Encoder.GetTileHVMirrorHeuristics(Tile^, HMirror, VMirror);
+    Encoder.GetTileHVMirrorHeuristics(FT^, -1, HMirror, VMirror);
 
-    Tile^.Active := True;
-    Tile^.UseCount := 1;
-    Tile^.TmpIndex := -1;
-    Tile^.HMirror_Initial := HMirror;
-    Tile^.VMirror_Initial := VMirror;
+    FT^.Active := True;
+    FT^.UseCount := 1;
+    FT^.TmpIndex := -1;
+    FT^.HMirror_Initial := HMirror;
+    FT^.VMirror_Initial := VMirror;
 
-    TMI^.HMirror := HMirror;
-    TMI^.VMirror := VMirror;
+    for iCpn := 0 to cColorCpns - 1 do
+    begin
+      Encoder.GetTileHVMirrorHeuristics(FT^, iCpn, HMirror, VMirror);
 
-    if HMirror then Encoder.HMirrorTile(Tile^);
-    if VMirror then Encoder.VMirrorTile(Tile^);
+      TMI^.HMirror[iCpn] := HMirror;
+      TMI^.VMirror[iCpn] := VMirror;
+    end;
+
+    if FT^.HMirror_Initial then Encoder.HMirrorTile(FT^);
+    if FT^.VMirror_Initial then Encoder.VMirrorTile(FT^);
   end;
 
   // compress frame tiles to save memory
@@ -1557,8 +1568,15 @@ var
     dy := sy shl cTileWidthBits;
 
     FrameTile := FrameTiles[AIndex];
-    Encoder.ConvertToCpnPixels(FrameTile^, False, False, FTCpnPixels);
-    Encoder.ComputePsyVisFeatures(FTCpnPixels, pvsWeightedDCT, False, -1, FTDCT);
+
+    for iCpn := 0 to cColorCpns - 1 do
+    begin
+      Encoder.ConvertToCpnPixels(FrameTile^,
+        FrameTile^.VMirror_Initial xor TMI^.VMirror[iCpn],
+        FrameTile^.HMirror_Initial xor TMI^.HMirror[iCpn],
+        FTCpnPixels);
+      Encoder.ComputePsyVisFeatures(FTCpnPixels, pvsWeightedDCT, False, iCpn, @FTDCT[iCpn * Sqr(cTileWidth)]);
+    end;
 
     // redo motion prediction (account for palette)
 
@@ -1666,7 +1684,7 @@ var
       // draw fb (pal tile)
 
       for iCpn := 0 to cColorCpns - 1 do
-        Encoder.FTiles[TMI^.TileIdx[iCpn]]^.BlitCpnPixels(FrontBuf, iCpn, TMI^.VMirror, TMI^.HMirror, dy, dx);
+        Encoder.FTiles[TMI^.TileIdx[iCpn]]^.BlitCpnPixels(FrontBuf, iCpn, TMI^.VMirror[iCpn], TMI^.HMirror[iCpn], dy, dx);
     end;
 
     SpinEnter(@PKeyFrame.ReconstructLock);
@@ -1865,12 +1883,7 @@ begin
   end
   else
   begin
-    // allocate theoretically half the tiles for key frames first frames
-    kfffTileCount := FGlobalTilingTileCount;
-    if Length(FFrames) > 1 then
-      kfffTileCount := kfffTileCount shr 1;
-
-    kfffTileCount := SolveTileCount(kfffTileCount, OnKFFirstFrame);
+    kfffTileCount := SolveTileCount(FGlobalTilingTileCount, OnKFFirstFrame);
   end;
 
   ProgressRedraw(1, 'KFFirstFramesSolveTileCount');
@@ -1889,16 +1902,13 @@ begin
   end
   else
   begin
-    // subtract what was used for key frames first frames
-    globalTileCount := FGlobalTilingTileCount - kfffTileCount;
-
-    globalTileCount := SolveTileCount(globalTileCount, OnKFFirstFrame);
+    globalTileCount := SolveTileCount(FGlobalTilingTileCount, OnKFFirstFrame);
   end;
 
   ProgressRedraw(2, 'SolveTileCount');
 
   TransferTiles(globalTileCount, OnKFFirstFrame);
-  ReduceTiles(kfffTileCount + globalTileCount);
+  ReduceTiles(ilerp(kfffTileCount, globalTileCount, Length(FFrames) - Length(FKeyFrames), Length(FFrames)));
   ReindexTiles;
 
   ProgressRedraw(3, 'Reduce');
@@ -3206,17 +3216,19 @@ begin
         end
         else if TMI^.IsValidTileIdx then
         begin
-          hmir := TMI^.HMirror;
-          vmir := TMI^.VMirror;
-
-          if not FRenderMirrored then
-          begin
-            hmir := False;
-            vmir := False;
-          end;
-
           for iCpn := 0 to cColorCpns - 1 do
+          begin
+            hmir := TMI^.HMirror[iCpn];
+            vmir := TMI^.VMirror[iCpn];
+
+            if not FRenderMirrored then
+            begin
+              hmir := False;
+              vmir := False;
+            end;
+
             DrawTile(FRenderFrameBuffer.GetBuffer, iCpn, FTiles[TMI^.TileIdx[iCpn]], sy, sx, hmir, vmir, False);
+          end;
         end
         else
         begin
@@ -3693,9 +3705,9 @@ var
   procedure DoTransfer(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
     tIdx, sy, sx, ty, tx, iCpn: Integer;
-    rgb: array[0 .. cColorCpns - 1] of Byte;
+    hmir, vmir: Boolean;
     Frame: TFrame;
-    Tile, FrameTile: PTile;
+    Tile, FT: PTile;
     TMI: PTileMapItem;
   begin
     if not InRange(AIndex, 0, High(FFrames)) then
@@ -3717,8 +3729,8 @@ var
           begin
             tIdx := InterLockedExchangeAdd(newTIdx, cColorCpns);
 
-            FrameTile := Frame.FrameTiles[sy * FTileMapWidth + sx];
-            Assert(FrameTile^.Active);
+            FT := Frame.FrameTiles[sy * FTileMapWidth + sx];
+            Assert(FT^.Active);
 
             for iCpn := 0 to cColorCpns - 1 do
             begin
@@ -3726,9 +3738,15 @@ var
 
               for ty := 0 to cTileWidth - 1 do
                 for tx := 0 to cTileWidth - 1 do
-                  Tile^.Pixels[0, ty, tx] := FrameTile^.Pixels[iCpn, ty, tx];
+                  Tile^.Pixels[0, ty, tx] := FT^.Pixels[iCpn, ty, tx];
 
-              Tile^.Flags := FrameTile^.Flags;
+              GetTileHVMirrorHeuristics(Tile^, 0, hmir, vmir);
+              if hmir then HMirrorTile(Tile^);
+              if vmir then VMirrorTile(Tile^);
+
+              Tile^.HMirror_Initial := hmir xor FT^.HMirror_Initial;
+              Tile^.VMirror_Initial := vmir xor FT^.VMirror_Initial;
+              Tile^.Active := True;
               Tile^.UseCount := 1;
               TMI^.TileIdx[iCpn] := tIdx;
               Inc(tIdx)
@@ -4112,27 +4130,36 @@ begin
         end;
 end;
 
-class function TTilingEncoder.GetTileZoneSum(const ATile: TTile; x, y, w, h: Integer): Integer;
+class function TTilingEncoder.GetTileZoneSum(const ATile: TTile; ACpn, x, y, w, h: Integer): Integer;
 var
   i, j: Integer;
-  r, g, b: Byte;
 begin
   Result := 0;
-  for j := y to y + h - 1 do
-    for i := x to x + w - 1 do
-      Result += ToLuma(ATile.Pixels[0, j, i], ATile.Pixels[1, j, i], ATile.Pixels[2, j, i]);
+
+  if ACpn < 0 then
+  begin
+    for j := y to y + h - 1 do
+      for i := x to x + w - 1 do
+        Result += ToLuma(ATile.Pixels[0, j, i], ATile.Pixels[1, j, i], ATile.Pixels[2, j, i]);
+  end
+  else
+  begin
+    for j := y to y + h - 1 do
+      for i := x to x + w - 1 do
+        Result += ATile.Pixels[ACpn, j, i];
+  end;
 end;
 
-class procedure TTilingEncoder.GetTileHVMirrorHeuristics(const ATile: TTile; out AHMirror, AVMirror: Boolean);
+class procedure TTilingEncoder.GetTileHVMirrorHeuristics(const ATile: TTile; ACpn: Integer; out AHMirror, AVMirror: Boolean);
 var
   q00, q01, q10, q11: Integer;
 begin
   // enforce an heuristical 'spin' on tiles mirrors (brighter top-left corner)
 
-  q00 := GetTileZoneSum(ATile, 0, 0, cTileWidth div 2, cTileWidth div 2);
-  q01 := GetTileZoneSum(ATile, cTileWidth div 2, 0, cTileWidth div 2, cTileWidth div 2);
-  q10 := GetTileZoneSum(ATile, 0, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2);
-  q11 := GetTileZoneSum(ATile, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2);
+  q00 := GetTileZoneSum(ATile, ACpn, 0, 0, cTileWidth div 2, cTileWidth div 2);
+  q01 := GetTileZoneSum(ATile, ACpn, cTileWidth div 2, 0, cTileWidth div 2, cTileWidth div 2);
+  q10 := GetTileZoneSum(ATile, ACpn, 0, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2);
+  q11 := GetTileZoneSum(ATile, ACpn, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2);
 
   AHMirror := q00 + q10 < q01 + q11;
   AVMirror := q00 + q01 < q10 + q11;
@@ -4219,8 +4246,8 @@ var
   begin
     //TMI.TileIdx := tileIdx; //TODO
     //TMI.PalIdx := palIdx;
-    TMI.HMirror := attrs and 1 <> 0;
-    TMI.VMirror := attrs and 2 <> 0;
+    //TMI.HMirror := attrs and 1 <> 0;
+    //TMI.VMirror := attrs and 2 <> 0;
 
     TMI.IsPredicted := False;
 
@@ -4504,7 +4531,9 @@ var
       for iCpn := 0 to cColorCpns - 1 do
         isLongTile := isLongTile or (TMI.TileIdx[iCpn] > High(Word));
 
-      attrs := (Ord(TMI.VMirror) shl 1) or Ord(TMI.HMirror);
+      attrs := 0;
+      for iCpn := 0 to cColorCpns - 1 do
+        attrs := ((Ord(TMI.VMirror[iCpn]) shl 1) or Ord(TMI.HMirror[iCpn])) shl (iCpn shl 1);
 
       if not isLongTile then
       begin
