@@ -76,7 +76,10 @@ const
     (0.3265091542, 0.436405793551, 0.372504254596, 0.295774038565, 0.226951348204, 0.17408067321, 0.136153931001, 0.109083846276)
   );
 
-  cRGBWeights: array[0 .. cColorCpns - 1] of Double = (cRedMul / cRedMul, cGreenMul / cRedMul, cBlueMul / cRedMul);
+  cRGBWeights: array[Boolean, 0 .. cColorCpns - 1] of Double = (
+    (1.0, 1.0, 1.0),
+    (cRedMul / cRedMul, cGreenMul / cRedMul, cBlueMul / cRedMul)
+  );
 
   cDCTUVRatio: array[0..7,0..7] of TFloat = (
     (0.5, sqrt(0.5), sqrt(0.5), sqrt(0.5), sqrt(0.5), sqrt(0.5), sqrt(0.5), sqrt(0.5)),
@@ -188,7 +191,7 @@ generic function DCTInner<T>(pCpn, pLut: T; count: Integer): Double;
 function DCTInner_asm(pCpn_rcx, pLut_rdx: PFloat): Double; register; assembler;
 function EqualQualityTileCount(tileCount: Double): Integer;
 function GoldenRatioSearch(Func: TGRSEvalFunc; MinX, MaxX: Double; ObjectiveY: Double; EpsilonX, EpsilonY: Double; Data: Pointer): TGRSResult;
-function EuclideanToPSNR(AEuclidean: Cardinal): Double;
+function EuclideanToPSNR(AEuclidean: Double): Double;
 function PSNRToEuclidean(APSNR: Double): Cardinal;
 
 implementation
@@ -1222,7 +1225,7 @@ begin
   end;
 end;
 
-function EuclideanToPSNR(AEuclidean: Cardinal): Double;
+function EuclideanToPSNR(AEuclidean: Double): Double;
 begin
   Result := AEuclidean * (1 / cTileDCTSize);
   Result := cBestPSNR - 10.0 * Log10(Max(1.0, Result));

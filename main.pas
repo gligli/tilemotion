@@ -21,8 +21,6 @@ type
     btnRunAll: TButton;
     btnPM: TButton;
     cbxMPRadius: TComboBox;
-    cbxDitheringMode: TComboBox;
-    chkFTEPU: TCheckBox;
     chkStretch: TCheckBox;
     chkPredicted: TCheckBox;
     cbxScaling: TComboBox;
@@ -43,7 +41,6 @@ type
     Label18: TLabel;
     Label15: TLabel;
     lblMaxCores: TLabel;
-    Label17: TLabel;
     Label20: TLabel;
     Label22: TLabel;
     Label4: TLabel;

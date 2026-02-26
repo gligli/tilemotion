@@ -97,9 +97,7 @@ type
   PTileDynArray2 = array of PTileDynArray;
 
   TRGBPixels = array[0..(cTileWidth - 1),0..(cTileWidth - 1)] of Integer;
-  TPalPixels = array[0..(cTileWidth - 1),0..(cTileWidth - 1)] of Byte;
   PRGBPixels = ^TRGBPixels;
-  PPalPixels = ^TPalPixels;
 
   TCpnPixels = array[0..cColorCpns-1, 0..cTileWidth-1,0..cTileWidth-1] of Single;
   TCpnPixelsDouble = array[0..cColorCpns-1, 0..cTileWidth-1,0..cTileWidth-1] of Double;
@@ -437,7 +435,7 @@ type
     generic procedure DeWaveletGS<T, PT>(wl: PT; pic: PT; dx, dy, depth: longint);
 
     procedure ConvertToCpnPixels(const ATile: TTile; VMirror, HMirror: Boolean; out ACpnPixel: TCpnPixels); inline;
-    procedure ComputePsyVisFeatures(const ACpnPixels: TCpnPixels; Mode: TPsyVisMode; ColorCpn: Integer; ADCT: PDCTScalar); inline;
+    procedure ComputePsyVisFeatures(const ACpnPixels: TCpnPixels; Mode: TPsyVisMode; WeightCpns: Boolean; ColorCpn: Integer; ADCT: PDCTScalar); inline;
 
     procedure ComputeTileCpnPsyVisFeatures(const ATile: TTile; Mode: TPsyVisMode; VMirror, HMirror: Boolean; ColorCpn: Integer; ADCT: PDouble); inline;
     procedure ComputeInvTileCpnPsyVisFeatures(DCT: PDouble; Mode: TPsyVisMode; ColorCpn: Integer; var ATile: TTile);
@@ -1149,7 +1147,7 @@ procedure TFrame.PrepareDCTs(const ADCTs: TDCTDynArray; const ABuffer: TIntegerD
         DCTTile^.CopyRGBPixels(ABuffer, AIndex, x);
 
         Encoder.ConvertToCpnPixels(DCTTile^, False, False, CpnPixels);
-        Encoder.ComputePsyVisFeatures(CpnPixels, pvsWeightedDCT, -1, ADCTs[yx]);
+        Encoder.ComputePsyVisFeatures(CpnPixels, pvsWeightedDCT, True, -1, ADCTs[yx]);
 
         Inc(yx);
       end;
@@ -1319,7 +1317,7 @@ procedure TFrame.Predict(ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBu
     FrameTile := FrameTiles[AIndex];
 
     Encoder.ConvertToCpnPixels(FrameTile^, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, CurCpnPixels);
-    Encoder.ComputePsyVisFeatures(CurCpnPixels, pvsWeightedDCT, -1, CurDCT);
+    Encoder.ComputePsyVisFeatures(CurCpnPixels, pvsWeightedDCT, True, -1, CurDCT);
 
     dx := sx shl cTileWidthBits;
     dy := sy shl cTileWidthBits;
@@ -1533,6 +1531,7 @@ var
     sx, sy, dx, dy, ty, tx, iCpn: Integer;
     knnErr: array[0 .. cColorCpns - 1] of Cardinal;
     knnPSNR, mpPSNR: TFloat;
+    errAcc: Double;
 
     FrameTile: PTile;
     TMI: PTileMapItem;
@@ -1553,7 +1552,7 @@ var
 
     FrameTile := FrameTiles[AIndex];
     Encoder.ConvertToCpnPixels(FrameTile^, False, False, FTCpnPixels);
-    Encoder.ComputePsyVisFeatures(FTCpnPixels, pvsWeightedDCT, -1, FTDCT);
+    Encoder.ComputePsyVisFeatures(FTCpnPixels, pvsWeightedDCT, False, -1, FTDCT);
 
     // redo motion prediction (account for palette)
 
@@ -1587,9 +1586,16 @@ var
     // devise which is best
 
     if TMI^.IsValidTileIdx then
-      knnPSNR := EuclideanToPSNR(knnErr[0] + knnErr[1] + knnErr[2])
+    begin
+      errAcc := 0.0;
+      for iCpn := 0 to cColorCpns - 1 do
+        errAcc += knnErr[iCpn] * cRGBWeights[True, iCpn];
+      knnPSNR := EuclideanToPSNR(errAcc)
+    end
     else
+    begin
       knnPSNR := -Infinity;
+    end;
 
     case CompareValue(knnPSNR, mpPSNR, cPSNREpsilon) of
       GreaterThanValue:
@@ -2672,7 +2678,7 @@ begin
     end;
 end;
 
-procedure TTilingEncoder.ComputePsyVisFeatures(const ACpnPixels: TCpnPixels; Mode: TPsyVisMode; ColorCpn: Integer; ADCT: PDCTScalar);
+procedure TTilingEncoder.ComputePsyVisFeatures(const ACpnPixels: TCpnPixels; Mode: TPsyVisMode; WeightCpns: Boolean; ColorCpn: Integer; ADCT: PDCTScalar);
 var
   u, v, cpn: Integer;
   z: Double;
@@ -2695,7 +2701,7 @@ begin
   		    z := DCTInner_asm(@ACpnPixels[cpn, 0, 0], pLut);
 
           if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
-            z *= cDCTWeights[v, u];
+            z *= cDCTWeights[v, u] * cRGBWeights[WeightCpns, cpn];
 
           pDCT[pSnake^] := Round(z);
           Inc(pLut, Sqr(cTileWidth));
@@ -2714,7 +2720,7 @@ begin
 		    z := DCTInner_asm(@ACpnPixels[ColorCpn, 0, 0], pLut);
 
         if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
-          z *= cDCTWeights[v, u];
+          z *= cDCTWeights[v, u] * cRGBWeights[WeightCpns, ColorCpn];
 
         pDCT[pSnake^] := Round(z);
         Inc(pLut, Sqr(cTileWidth));
@@ -3859,7 +3865,7 @@ var
     Assert(T^.Active);
 
     ConvertToCpnPixels(T^, False, False, CpnPixels);
-    ComputePsyVisFeatures(CpnPixels, pvsWeightedDCT, 0, @DS^.Dataset[AIndex, 0]);
+    ComputePsyVisFeatures(CpnPixels, pvsWeightedDCT, False, 0, @DS^.Dataset[AIndex, 0]);
   end;
 
 var
