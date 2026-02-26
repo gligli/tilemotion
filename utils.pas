@@ -27,7 +27,8 @@ const
 
   cLumaDiv = cRedMul + cGreenMul + cBlueMul;
 
-  cBitsPerComp = 8;
+  cBitsPerCompBits = 3;
+  cBitsPerComp = 1 shl cBitsPerCompBits;
   cVecInvWidth = 16;
   cTileWidthBits = 3;
   cTileWidth = 1 shl cTileWidthBits;
@@ -553,8 +554,8 @@ function InsertRGB(col: Integer; value, cpn: Integer): Integer;
 var
   mask: Integer;
 begin
-  mask := -1 xor (((1 shl cBitsPerComp) - 1) shl (cpn * cBitsPerComp));
-  Result := col and mask or (value shl (cpn * cBitsPerComp));
+  mask := -1 xor (((1 shl cBitsPerComp) - 1) shl (cpn shl cBitsPerCompBits));
+  Result := col and mask or (value shl (cpn shl cBitsPerCompBits));
 end;
 
 function Posterize(v: Byte; cvt: Integer): Byte; inline;
