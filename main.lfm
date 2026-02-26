@@ -638,6 +638,8 @@ object MainForm: TMainForm
     Width = 43
     Anchors = [akLeft, akBottom]
     Caption = 'JPEG'
+    Checked = True
+    State = cbChecked
     TabOrder = 10
     OnChange = UpdateVideo
   end

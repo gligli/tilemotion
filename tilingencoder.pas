@@ -3517,7 +3517,7 @@ begin
   MotionPredictMaxBufferedFrames := 3;
 
   GlobalTilingUseTargetPSNR := True;
-  GlobalTilingTargetPSNR := 30.0;
+  GlobalTilingTargetPSNR := 36.0;
   GlobalTilingQualityBasedTileCount := 3.0;
   GlobalTilingTileCount := 0; // after GlobalTilingQualityBasedTileCount because has priority
 
