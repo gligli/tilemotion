@@ -135,7 +135,8 @@ type
     procedure BlendRGBPixels(const AM1Buffer, AM2Buffer: TIntegerDynArray2; AY, AX: Integer; AM1Weight, AM2Weight: Byte);
     procedure BlitRGBPixels(const AFrameBuffer: TIntegerDynArray2; AVMirror, AHMirror: Boolean; AY, AX: Integer);
     procedure ClearRGBPixels;
-    function CompareRGBPixelsTo(const ATile: TTile): Integer;
+    function CompareRawPixelsTo(const ATile: TTile): Integer;
+    function CompareHSVPixelsTo(const ATile: TTile): Integer;
 
     property Active: Boolean read GetActive write SetActive;
     property HMirror_Initial: Boolean read GetHMirror_Initial write SetHMirror_Initial;
@@ -598,7 +599,7 @@ const
 
     Result := CompareValue(t2^.UseCount, t1^.UseCount);
     if Result = 0 then
-      Result := t1^.CompareRGBPixelsTo(t2^)
+      Result := t1^.CompareHSVPixelsTo(t2^)
   end;
 
 { TTileMapItemHelper }
@@ -901,7 +902,44 @@ begin
   FillChar(Pixels, SizeOf(Pixels), 0);
 end;
 
-function TTileHelper.CompareRGBPixelsTo(const ATile: TTile): Integer;
+function TTileHelper.CompareHSVPixelsTo(const ATile: TTile): Integer;
+const
+  CPrecisionDiv = 1;
+var
+  iPx, luma, lumaAccL, lumaAccR: Integer;
+  h, s, v, hAccL, sAccL, vAccL, hAccR, sAccR, vAccR: TFloat;
+begin
+  lumaAccL := 0;
+  lumaAccR := 0;
+  hAccL := 0.0; sAccL := 0.0; vAccL := 0.0;
+  hAccR := 0.0; sAccR := 0.0; vAccR := 0.0;
+
+
+  for iPx := 0 to Sqr(cTileWidth) - 1 do
+  begin
+    luma := ToLuma(Pixels[0, iPx], Pixels[1, iPx], Pixels[2, iPx]);
+    lumaAccL += luma;
+
+    RGBToHSV(Pixels[0, iPx], Pixels[1, iPx], Pixels[2, iPx], h, s, v);
+    hAccL += h; sAccL += s; vAccL += v;
+
+    luma := ToLuma(ATile.Pixels[0, iPx], ATile.Pixels[1, iPx], ATile.Pixels[2, iPx]);
+    lumaAccR += luma;
+
+    RGBToHSV(Pixels[0, iPx], Pixels[1, iPx], Pixels[2, iPx], h, s, v);
+    hAccR += h; sAccR += s; vAccR += v;
+  end;
+
+  Result := CompareValue(lumaAccL, lumaAccR, Sqr(cTileWidth) * cLumaDiv * CPrecisionDiv);
+  if Result = 0 then
+    Result := CompareValue(0.0, FMod(hAccL - hAccR, Sqr(cTileWidth)), Sqr(cTileWidth) / High(Byte) * CPrecisionDiv);
+  if Result = 0 then
+    Result := CompareValue(sAccL, sAccR, Sqr(cTileWidth) / High(Byte) * CPrecisionDiv);
+  if Result = 0 then
+    Result := CompareValue(vAccL, vAccR, Sqr(cTileWidth) / High(Byte) * CPrecisionDiv);
+end;
+
+function TTileHelper.CompareRawPixelsTo(const ATile: TTile): Integer;
 begin
   Result := CompareByte(Pixels[0, 0], ATile.Pixels[0, 0], sqr(cTileWidth) * cColorCpns);
 end;
@@ -2651,10 +2689,7 @@ procedure TTilingEncoder.ConvertToCpnPixels(const ATile: TTile; VMirror, HMirror
     r, g, b: Byte;
   begin
     FromRGB(col, r, g, b);
-
-    ACpnPixel[0, yx] := r;
-    ACpnPixel[1, yx] := g;
-    ACpnPixel[2, yx] := b;
+    RGBToYUV(r, g, b, ACpnPixel[0, yx], ACpnPixel[1, yx], ACpnPixel[2, yx], cDCTScale);
   end;
 
 var
@@ -3749,13 +3784,13 @@ begin
   WriteLn('ReindexTiles: ', Length(Tiles):12, ' / ', Length(FFrames) * FTileMapSize:12,  ' final tiles, (', Length(Tiles) * 100.0 / (Length(FFrames) * FTileMapSize):4:3, '%)');
 end;
 
-function CompareTileRGBPixels(Item1, Item2:Pointer):Integer;
+function CompareTileRawPixels(Item1, Item2:Pointer):Integer;
 var
   t1, t2: PTile;
 begin
   t1 := PTile(Item1);
   t2 := PTile(Item2);
-  Result := t1^.CompareRGBPixelsTo(t2^);
+  Result := t1^.CompareRawPixelsTo(t2^);
 end;
 
 procedure TTilingEncoder.MakeTilesUnique;
@@ -3799,13 +3834,13 @@ begin
       end;
     sortList.Count := pos;
 
-    sortList.Sort(@CompareTileRGBPixels);
+    sortList.Sort(@CompareTileRawPixels);
 
     // merge exactly similar tiles (so, consecutive after prev code)
 
     firstSameIdx := 0;
     for sortListIdx := 1 to sortList.Count - 1 do
-      if CompareTileRGBPixels(sortList[sortListIdx - 1], sortList[sortListIdx]) <> 0 then
+      if CompareTileRawPixels(sortList[sortListIdx - 1], sortList[sortListIdx]) <> 0 then
         DoOneMerge;
 
     sortListIdx := sortList.Count;

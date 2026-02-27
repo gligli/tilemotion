@@ -156,6 +156,7 @@ type
   TDCTDynArray2 = array of TDCTDynArray;
 
 const
+  cDCTScale = -Low(TDCTScalar) / ((1 shl cBitsPerComp) * Sqr(cTileWidth));
   cBestPSNR = 20.0 * Ln((1 shl cBitsPerComp) - 1) / Ln(10.0);
 
 procedure SpinEnter(Lock: PSpinLock); assembler;
@@ -172,8 +173,8 @@ procedure FromRGB(col: Integer; out r, g, b: Byte); inline; overload;
 function ToLuma(r, g, b: Integer): Integer; inline;
 function ToBW(col: Integer): Integer;
 function HSVToRGB(h, s, v: Byte): Integer;
-procedure RGBToHSV(col: Integer; out h, s, v: Byte); overload;
-procedure RGBToHSV(col: Integer; out h, s, v: TFloat); overload;
+procedure RGBToHSV(r, g, b: Byte; out h, s, v: Byte); overload;
+procedure RGBToHSV(r, g, b: Byte; out h, s, v: TFloat); overload;
 procedure RGBToYUV(col: Integer; out y, u, v: TFloat; scl: TFloat);
 procedure RGBToYUV(r, g, b: Byte; out y, u, v: TFloat; scl: TFloat);
 procedure RGBToLAB(r, g, b: TFloat; out ol, oa, ob: TFloat);
@@ -308,29 +309,25 @@ begin
 end;
 
 // from https://www.delphipraxis.net/157099-fast-integer-rgb-hsl.html
-procedure RGBToHSV(col: Integer; out h, s, v: Byte);
-var
-  rr, gg, bb: Integer;
+procedure RGBToHSV(r, g, b: Byte; out h, s, v: Byte);
 
   function RGBMaxValue: Integer;
   begin
-    Result := rr;
-    if (Result < gg) then Result := gg;
-    if (Result < bb) then Result := bb;
+    Result := r;
+    if (Result < g) then Result := g;
+    if (Result < b) then Result := b;
   end;
 
   function RGBMinValue : Integer;
   begin
-    Result := rr;
-    if (Result > gg) then Result := gg;
-    if (Result > bb) then Result := bb;
+    Result := r;
+    if (Result > g) then Result := g;
+    if (Result > b) then Result := b;
   end;
 
 var
   Delta, mx, mn, hh, ss, ll: Integer;
 begin
-  FromRGB(col, rr, gg, bb);
-
   mx := RGBMaxValue;
   mn := RGBMinValue;
 
@@ -342,12 +339,12 @@ begin
     Delta := ll - mn;
     ss := MulDiv(Delta, 255, ll);
 
-    if (rr = ll) then
-      hh := MulDiv(42, gg - bb, Delta)
-    else if (gg = ll) then
-      hh := MulDiv(42, bb - rr, Delta) + 84
-    else if (bb = ll) then
-      hh := MulDiv(42, rr - gg, Delta) + 168;
+    if (r = ll) then
+      hh := MulDiv(42, g - b, Delta)
+    else if (g = ll) then
+      hh := MulDiv(42, b - r, Delta) + 84
+    else if (b = ll) then
+      hh := MulDiv(42, r - g, Delta) + 168;
 
     hh := hh mod 252;
   end;
@@ -393,12 +390,12 @@ begin
   end;
 end;
 
-procedure RGBToHSV(col: Integer; out h, s, v: TFloat);
+procedure RGBToHSV(r, g, b: Byte; out h, s, v: TFloat);
 var
   bh, bs, bv: Byte;
 begin
   bh := 0; bs := 0; bv := 0;
-  RGBToHSV(col, bh, bs, bv);
+  RGBToHSV(r, g, b, bh, bs, bv);
   h := bh / 255.0;
   s := bs / 255.0;
   v := bv / 255.0;
