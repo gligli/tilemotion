@@ -413,8 +413,7 @@ object MainForm: TMainForm
         Width = 194
         Frequency = 5
         Max = 100
-        Min = 1
-        Position = 1
+        Position = 0
         ShowSelRange = False
         OnChange = UpdateGUI
         Color = 3487029

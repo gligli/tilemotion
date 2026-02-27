@@ -231,11 +231,11 @@
         <IsPartOfProject Value="True"/>
       </Unit3>
       <Unit4>
-        <Filename Value="kmodes.pas"/>
+        <Filename Value="utils.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit4>
       <Unit5>
-        <Filename Value="utils.pas"/>
+        <Filename Value="mywritejpeg.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit5>
     </Units>

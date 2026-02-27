@@ -12,7 +12,7 @@ interface
 
 uses
   windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, zstream, IniFiles, Graphics,
-  IntfGraphics, FPimage, FPCanvas, FPWritePNG, FPReadJPEG, FPWriteJPEG, GraphType, fgl, MTProcs, extern, tbbmalloc, bufstream, utils;
+  IntfGraphics, FPimage, FPCanvas, FPWritePNG, FPReadJPEG, mywritejpeg, GraphType, fgl, MTProcs, extern, tbbmalloc, bufstream, utils;
 type
   TEncoderStep = (esAll = -1, esLoad = 0, esPredict, esReduce, esReconstruct, esReindex, esJPEG, esSave);
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
@@ -2648,7 +2648,7 @@ end;
 procedure TTilingEncoder.SetJPEGQuality(AValue: Integer);
 begin
   if FJPEGQuality = AValue then Exit;
-  FJPEGQuality := EnsureRange(AValue, Low(TJPEGQualityRange), High(TJPEGQualityRange));
+  FJPEGQuality := EnsureRange(AValue, Low(TMyJPEGCompressionQuality), High(TMyJPEGCompressionQuality));
 end;
 
 procedure TTilingEncoder.SetRenderFrameIndex(AValue: Integer);
@@ -3382,7 +3382,7 @@ begin
   ShotTransMinSecondsPerKF := 1.0;  // minimum seconds between keyframes
   ShotTransCorrelLoThres := 0.8;   // interframe pearson correlation low limit
 
-  JPEGQuality := 95;
+  JPEGQuality := 90;
 end;
 
 procedure TTilingEncoder.Test;
@@ -4062,7 +4062,7 @@ var
   iMap, ty, tx, tyx, iy, imgPos, widthInTiles, heightInTiles, remx: Integer;
   T: PTile;
   Img: TImgRGB8Bit;
-  JPGWriter: TFPWriterJPEG;
+  JPGWriter: TMyWriterJPEG;
   JPGReader: TFPReaderJPEG;
   px: PFPCompactImgRGB8BitValue;
 begin
@@ -4075,12 +4075,13 @@ begin
   heightInTiles := (Length(ATiles) - 1) div widthInTiles + 1;
 
   Img := TImgRGB8Bit.Create(widthInTiles * cTileWidth, heightInTiles * cTileWidth);
-  JPGWriter := TFPWriterJPEG.Create;
+  JPGWriter := TMyWriterJPEG.Create;
   JPGReader := TFPReaderJPEG.Create;
   try
     JPGWriter.CompressionQuality := EnsureRange(AQuality, Low(TJPEGQualityRange), High(TJPEGQualityRange));
     JPGWriter.GrayScale := False;
     JPGWriter.ProgressiveEncoding := True;
+    JPGWriter.ChromaSubsampling := False;
 
     JPGReader.Performance := jpBestQuality;
 
@@ -4107,13 +4108,12 @@ begin
     end;
 
     iy := 0;
-    remx := Img.Width - (imgPos mod Img.Width);
+    remx := (Img.Width - (imgPos mod Img.Width)) * cColorCpns;
     for ty := 0 to cTileWidth - 1 do
     begin
-      FillChar(Img.FData[imgPos + iy], remx, High(Byte));
+      FillChar(Img.FData[imgPos + iy], remx, 0);
       Inc(iy, Img.Width);
     end;
-
 
 {$if defined(DEBUG) or defined(TEST)}
     Img.SaveToFile(Format('%s_%.4d.jpg', [ChangeFileExt(FOutputFileName, ''), ATiles[0]^.TmpIndex]), JPGWriter);
