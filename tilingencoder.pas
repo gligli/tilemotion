@@ -52,32 +52,32 @@ type
   // =====================
   //
   // PredictedTileShortOffsets:        data -> none; commandBits -> y offset (6 bits); x offset (6 bits)
-  // PredictedTileLongOffsets:         data -> x offset (8 bits); y offset (8 bits); commandBits -> none
-  // ShortTileIdxShortPalIdx:          data -> tile index (16 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
-  // LongTileIdxShortPalIdx:           data -> tile index (32 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
-  // LongTileIdxLongPalIdx:            data -> palette index (16 bits); tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
-  // IntraTile:                        data -> palette index (16 bits); indexes per pixel (64 bytes); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
+  // PredictedTileLongOffsets:         data -> x offset (8 bits); y offset (8 bits); commandBits -> none (12 bits)
+  // GlobalShortTileIdx:               data -> global tiles tile index (16 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
+  // KFShortTileIdx:                   data -> keyframe tiles tile index (16 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
   // SkipBlock:                        data -> none; commandBits -> skip count - 1 (12 bits)
   // Blend:                            data -> none; commandBits -> frame -2 weight (6 bits); frame -1 weight (6 bits)
+  // GlobalLongTileIdx:                data -> global tiles tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
+  // KFLongTileIdx:                    data -> keyframe tiles tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
   //
   // (insert new commands here...)
   //
-  // FrameEnd:                         data -> none; commandBits -> none (11 bits); keyframe end (1 bit)
-  // LoadPalette:                      data -> palette index (16 bits); { RGBA bytes (32bits) } * indexes count; commandBits -> palette format (0: RGBA32) (12 bits)
-  // TileSet:                          data -> start tile (32 bits); end tile (32 bits); { indexes per pixel (64 bytes) } * count; commandBits -> JPEG bitness (grayscale)
-  // SetDimensions:                    data -> width in tiles (16 bits); height in tiles (16 bits); frame length in nanoseconds (32 bits) (2^32-1: still frame); tile count (32 bits); commandBits -> none
+  // FrameEnd:                         data -> none; commandBits -> none (11 bits); keyframe end? (1 bit)
+  // TileSet:                          data -> start tile (32 bits); end tile (32 bits); JPEG size (32 bits); { JPEG stream }; none (4 bits); commandBits -> JPEG component count - 1 (3 bits); JPEG per pixel bitness - 1 (4 bits); global tile set? (1 bit)
+  // SetDimensions:                    data -> width in tiles (32 bits); height in tiles (32 bits); frame length in nanoseconds (32 bits) (2^32-1: still frame); global tile count (32 bits); maximum local tile count (32 bits); commandBits -> none (12 bits)
   // ExtendedCommand:                  data -> following bytes count (32 bits); custom commands, proprietary extensions, ...; commandBits -> extended command index (12 bits)
 
   TGTMCommand = (
     gtPredictedTileShortOffsets = 0,
     gtPredictedTileLongOffsets = 1,
-    gtShortTileIdx = 2,
-    gtLongTileIdx = 3,
+    gtGlobalShortKFTileIdx = 2,
+    gtKFShortKFTileIdx = 3,
     gtSkipBlock = 4,
     gtBlend = 5,
+    gtGlobalLongKFTileIdx = 6,
+    gtKFLongKFTileIdx = 7,
 
-    gtFrameEnd = 11,
-    gtLoadPalette = 12,
+    gtFrameEnd = 12,
     gtTileSet = 13,
     gtSetDimensions = 14,
     gtExtendedCommand = 15
@@ -314,7 +314,7 @@ type
     ReconstructPSNRCml: Double;
     ReconstructLock: TSpinlock;
 
-    KFTilesMap: TIntegerDynArray;
+    KFTiles: PTileDynArray;
     KFJPEG: TMemoryStream;
 
     procedure LogPSNR;
@@ -338,12 +338,11 @@ type
     FCS: TRTLCriticalSection;
     FKeyFramesLeft: Integer;
     FTileDS: PTilingDataset;
-    FGlobalTilesMap: TIntegerDynArray;
+    FGlobalTiles: PTileDynArray;
     FGlobalJPEG: TMemoryStream;
 
     FGamma: array[0..1] of TFloat;
     FGammaCorLut: array[-1..1, 0..High(Byte)] of TFloat;
-    FVecInv: array[0..256 * 4 - 1] of Cardinal;
     FDCTLut:array[Boolean {Special?}, 0..cUnrolledDCTSize - 1] of TFloat;
     FDCTLutDouble:array[Boolean {Special?}, 0..cUnrolledDCTSize - 1] of Double;
     FInvDCTLutDouble:array[0..cUnrolledDCTSize - 1] of Double;
@@ -474,7 +473,7 @@ type
     procedure MergeTiles(const TileIndexes: TIntegerDynArray; TileCount: Integer; BestIdx: Int64);
 
     procedure MapTiles;
-    procedure CompressJPEG(ATilesMap: TIntegerDynArray; AStream: TMemoryStream; AQuality: Integer);
+    procedure CompressJPEG(const ATiles: PTileDynArray; AStream: TMemoryStream; AQuality: Integer; AKeyFrame: TKeyFrame);
 
     procedure LoadStream(AStream: TStream);
     procedure SaveStream(AStream: TStream);
@@ -571,9 +570,6 @@ type
   TFastPortableNetworkGraphic = class(TPortableNetworkGraphic)
     procedure InitializeWriter(AImage: TLazIntfImage; AWriter: TFPCustomImageWriter); override;
   end;
-
-
-  { TImgGray8Bit }
 
   { TImgRGB8Bit }
 
@@ -907,23 +903,12 @@ end;
 
 function TTileHelper.CompareRGBPixelsTo(const ATile: TTile): Integer;
 begin
-  Result := CompareByte(Pixels[1, 0], ATile.Pixels[1, 0], sqr(cTileWidth));
-  if Result = 0 then
-    Result := CompareByte(Pixels[0, 0], ATile.Pixels[0, 0], sqr(cTileWidth));
-  if Result = 0 then
-    Result := CompareByte(Pixels[2, 0], ATile.Pixels[2, 0], sqr(cTileWidth));
+  Result := CompareByte(Pixels[0, 0], ATile.Pixels[0, 0], sqr(cTileWidth) * cColorCpns);
 end;
 
 procedure TTileHelper.CopyFrom(const ATile: TTile);
 begin
-  UseCount := ATile.UseCount;
-  TmpIndex := ATile.TmpIndex;
-  MergeIndex := ATile.MergeIndex;
-  Active := ATile.Active;
-  HMirror_Initial := ATile.HMirror_Initial;
-  VMirror_Initial := ATile.VMirror_Initial;
-
-  Move(ATile.Pixels, Pixels, SizeOf(Pixels));
+  Move(ATile, Self, SizeOf(TTile));
 end;
 
 { TKeyFrame }
@@ -1715,11 +1700,6 @@ begin
       else
         FGammaCorLut[g, i] := i / 255.0;
 
-  // inverse
-
-  for i := 0 to High(FVecInv) do
-    FVecInv[i] := iDivDef(1 shl cVecInvWidth, i shr 2, 0);
-
   // DCT
 
   i := 0;
@@ -2044,6 +2024,7 @@ end;
 procedure TTilingEncoder.JPEG;
 var
   kfIdx: Integer;
+  KF: TKeyFrame;
 begin
   if Length(FTiles) = 0 then
     Exit;
@@ -2054,9 +2035,12 @@ begin
 
   ProgressRedraw(1, 'MapTiles');
 
-  CompressJPEG(FGlobalTilesMap, FGlobalJPEG, FJPEGQuality);
+  CompressJPEG(FGlobalTiles, FGlobalJPEG, FJPEGQuality, nil);
   for kfIdx := 0 to High(FKeyFrames) do
-    CompressJPEG(FKeyFrames[kfIdx].KFTilesMap, FKeyFrames[kfIdx].KFJPEG, FJPEGQuality);
+  begin
+    KF := FKeyFrames[kfIdx];
+    CompressJPEG(KF.KFTiles, KF.KFJPEG, FJPEGQuality, KF);
+  end;
 
   ProgressRedraw(2, 'CompressJPEGs');
 end;
@@ -2910,7 +2894,7 @@ end;
 
 procedure TTilingEncoder.Render;
 
-  procedure DrawTile(const ABuffer: TIntegerDynArray2; AColorCpn: Integer; ATilePtr: PTile; ASY, ASX: Integer; AHmirror, AVmirror, AForceActive, AJPEG: Boolean); inline;
+  procedure DrawTile(const ABuffer: TIntegerDynArray2; ATilePtr: PTile; ASY, ASX: Integer; AHmirror, AVmirror, AForceActive: Boolean); inline;
   var
     col, tx, ty, txm, tym, tyxm: Integer;
     psl: PInteger;
@@ -2931,17 +2915,7 @@ procedure TTilingEncoder.Render;
 
         col := $ff00ff;
         if ATilePtr^.Active or AForceActive then
-        begin
-          if AColorCpn >= 0 then
-          begin
-            col := psl^;
-            col := InsertRGB(col, ATilePtr^.Pixels[Ord(AJPEG), tyxm], AColorCpn);
-          end
-          else
-          begin
-            col := ToRGB(ATilePtr^.Pixels[0, tyxm], ATilePtr^.Pixels[1, tyxm], ATilePtr^.Pixels[2, tyxm]);
-          end;
-        end;
+          col := ToRGB(ATilePtr^.Pixels[0, tyxm], ATilePtr^.Pixels[1, tyxm], ATilePtr^.Pixels[2, tyxm]);
 
         psl^ := col;
         Inc(psl);
@@ -3011,6 +2985,19 @@ procedure TTilingEncoder.Render;
     end;
   end;
 
+  function GetFinalTile(ATileIdx: Integer): PTile;
+  var
+    KFTiles: PTileDynArray;
+  begin
+    Result := FTiles[ATileIdx];
+    KFTiles := FFrames[FRenderFrameIndex].PKeyFrame.KFTiles;
+    if FRenderUseJPEG and Assigned(KFTiles) then
+      if Result^.TmpIndex >= Length(FGlobalTiles) then
+        Result := KFTiles[Result^.TmpIndex - Length(FGlobalTiles)]
+      else
+        Result := FGlobalTiles[Result^.TmpIndex];
+  end;
+
 var
   i, sx, sy, globalTileCount, col, off, siz: Integer;
   hmir, vmir: Boolean;
@@ -3071,7 +3058,7 @@ begin
               vmir := False;
             end;
 
-            DrawTile(TempBuf, -1, tilePtr, 0, 0, hmir, vmir, True, False);
+            DrawTile(TempBuf, tilePtr, 0, 0, hmir, vmir, True);
 
             BlitBuffer(TempBuf, pFB, sy, sx, FInputBitmap.Width);
           end;
@@ -3103,10 +3090,12 @@ begin
               FRenderFrameBuffer.GetBuffer(-TMI^.Attrs.MotionBackBufferOffset),
               (sy shl cTileWidthBits) + TMI^.Attrs.MotionY,
               (sx shl cTileWidthBits) + TMI^.Attrs.MotionX);
-          DrawTile(FRenderFrameBuffer.GetBuffer, -1, TempTile, sy, sx, False, False, True, False)
+          DrawTile(FRenderFrameBuffer.GetBuffer, TempTile, sy, sx, False, False, True)
         end
         else if TMI^.IsValidTileIdx then
         begin
+          tilePtr := GetFinalTile(TMI^.TileIdx);
+
           hmir := TMI^.HMirror;
           vmir := TMI^.VMirror;
 
@@ -3116,7 +3105,7 @@ begin
             vmir := False;
           end;
 
-          DrawTile(FRenderFrameBuffer.GetBuffer, -1, FTiles[TMI^.TileIdx], sy, sx, hmir, vmir, False, FRenderUseJPEG);
+          DrawTile(FRenderFrameBuffer.GetBuffer, tilePtr, sy, sx, hmir, vmir, False);
         end
         else
         begin
@@ -3217,7 +3206,7 @@ begin
 
             if InRange(tidx, 0, High(Tiles)) then
             begin
-              tilePtr := Tiles[tidx];
+              tilePtr := GetFinalTile(tidx);
 
               hmir := tilePtr^.HMirror_Initial;
               vmir := tilePtr^.VMirror_Initial;
@@ -3228,7 +3217,7 @@ begin
                 vmir := False;
               end;
 
-              DrawTile(TempBuf, -1, tilePtr, 0, 0, hmir, vmir, False, FRenderUseJPEG);
+              DrawTile(TempBuf, tilePtr, 0, 0, hmir, vmir, False);
 
               BlitBuffer(TempBuf, pFB, sy, sx, FTilesBitmap.Width);
             end;
@@ -3358,7 +3347,7 @@ begin
   ShotTransMinSecondsPerKF := 1.0;  // minimum seconds between keyframes
   ShotTransCorrelLoThres := 0.8;   // interframe pearson correlation low limit
 
-  JPEGQuality := 90;
+  JPEGQuality := 95;
 end;
 
 procedure TTilingEncoder.Test;
@@ -3771,7 +3760,7 @@ end;
 
 procedure TTilingEncoder.MakeTilesUnique;
 var
-  i, pos, firstSameIdx: Integer;
+  sortListIdx, pos, firstSameIdx: Integer;
   sortList: TFPList;
   sameIdx: TIntegerDynArray;
 
@@ -3779,15 +3768,17 @@ var
   var
     j: Integer;
   begin
-    if i - firstSameIdx >= 2 then
+    if sortListIdx - firstSameIdx >= 2 then
     begin
-      for j := firstSameIdx to i - 1 do
+      for j := firstSameIdx to sortListIdx - 1 do
         sameIdx[j - firstSameIdx] := PTile(sortList[j])^.TmpIndex;
-      MergeTiles(sameIdx, i - firstSameIdx, sameIdx[0]);
+      MergeTiles(sameIdx, sortListIdx - firstSameIdx, sameIdx[0]);
     end;
-    firstSameIdx := i;
+    firstSameIdx := sortListIdx;
   end;
 
+var
+  tIdx: Integer;
 begin
   InitMergeTiles;
   sortList := TFPList.Create;
@@ -3799,11 +3790,11 @@ begin
 
     sortList.Count := Length(FTiles);
     pos := 0;
-    for i := 0 to High(FTiles) do
-      if FTiles[i]^.Active then
+    for tIdx := 0 to High(FTiles) do
+      if FTiles[tIdx]^.Active then
       begin
-        sortList[pos] := FTiles[i];
-        PTile(sortList[pos])^.TmpIndex := i;
+        sortList[pos] := FTiles[tIdx];
+        PTile(sortList[pos])^.TmpIndex := tIdx;
         Inc(pos);
       end;
     sortList.Count := pos;
@@ -3813,12 +3804,17 @@ begin
     // merge exactly similar tiles (so, consecutive after prev code)
 
     firstSameIdx := 0;
-    for i := 1 to sortList.Count - 1 do
-      if CompareTileRGBPixels(sortList[i - 1], sortList[i]) <> 0 then
+    for sortListIdx := 1 to sortList.Count - 1 do
+      if CompareTileRGBPixels(sortList[sortListIdx - 1], sortList[sortListIdx]) <> 0 then
         DoOneMerge;
 
-    i := sortList.Count;
+    sortListIdx := sortList.Count;
     DoOneMerge;
+
+    // cleanup
+
+    for tIdx := 0 to High(FTiles) do
+      FTiles[tIdx]^.TmpIndex := -1;
 
   finally
     sortList.Free;
@@ -3925,7 +3921,7 @@ var
   perKFPos: TIntegerDynArray;
   globalPos: Integer;
   TMI: PTileMapItem;
-  tile: PTile;
+  T, FinalT: PTile;
 begin
   // init
 
@@ -3944,13 +3940,13 @@ begin
         if tIdx < 0 then
           Continue;
 
-        tile := FTiles[tIdx];
+        T := FTiles[tIdx];
         kfIdx := FFrames[frmIdx].PKeyFrame.Index;
 
-        if tile^.TmpIndex < 0 then
-          tile^.TmpIndex := kfIdx
-        else if tile^.TmpIndex <> kfIdx then
-          tile^.TmpIndex := High(Integer);
+        if T^.TmpIndex < 0 then
+          T^.TmpIndex := kfIdx
+        else if T^.TmpIndex <> kfIdx then
+          T^.TmpIndex := High(Integer);
       end;
 
   // count tiles
@@ -3959,8 +3955,8 @@ begin
   globalPos := 0;
   for tIdx := 0 to High(FTiles) do
   begin
-    tile := FTiles[tIdx];
-    kfIdx := tile^.TmpIndex;
+    T := FTiles[tIdx];
+    kfIdx := T^.TmpIndex;
 
     if kfIdx >= 0 then
     begin
@@ -3975,40 +3971,48 @@ begin
 
   for kfIdx := 0 to High(FKeyFrames) do
   begin
-    SetLength(FKeyFrames[kfIdx].KFTilesMap, perKFPos[kfIdx]);
+    TTile.Array1DDispose(FKeyFrames[kfIdx].KFTiles);
+    FKeyFrames[kfIdx].KFTiles := TTile.Array1DNew(perKFPos[kfIdx]);
     perKFPos[kfIdx] := 0;
   end;
-  SetLength(FGlobalTilesMap, globalPos);
+  TTile.Array1DDispose(FGlobalTiles);
+  FGlobalTiles := TTile.Array1DNew(globalPos);
   globalPos := 0;
 
-  // fill arrays with tile indexes
+  // fill arrays with T indexes
 
   for tIdx := 0 to High(FTiles) do
   begin
-    tile := FTiles[tIdx];
-    kfIdx := tile^.TmpIndex;
+    T := FTiles[tIdx];
+    kfIdx := T^.TmpIndex;
 
     if kfIdx >= 0 then
     begin
       if kfIdx < High(Integer) then
       begin
-        tile^.TmpIndex := Length(FGlobalTilesMap) + perKFPos[kfIdx];
+        FinalT := FKeyFrames[kfIdx].KFTiles[perKFPos[kfIdx]];
+        FinalT^.CopyFrom(T^);
 
-        FKeyFrames[kfIdx].KFTilesMap[perKFPos[kfIdx]] := tIdx;
+        T^.TmpIndex := Length(FGlobalTiles) + perKFPos[kfIdx];
+        FinalT^.TmpIndex := tIdx;
+
         Inc(perKFPos[kfIdx]);
       end
       else
       begin
-        tile^.TmpIndex := globalPos;
+        FinalT := FGlobalTiles[globalPos];
+        FinalT^.CopyFrom(T^);
 
-        FGlobalTilesMap[globalPos] := tIdx;
+        T^.TmpIndex := globalPos;
+        FinalT^.TmpIndex := tIdx;
+
         Inc(globalPos);
       end;
     end;
   end;
 end;
 
-procedure TTilingEncoder.CompressJPEG(ATilesMap: TIntegerDynArray; AStream: TMemoryStream; AQuality: Integer);
+procedure TTilingEncoder.CompressJPEG(const ATiles: PTileDynArray; AStream: TMemoryStream; AQuality: Integer; AKeyFrame: TKeyFrame);
 
   procedure AdvancePos(var APos: Integer; AWidth: Integer);
   begin
@@ -4029,11 +4033,11 @@ var
 begin
   AStream.Clear;
 
-  if Length(ATilesMap) <= 0 then
+  if Length(ATiles) <= 0 then
     Exit;
 
   widthInTiles := FTileMapWidth;
-  heightInTiles := (Length(ATilesMap) - 1) div widthInTiles + 1;
+  heightInTiles := (Length(ATiles) - 1) div widthInTiles + 1;
 
   Img := TImgRGB8Bit.Create(widthInTiles * cTileWidth, heightInTiles * cTileWidth);
   JPGWriter := TFPWriterJPEG.Create;
@@ -4046,9 +4050,9 @@ begin
     JPGReader.Performance := jpBestQuality;
 
     imgPos := 0;
-    for iMap := 0 to High(ATilesMap) do
+    for iMap := 0 to High(ATiles) do
     begin
-      T := FTiles[ATilesMap[iMap]];
+      T := FTiles[ATiles[iMap]^.TmpIndex];
 
       iy := 0;
       for ty := 0 to cTileWidth - 1 do
@@ -4077,29 +4081,42 @@ begin
 
 
 {$if defined(DEBUG) or defined(TEST)}
-    Img.SaveToFile(Format('%s_%.4d.jpg', [ChangeFileExt(FOutputFileName, ''), ATilesMap[0]]), JPGWriter);
+    Img.SaveToFile(Format('%s_%.4d.jpg', [ChangeFileExt(FOutputFileName, ''), ATiles[0]^.TmpIndex]), JPGWriter);
 {$endif}
 
     Img.SaveToStream(AStream, JPGWriter);
 
-    //AStream.Position := 0;
-    //Img.LoadFromStream(AStream, JPGReader);
-    //
-    //imgPos := 0;
-    //for iMap := 0 to High(ATilesMap) do
-    //begin
-    //  T := FTiles[ATilesMap[iMap]];
-    //
-    //  iy := 0;
-    //  for ty := 0 to cTileWidth - 1 do
-    //  begin
-    //    for tx := 0 to cTileWidth - 1 do
-    //      T^.Pixels[1, (ty shl cTileWidthBits) + tx] := Img.FData[imgPos + tx + iy];
-    //    Inc(iy, Img.Width);
-    //  end;
-    //
-    //  AdvancePos(imgPos, Img.Width);
-    //end;
+    AStream.Position := 0;
+    Img.LoadFromStream(AStream, JPGReader);
+
+    imgPos := 0;
+    for iMap := 0 to High(ATiles) do
+    begin
+      T := ATiles[iMap];
+
+      iy := 0;
+      for ty := 0 to cTileWidth - 1 do
+      begin
+        for tx := 0 to cTileWidth - 1 do
+        begin
+          tyx := (ty shl cTileWidthBits) + tx;
+          px := @Img.FData[imgPos + tx + iy];
+          T^.Pixels[0, tyx] := px^.R;
+          T^.Pixels[1, tyx] := px^.G;
+          T^.Pixels[2, tyx] := px^.B;
+        end;
+        Inc(iy, Img.Width);
+      end;
+
+      AdvancePos(imgPos, Img.Width);
+    end;
+
+    if Assigned(AKeyFrame) then
+      Write('KF: ', AKeyFrame.StartFrame:8)
+    else
+      Write('Global      ');
+
+    WriteLn(', TileCount: ', Length(ATiles):8, ', Size: ', Img.Width:6, ' x ', Img.Height:6, ', Quality: ', AQuality:3, ', FileSize: ', AStream.Size / 1024:12:2, ' KBytes');
 
   finally
     JPGReader.Free;
@@ -4436,8 +4453,9 @@ var
 
   procedure DoTMI(const TMI: TTileMapItem);
   var
+    finalTileIdx: Integer;
     attrs: Word;
-    isLongTile, isLongOffsets: Boolean;
+    isGlobalTile, isLongTile, isLongOffsets: Boolean;
   begin
     if TMI.IsPredicted then
     begin
@@ -4465,30 +4483,52 @@ var
     end
     else
     begin
-      isLongTile := TMI.TileIdx > High(Word);
+      finalTileIdx := FTiles[TMI.TileIdx]^.TmpIndex;
+      isGlobalTile := finalTileIdx < Length(FGlobalTiles);
+      if not isGlobalTile then
+        finalTileIdx -= Length(FGlobalTiles);;
+
+      isLongTile := finalTileIdx > High(Word);
 
       attrs := (Ord(TMI.VMirror) shl 1) or Ord(TMI.HMirror);
 
       if not isLongTile then
       begin
-        DoCmd(gtShortTileIdx, attrs);
-        DoWord(TMI.TileIdx);
+        if isGlobalTile then
+        begin
+          DoCmd(gtGlobalShortKFTileIdx, attrs);
+          DoWord(finalTileIdx);
+        end
+        else
+        begin
+          DoCmd(gtKFShortKFTileIdx, attrs);
+          DoWord(finalTileIdx);
+        end;
       end
       else
       begin
-        DoCmd(gtLongTileIdx, attrs);
-        DoDWord(TMI.TileIdx);
+        if isGlobalTile then
+        begin
+          DoCmd(gtGlobalLongKFTileIdx, attrs);
+          DoDWord(finalTileIdx);
+        end
+        else
+        begin
+          DoCmd(gtKFLongKFTileIdx, attrs);
+          DoDWord(finalTileIdx);
+        end;
       end;
     end;
   end;
 
-  procedure WriteTiles(AStrm: TMemoryStream; AStart, ACount: Integer);
+  procedure WriteTiles(AStrm: TMemoryStream; AStart, ACount: Integer; AGlobal: Boolean);
   begin
     if AStrm.Size > 0 then
     begin
-      DoCmd(gtTileSet, cBitsPerComp);
+      DoCmd(gtTileSet, ((cColorCpns - 1) shl 5) or ((cBitsPerComp - 1) shl 1) or Ord(AGlobal));
       DoDWord(AStart); // start tile
       DoDWord(AStart + ACount); // end tile
+      DoDWord(AStrm.Size); // JPEG size
 
       AStrm.Position := 0;
       ZStream.CopyFrom(AStrm, AStrm.Size);
@@ -4501,13 +4541,14 @@ var
   begin
     maxTileCount := 0;
     for kfIdx := 0 to High(FKeyFrames) do
-      maxTileCount := max(maxTileCount, Length(FGlobalTilesMap) + Length(FKeyFrames[kfIdx].KFTilesMap));
+      maxTileCount := max(maxTileCount, Length(FKeyFrames[kfIdx].KFTiles));
 
     DoCmd(gtSetDimensions, 0);
-    DoWord(FTileMapWidth); // frame tilemap width
-    DoWord(FTileMapHeight); // frame tilemap height
+    DoDWord(FTileMapWidth); // frame tilemap width
+    DoDWord(FTileMapHeight); // frame tilemap height
     DoDWord(round(1000*1000*1000 / FFramesPerSecond)); // frame length in nanoseconds
-    DoDWord(maxTileCount); // tile count
+    DoDWord(Length(FGlobalTiles)); // global tile count
+    DoDWord(maxTileCount); // maximum local tile count
   end;
 
   procedure WriteSettings;
@@ -4530,7 +4571,7 @@ begin
   FillChar(Header, SizeOf(Header), 0);
   Header.FourCC := 'GTMv';
   Header.RIFFSize := SizeOf(Header) - SizeOf(Header.FourCC) - SizeOf(Header.RIFFSize);
-  Header.EncoderVersion := 4; // 2 -> fixed blending extents; 3 -> *AddlBlendTileIdx; 4 -> Predict;
+  Header.EncoderVersion := 5; // 2 -> fixed blending extents; 3 -> *AddlBlendTileIdx; 4 -> Predict; 5 -> JPEG
   Header.FramePixelWidth := FScreenWidth;
   Header.FramePixelHeight := FScreenHeight;
   Header.KFCount := Length(FKeyFrames);
@@ -4559,14 +4600,14 @@ begin
   try
     WriteSettings;
     WriteDimensions;
-    WriteTiles(FGlobalJPEG, 0, Length(FGlobalTilesMap));
+    WriteTiles(FGlobalJPEG, 0, Length(FGlobalTiles), True);
 
     LastKF := 0;
     for kfIdx := 0 to High(FKeyFrames) do
     begin
       KeyFrame := FKeyFrames[kfIdx];
 
-      WriteTiles(KeyFrame.KFJPEG, Length(FGlobalTilesMap), Length(KeyFrame.KFTilesMap));
+      WriteTiles(KeyFrame.KFJPEG, 0, Length(KeyFrame.KFTiles), False);
 
       for frmIdx := KeyFrame.StartFrame to KeyFrame.EndFrame do
       begin

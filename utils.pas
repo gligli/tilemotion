@@ -29,7 +29,6 @@ const
 
   cBitsPerCompBits = 3;
   cBitsPerComp = 1 shl cBitsPerCompBits;
-  cVecInvWidth = 16;
   cTileWidthBits = 3;
   cTileWidth = 1 shl cTileWidthBits;
   cColorCpns = 3;
