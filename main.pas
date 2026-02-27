@@ -14,8 +14,8 @@ type
 
   TMainForm = class(TForm)
     Bevel1: TBevel;
-    Bevel2: TBevel;
     Bevel3: TBevel;
+    Bevel4: TBevel;
     btnInput: TButton;
     btnGTM: TButton;
     btnRunAll: TButton;
@@ -40,6 +40,7 @@ type
     Label10: TLabel;
     Label11: TLabel;
     Label13: TLabel;
+    Label14: TLabel;
     Label18: TLabel;
     Label15: TLabel;
     lblJPEG: TLabel;
@@ -79,6 +80,7 @@ type
     seShotTransMaxSecondsPerKF: TFloatSpinEdit;
     seShotTransCorrelLoThres: TFloatSpinEdit;
     seQbTiles: TFloatSpinEdit;
+    seMPFRC: TSpinEdit;
     seVisGamma: TFloatSpinEdit;
     seFrameCount: TSpinEdit;
     seMaxTiles: TSpinEdit;
@@ -561,6 +563,7 @@ begin
     FTilingEncoder.RenderGammaValue := seVisGamma.Value;
 
     FTilingEncoder.MotionPredictRadius := StrToIntDef(cbxMPRadius.Text, 0);
+    FTilingEncoder.MotionPredictMaxBufferedFrames := seMPFRC.Value;
 
     FTilingEncoder.GlobalTilingUseTargetPSNR := rbPSNR.Checked;
     FTilingEncoder.GlobalTilingTargetPSNR := sePSNR.Value;
@@ -592,6 +595,8 @@ begin
     sePSNR.Enabled := rbPSNR.Checked;
     seQbTiles.Enabled := rbTileLimit.Checked;
     seMaxTiles.Enabled := rbTileLimit.Checked;
+    tbJPEG.Enabled := rbTileLimit.Checked;
+    lblJPEG.Enabled := rbTileLimit.Checked;
     lblJPEG.Caption := IntToStr(FTilingEncoder.JPEGQuality);
   finally
     Screen.Cursor := prevCursor;
@@ -624,6 +629,7 @@ begin
    cbxScaling.Text := FloatToStr(FTilingEncoder.Scaling);
 
    cbxMPRadius.Text := IntToStr(FTilingEncoder.MotionPredictRadius);
+   seMPFRC.Value := FTilingEncoder.MotionPredictMaxBufferedFrames;
 
    rbPSNR.Checked := FTilingEncoder.GlobalTilingUseTargetPSNR;
    rbTileLimit.Checked := not FTilingEncoder.GlobalTilingUseTargetPSNR;

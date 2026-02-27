@@ -185,7 +185,6 @@ function lerp(x, y, alpha: Double): Double; inline;
 function ilerp(x, y, alpha, maxAlpha: Integer): Integer; inline;
 function revlerp(x, r, alpha: Double): Double; inline;
 function BlendRGB(x, y, alphax, alphay: Integer; shift: Byte): Integer;
-function InsertRGB(col: Integer; value, cpn: Integer): Integer;
 function Posterize(v: Byte; cvt: Integer): Byte; inline;
 function PosterizeBpc(v, bpc: Byte): Byte; inline;
 function CompareEuclideanDCTPtr(pa, pb: PDCTScalar): Cardinal; overload;
