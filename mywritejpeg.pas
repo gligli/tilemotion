@@ -38,6 +38,7 @@ type
     FGamma: Double;
     FGrayscale: boolean;
     FProgressiveEncoding: boolean;
+    FWriteMarkers: Boolean;
     FQuality: TMyJPEGCompressionQuality;
 
     FError: jpeg_error_mgr;
@@ -50,6 +51,7 @@ type
     property CompressionQuality: TMyJPEGCompressionQuality read FQuality write FQuality;
     property ProgressiveEncoding: boolean read FProgressiveEncoding write FProgressiveEncoding;
     property GrayScale: boolean read FGrayscale write FGrayScale;
+    property WriteMarkers: Boolean read FWriteMarkers write FWriteMarkers;
     property ChromaSubsampling: boolean read FChromaSubsampling write FChromaSubsampling;
     property Gamma: Double read FGamma write FGamma;
   end;
@@ -158,6 +160,12 @@ var
       FInfo.comp_info^[2].v_samp_factor := 1;
     end;
 
+    if not FWriteMarkers then
+    begin
+      FInfo.write_Adobe_marker := False;
+      FInfo.write_JFIF_header := False;
+    end;
+
     if ProgressiveEncoding then
       jpeg_simple_progression(@FInfo);
   end;
@@ -235,6 +243,7 @@ begin
   FQuality:=75;
   FGamma := 1.0;
   FChromaSubsampling := True;
+  FWriteMarkers := True;
 end;
 
 destructor TMyWriterJPEG.Destroy;

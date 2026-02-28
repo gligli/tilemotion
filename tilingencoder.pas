@@ -1148,6 +1148,7 @@ begin
     JPGWriter.GrayScale := False;
     JPGWriter.ProgressiveEncoding := True;
     JPGWriter.ChromaSubsampling := False;
+    JPGWriter.WriteMarkers := False;
 
     JPGReader.Performance := jpBestQuality;
 
@@ -1182,7 +1183,7 @@ begin
     end;
 
 {$if defined(DEBUG) or defined(TEST)}
-    Img.SaveToFile(Format('JPEG_%d.jpg', [TilesToJPEGRef[0]^.TmpIndex]), JPGWriter);
+    Img.SaveToFile(Format('JPEG_%d.jpg', [TilesToJPEGRef[0]^.MapIndex]), JPGWriter);
 {$endif}
 
     Img.SaveToStream(JPEG, JPGWriter);
@@ -1756,7 +1757,7 @@ var
 
   procedure DoXY(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
-    sx, sy, dx, dy, ty, tx, iCpn: Integer;
+    sx, sy, dx, dy, ty, tx: Integer;
     knnErr: Cardinal;
     knnPSNR, mpPSNR: Double;
 
@@ -2227,6 +2228,36 @@ begin
 end;
 
 procedure TTilingEncoder.JPEG;
+
+  procedure DoJPEG(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  var
+    KF: TKeyFrame;
+    TilesJPEG: TTilesJPEG;
+  begin
+    if not InRange(AIndex, -1, High(FKeyFrames)) then
+      Exit;
+
+    if AIndex < 0 then
+    begin
+      FGlobalTilesJPEG.Free;
+      FGlobalTilesJPEG := TTilesJPEG.Create(FTiles, FGlobalTiles, FTileMapWidth);
+      TilesJPEG := FGlobalTilesJPEG;
+    end
+    else
+    begin
+      KF := FKeyFrames[AIndex];
+
+      KF.TilesJPEG.Free;
+      KF.TilesJPEG := TTilesJPEG.Create(FTiles, KF.LocalTiles, FTileMapWidth);
+      TilesJPEG := KF.TilesJPEG;
+    end;
+
+    if FGlobalTilingUseTargetPSNR then
+      TilesJPEG.CompressJPEG(Self, FGlobalTilingTargetPSNR)
+    else
+      TilesJPEG.CompressJPEG(FJPEGQuality);
+  end;
+
 var
   kfIdx: Integer;
   KF: TKeyFrame;
@@ -2240,30 +2271,13 @@ begin
 
   ProgressRedraw(1, 'MapTiles');
 
-  FGlobalTilesJPEG.Free;
-  FGlobalTilesJPEG := TTilesJPEG.Create(FTiles, FGlobalTiles, FTileMapWidth);
-  if FGlobalTilingUseTargetPSNR then
-    FGlobalTilesJPEG.CompressJPEG(Self, FGlobalTilingTargetPSNR)
-  else
-    FGlobalTilesJPEG.CompressJPEG(FJPEGQuality);
+  ProcThreadPool.DoParallelLocalProc(@DoJPEG, -1, High(FKeyFrames));
 
+  WriteLn('Global      , TileCount: ', Length(FGlobalTiles):8, ', Size: ', FGlobalTilesJPEG.Size.X:6, ' x ', FGlobalTilesJPEG.Size.Y:6, ', Quality: ', FGlobalTilesJPEG.Quality:3, ', FileSize: ', FGlobalTilesJPEG.JPEG.Size / 1024:10:3, ' KBytes');
   for kfIdx := 0 to High(FKeyFrames) do
   begin
     KF := FKeyFrames[kfIdx];
-
-    KF.TilesJPEG.Free;
-    KF.TilesJPEG := TTilesJPEG.Create(FTiles, KF.LocalTiles, FTileMapWidth);
-    if FGlobalTilingUseTargetPSNR then
-      KF.TilesJPEG.CompressJPEG(Self, FGlobalTilingTargetPSNR)
-    else
-      KF.TilesJPEG.CompressJPEG(FJPEGQuality);
-  end;
-
-  WriteLn('Global      , TileCount: ', Length(FGlobalTiles):8, ', Size: ', FGlobalTilesJPEG.Size.X:6, ' x ', FGlobalTilesJPEG.Size.Y:6, ', Quality: ', FGlobalTilesJPEG.Quality:3, ', FileSize: ', FGlobalTilesJPEG.JPEG.Size / 1024:12:2, ' KBytes');
-  for kfIdx := 0 to High(FKeyFrames) do
-  begin
-    KF := FKeyFrames[kfIdx];
-    WriteLn('KF: ', KF.StartFrame:8,', TileCount: ', Length(KF.LocalTiles):8, ', Size: ', KF.TilesJPEG.Size.X:6, ' x ', KF.TilesJPEG.Size.Y:6, ', Quality: ', KF.TilesJPEG.Quality:3, ', FileSize: ', KF.TilesJPEG.JPEG.Size / 1024:12:2, ' KBytes');
+    WriteLn('KF: ', KF.StartFrame:8,', TileCount: ', Length(KF.LocalTiles):8, ', Size: ', KF.TilesJPEG.Size.X:6, ' x ', KF.TilesJPEG.Size.Y:6, ', Quality: ', KF.TilesJPEG.Quality:3, ', FileSize: ', KF.TilesJPEG.JPEG.Size / 1024:10:3, ' KBytes');
   end;
 
   ProgressRedraw(2, 'CompressJPEGs');
@@ -4815,7 +4829,7 @@ begin
             Header.KFMaxBytesPerSec := max(Header.KFMaxBytesPerSec, round(KFSize * FFramesPerSecond / KFCount));
           Header.AverageBytesPerSec += KFSize;
 
-          WriteLn('KF: ', KeyFrame.StartFrame:8, ' FCnt: ', KFCount:4, ' Raw: ', KFInfo[kfIdx].RawSize:8, ' Written: ', KFSize:8, ' Bitrate: ', (KFSize / 1024.0 * 8.0 / KFCount):8:2, ' kbpf   (', (KFSize / 1024.0 * 8.0 / KFCount * FFramesPerSecond):8:2, ' kbps)');
+          WriteLn('KF: ', KeyFrame.StartFrame:8, ', FCnt: ', KFCount:4, ', Raw: ', KFInfo[kfIdx].RawSize / 1024:10:3, ' KB', ', Written: ', KFSize / 1024:10:3, ' KB', ', Bitrate: ', (KFSize / 1024.0 * 8.0 / KFCount):8:2, ' kbpf   (', (KFSize / 1024.0 * 8.0 / KFCount * FFramesPerSecond):8:2, ' kbps)');
 
           ZStream.Clear;
         end;
@@ -4834,7 +4848,7 @@ begin
 
   StreamSize := AStream.Size - StartPos;
 
-  WriteLn('Written: ', StreamSize:12, ' Bitrate: ', (StreamSize / 1024.0 * 8.0 / Length(FFrames)):8:2, ' kbpf  (', (StreamSize / 1024.0 * 8.0 / Length(FFrames) * FFramesPerSecond):8:2, ' kbps)');
+  WriteLn('Written: ', StreamSize / 1024:10:3, ' KBytes', ', Bitrate: ', (StreamSize / 1024.0 * 8.0 / Length(FFrames)):8:2, ' kbpf  (', (StreamSize / 1024.0 * 8.0 / Length(FFrames) * FFramesPerSecond):8:2, ' kbps)');
 end;
 
 constructor TTilingEncoder.Create;
