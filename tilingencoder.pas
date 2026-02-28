@@ -576,8 +576,8 @@ type
 
   TImgRGB8Bit = class(TFPCompactImgRGB8Bit)
   protected
-    function GetInternalPixel({%H-}x, {%H-}y: integer): integer; override;
-    procedure SetInternalPixel({%H-}x, {%H-}y: integer; {%H-}Value: integer); override;
+    function GetInternalPixel(x, y: integer): integer; override;
+    procedure SetInternalPixel(x, y: integer; Value: integer); override;
   end;
 
 implementation
@@ -1174,12 +1174,15 @@ begin
       AdvancePos(imgPos, Img.Width);
     end;
 
-    iy := 0;
-    remx := (Img.Width - (imgPos mod Img.Width)) * cColorCpns;
-    for ty := 0 to cTileWidth - 1 do
+    if imgPos <> Img.Width * Img.Height then
     begin
-      FillChar(Img.FData[imgPos + iy], remx, 0);
-      Inc(iy, Img.Width);
+      iy := 0;
+      remx := (Img.Width - (imgPos mod Img.Width)) * cColorCpns;
+      for ty := 0 to cTileWidth - 1 do
+      begin
+        FillChar(Img.FData[imgPos + iy], remx, 0);
+        Inc(iy, Img.Width);
+      end;
     end;
 
 {$if defined(DEBUG) or defined(TEST)}
