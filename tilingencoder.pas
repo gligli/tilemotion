@@ -37,6 +37,7 @@ type
     FrameCount: Cardinal;
     AverageBytesPerSec: Cardinal;
     KFMaxBytesPerSec: Cardinal;
+    PSNRHVS: Single;
   end;
 
   TGTMKeyFrameInfo = packed record
@@ -47,37 +48,42 @@ type
     RawSize: Cardinal;
     CompressedSize: Cardinal;
     TimeCodeMillisecond: Cardinal;
+    PSNRHVS: Single;
   end;
 
   // Commands Description:
   // =====================
   //
-  // PredictedTileShortOffsets:        data -> none; commandBits -> y offset (6 bits); x offset (6 bits)
-  // PredictedTileLongOffsets:         data -> x offset (8 bits); y offset (8 bits); commandBits -> none
-  // ShortTileIdxShortPalIdx:          data -> tile index (16 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
-  // LongTileIdxShortPalIdx:           data -> tile index (32 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
-  // LongTileIdxLongPalIdx:            data -> palette index (16 bits); tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
-  // IntraTile:                        data -> palette index (16 bits); indexes per pixel (64 bytes); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
-  // SkipBlock:                        data -> none; commandBits -> skip count - 1 (12 bits)
-  // Blend:                            data -> none; commandBits -> frame -2 weight (6 bits); frame -1 weight (6 bits)
+  // PredictedTileOffsets6x6:          data -> none; commandBits -> y offset (6 bits); x offset (6 bits)
+  // PredictedTileOffsets8x8:          data -> x offset (8 bits); y offset (8 bits); commandBits -> none (12 bits)
+  // PredictedFm1Fm2Blend6x6:          data -> none; commandBits -> frame -2 weight (6 bits); frame -1 weight (6 bits)
+  // GlobalTileIdx16PalIdx10:          data -> global tile index (16 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
+  // KeyFrmTileIdx16PalIdx10:          data -> keyframe tile index (16 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
+  // GlobalTileIdx32PalIdx10:          data -> global tile index (32 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
+  // KeyFrmTileIdx32PalIdx10:          data -> keyframe tile index (32 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
+  // GlobalTileIdx32PalIdx16:          data -> palette index (16 bits); global tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
+  // KeyFrmTileIdx32PalIdx16:          data -> palette index (16 bits); keyframe tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
+  // PredictedOffsetBlock0x0:          data -> none; commandBits -> block size in tiles - 1 (12 bits)
   //
   // (insert new commands here...)
   //
   // FrameEnd:                         data -> none; commandBits -> none (11 bits); keyframe end (1 bit)
-  // LoadPalette:                      data -> palette index (16 bits); { RGBA bytes (32bits) } * indexes count; commandBits -> palette format (0: RGBA32) (12 bits)
-  // TileSet:                          data -> start tile (32 bits); end tile (32 bits); { indexes per pixel (64 bytes) } * count; commandBits -> indexes count per palette
-  // SetDimensions:                    data -> width in tiles (16 bits); height in tiles (16 bits); frame length in nanoseconds (32 bits) (2^32-1: still frame); tile count (32 bits); commandBits -> none
+  // LoadPalette:                      data -> palette index (16 bits); { RGBA bytes (32bits) } * indexes count; commandBits -> palette format (0: RGBA32) (6 bits); indexes count per palette - 1 (6 bits)
+  // TileSet:                          data -> start tile (32 bits); end tile (32 bits); { indexes per pixel (64 bytes) } * count; commandBits -> none (11 bits); is keyframe tileset (1 bit)
+  // SetDimensions:                    data -> width in tiles (32 bits); height in tiles (32 bits); frame length in nanoseconds (32 bits) (2^32-1: still frame); global tile count (32 bits); maximum local tile count (32 bits); commandBits -> none (12 bits)
   // ExtendedCommand:                  data -> following bytes count (32 bits); custom commands, proprietary extensions, ...; commandBits -> extended command index (12 bits)
 
   TGTMCommand = (
-    gtPredictedTileShortOffsets = 0,
-    gtPredictedTileLongOffsets = 1,
-    gtShortTileIdxShortPalIdx = 2,
-    gtLongTileIdxShortPalIdx = 3,
-    gtLongTileIdxLongPalIdx = 4,
-    gtIntraTile = 5,
-    gtSkipBlock = 6,
-    gtBlend = 7,
+    gtPredictedTileOffsets6x6 = 0,
+    gtPredictedTileOffsets8x8 = 1,
+    gtPredictedFm1Fm2Blend6x6 = 2,
+    gtGlobalTileIdx16PalIdx10 = 3,
+    gtKeyFrmTileIdx16PalIdx10 = 4,
+    gtGlobalTileIdx32PalIdx10 = 5,
+    gtKeyFrmTileIdx32PalIdx10 = 6,
+    gtGlobalTileIdx32PalIdx16 = 7,
+    gtKeyFrmTileIdx32PalIdx16 = 8,
+    gtPredictedOffsetBlock0x0 = 9,
 
     gtFrameEnd = 11,
     gtLoadPalette = 12,
@@ -5729,82 +5735,82 @@ begin
             if (CommandData and 1) <> 0 then // keyframe end?
               Break;
           end;
-          gtSkipBlock:
-          begin
-            // next frame if needed
-            if frm = nil then
-              frm := NextFrame(kf);
-
-            SkipBlock(frm, CommandData + 1, tmPos);
-          end;
-          gtShortTileIdxShortPalIdx, gtLongTileIdxShortPalIdx, gtLongTileIdxLongPalIdx:
-          begin
-            if Command in [gtLongTileIdxLongPalIdx] then
-              palIdx := ReadWord
-            else
-              palIdx := (CommandData shr 2) and ((1 shl (CGTMCommandBits - 2)) - 1);
-
-            if Command in [gtShortTileIdxShortPalIdx] then
-              tileIdx := ReadWord
-            else
-              tileIdx := ReadDWord;
-
-            // next frame if needed
-            if frm = nil then
-              frm := NextFrame(kf);
-
-            tileIdx := rawTileIdxToTileIdx[tileIdx];
-
-            SetTMI(tileIdx, palIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
-            Inc(tmPos);
-          end;
-          gtPredictedTileShortOffsets:
-          begin
-            // next frame if needed
-            if frm = nil then
-              frm := NextFrame(kf);
-
-            TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
-
-            TMI^.Attrs.MotionX := (CommandData and 31) - (CommandData and 32);
-            TMI^.Attrs.MotionY := ((CommandData shr 6) and 31) - ((CommandData shr 6) and 32);
-            TMI^.Attrs.MotionBackBufferOffset := 1;
-            TMI^.IsPredicted := True;
-
-            Inc(tmPos);
-          end;
-          gtPredictedTileLongOffsets:
-          begin
-            // next frame if needed
-            if frm = nil then
-              frm := NextFrame(kf);
-
-            TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
-
-            TMI^.Attrs.MotionX := ShortInt(ReadByte);
-            TMI^.Attrs.MotionY := ShortInt(ReadByte);
-            TMI^.Attrs.MotionBackBufferOffset := CommandData + 1;
-            TMI^.IsPredicted := True;
-
-            Inc(tmPos);
-          end;
-          gtIntraTile:
-          begin
-            palIdx := ReadWord;
-
-            tileIdx := Length(FTiles);
-            TTile.Array1DRealloc(FTiles, tileIdx + 1);
-
-            KFStream.Read(FTiles[tileIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
-            FTiles[tileIdx]^.Active := True;
-
-            // next frame if needed
-            if frm = nil then
-              frm := NextFrame(kf);
-
-            SetTMI(tileIdx, palIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
-            Inc(tmPos);
-          end
+          //gtSkipBlock:
+          //begin
+          //  // next frame if needed
+          //  if frm = nil then
+          //    frm := NextFrame(kf);
+          //
+          //  SkipBlock(frm, CommandData + 1, tmPos);
+          //end;
+          //gtShortTileIdxShortPalIdx, gtLongTileIdxShortPalIdx, gtLongTileIdxLongPalIdx:
+          //begin
+          //  if Command in [gtLongTileIdxLongPalIdx] then
+          //    palIdx := ReadWord
+          //  else
+          //    palIdx := (CommandData shr 2) and ((1 shl (CGTMCommandBits - 2)) - 1);
+          //
+          //  if Command in [gtShortTileIdxShortPalIdx] then
+          //    tileIdx := ReadWord
+          //  else
+          //    tileIdx := ReadDWord;
+          //
+          //  // next frame if needed
+          //  if frm = nil then
+          //    frm := NextFrame(kf);
+          //
+          //  tileIdx := rawTileIdxToTileIdx[tileIdx];
+          //
+          //  SetTMI(tileIdx, palIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
+          //  Inc(tmPos);
+          //end;
+          //gtPredictedTileShortOffsets:
+          //begin
+          //  // next frame if needed
+          //  if frm = nil then
+          //    frm := NextFrame(kf);
+          //
+          //  TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
+          //
+          //  TMI^.Attrs.MotionX := (CommandData and 31) - (CommandData and 32);
+          //  TMI^.Attrs.MotionY := ((CommandData shr 6) and 31) - ((CommandData shr 6) and 32);
+          //  TMI^.Attrs.MotionBackBufferOffset := 1;
+          //  TMI^.IsPredicted := True;
+          //
+          //  Inc(tmPos);
+          //end;
+          //gtPredictedTileLongOffsets:
+          //begin
+          //  // next frame if needed
+          //  if frm = nil then
+          //    frm := NextFrame(kf);
+          //
+          //  TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
+          //
+          //  TMI^.Attrs.MotionX := ShortInt(ReadByte);
+          //  TMI^.Attrs.MotionY := ShortInt(ReadByte);
+          //  TMI^.Attrs.MotionBackBufferOffset := CommandData + 1;
+          //  TMI^.IsPredicted := True;
+          //
+          //  Inc(tmPos);
+          //end;
+          //gtIntraTile:
+          //begin
+          //  palIdx := ReadWord;
+          //
+          //  tileIdx := Length(FTiles);
+          //  TTile.Array1DRealloc(FTiles, tileIdx + 1);
+          //
+          //  KFStream.Read(FTiles[tileIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
+          //  FTiles[tileIdx]^.Active := True;
+          //
+          //  // next frame if needed
+          //  if frm = nil then
+          //    frm := NextFrame(kf);
+          //
+          //  SetTMI(tileIdx, palIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
+          //  Inc(tmPos);
+          //end
 
           else
             Assert(False, 'Unknown command: ' + IntToStr(Ord(Command)) + ', commandData: ' + IntToStr(CommandData) + ', prevCommand: '+ IntToStr(Ord(prevCommand)));
@@ -5857,17 +5863,25 @@ var
     DoWord((Data shl CGTMCommandCodeBits) or Ord(Cmd));
   end;
 
+  procedure DoAltCmd(Cmd: TGTMCommand; AltCmd: TGTMCommand; IsAlt: Boolean; Data: Cardinal);
+  begin
+    if IsAlt then
+      DoCmd(Cmd, Data)
+    else
+      DoCmd(AltCmd, Data);
+  end;
+
   procedure DoTMI(const TMI: TTileMapItem);
   var
-    tileIdx, finalTileIdx: Cardinal;
+    tileIdx, finalTileIdx: Integer;
     palIdx, attrs: Word;
-    isIntra, isLongTile, isLongPal, isLongOffsets: Boolean;
+    isKeyFrameTile, isLongTile, isLongPal, isLongOffsets: Boolean;
   begin
     if TMI.IsPredicted then
     begin
       if TMI.IsBlended then
       begin
-        DoCmd(gtBlend, (TMI.Attrs.BlendWeightM2 shl CGTMBlendWeightShift) or TMI.Attrs.BlendWeightM1);
+        DoCmd(gtPredictedFm1Fm2Blend6x6, (TMI.Attrs.BlendWeightM2 shl CGTMBlendWeightShift) or TMI.Attrs.BlendWeightM1);
       end
       else
       begin
@@ -5875,7 +5889,7 @@ var
 
         if isLongOffsets then
         begin
-          DoCmd(gtPredictedTileLongOffsets, TMI.Attrs.MotionBackBufferOffset - 1);
+          DoCmd(gtPredictedTileOffsets8x8, TMI.Attrs.MotionBackBufferOffset - 1);
           DoByte(PByte(@TMI.Attrs.MotionX)^);
           DoByte(PByte(@TMI.Attrs.MotionY)^);
         end
@@ -5883,7 +5897,7 @@ var
         begin
           attrs := (PByte(@TMI.Attrs.MotionX)^ and 63) or ((PByte(@TMI.Attrs.MotionY)^ and 63) shl 6);
 
-          DoCmd(gtPredictedTileShortOffsets, attrs);
+          DoCmd(gtPredictedTileOffsets8x8, attrs);
         end;
       end;
     end
@@ -5893,36 +5907,33 @@ var
       palIdx := Max(0, TMI.PalIdx);
       finalTileIdx := Max(0, FTiles[tileIdx]^.TmpIndex);
 
-      isIntra := InRange(tileIdx, 0, High(FTiles)) and (FTiles[tileIdx]^.UseCount <= 1);
+      isKeyFrameTile := finalTileIdx >= Length(globalTiles);
       isLongTile := finalTileIdx > High(Word);
       isLongPal := palIdx >= (1 shl (CGTMCommandBits - 2));
 
       attrs := (Ord(TMI.VMirror) shl 1) or Ord(TMI.HMirror);
 
-      if isIntra then
+      if isKeyFrameTile then
       begin
-        DoCmd(gtIntraTile, attrs);
-        DoWord(palIdx);
-        ZStream.Write(FTiles[tileIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
+        finalTileIdx -= Length(globalTiles);
+        Assert(finalTileIdx >= 0);
+      end;
+
+      if not isLongTile and not isLongPal then
+      begin
+        DoAltCmd(gtGlobalTileIdx16PalIdx10, gtKeyFrmTileIdx16PalIdx10, isKeyFrameTile, attrs or (palIdx shl 2));
+        DoWord(finalTileIdx);
+      end
+      else if not isLongPal then
+      begin
+        DoAltCmd(gtGlobalTileIdx32PalIdx10, gtKeyFrmTileIdx32PalIdx10, isKeyFrameTile, attrs or (palIdx shl 2));
+        DoDWord(finalTileIdx);
       end
       else
       begin
-        if not isLongTile and not isLongPal then
-        begin
-          DoCmd(gtShortTileIdxShortPalIdx, attrs or (palIdx shl 2));
-          DoWord(finalTileIdx);
-        end
-        else if not isLongPal then
-        begin
-          DoCmd(gtLongTileIdxShortPalIdx, attrs or (palIdx shl 2));
-          DoDWord(finalTileIdx);
-        end
-        else
-        begin
-          DoCmd(gtLongTileIdxLongPalIdx, attrs);
-          DoWord(palIdx);
-          DoDWord(finalTileIdx);
-        end;
+        DoAltCmd(gtGlobalTileIdx32PalIdx16, gtKeyFrmTileIdx32PalIdx16, isKeyFrameTile, attrs);
+        DoWord(palIdx);
+        DoDWord(finalTileIdx);
       end;
     end;
   end;
@@ -5933,7 +5944,7 @@ var
   begin
     for palIdx := 0 to FPaletteCount - 1 do
     begin
-      DoCmd(gtLoadPalette, 0);
+      DoCmd(gtLoadPalette, (0 shl 6) or (FPaletteSize - 1));
       DoWord(palIdx);
       for colIdx := 0 to FPaletteSize - 1 do
       begin
@@ -5949,13 +5960,13 @@ var
     end;
   end;
 
-  procedure WriteTiles(const AList: TIntegerDynArray; AStart: Integer = 0);
+  procedure WriteTiles(const AList: TIntegerDynArray; IsKF: Boolean; AStart: Integer = 0);
   var
     tlIdx: Integer;
   begin
     if Length(AList) > 0 then
     begin
-      DoCmd(gtTileSet, FPaletteSize);
+      DoCmd(gtTileSet, Ord(IsKF));
       DoDWord(AStart); // start tile
       DoDWord(AStart + High(AList)); // end tile
 
@@ -5970,13 +5981,14 @@ var
   begin
     maxTileCount := 0;
     for kfIdx := 0 to High(perKfTiles) do
-      maxTileCount := max(maxTileCount, Length(globalTiles) + Length(perKfTiles[kfIdx]));
+      maxTileCount := max(maxTileCount, Length(perKfTiles[kfIdx]));
 
     DoCmd(gtSetDimensions, 0);
-    DoWord(FTileMapWidth); // frame tilemap width
-    DoWord(FTileMapHeight); // frame tilemap height
+    DoDWord(FTileMapWidth); // frame tilemap width
+    DoDWord(FTileMapHeight); // frame tilemap height
     DoDWord(round(1000*1000*1000 / FFramesPerSecond)); // frame length in nanoseconds
-    DoDWord(maxTileCount); // tile count
+    DoDWord(Length(globalTiles)); // global tile count
+    DoDWord(maxTileCount); // maximum keyframe tile count
   end;
 
   procedure WriteSettings;
@@ -6011,9 +6023,6 @@ var
             Continue;
 
           tile := FTiles[tIdx];
-          if tile^.UseCount <= 1 then
-            Continue;
-
           kfIdx := FFrames[frmIdx].PKeyFrame.Index;
 
           if tile^.TmpIndex < 0 then
@@ -6040,16 +6049,18 @@ var
       end;
     end;
 
-    // dim arrays
+    // dim arrays & log TileCount
 
+    SetLength(globalTiles, globalPos);
+    globalPos := 0;
+    WriteLn('Global      , TileCount: ', Length(globalTiles):8);
     SetLength(perKfTiles, Length(FKeyFrames));
     for kfIdx := 0 to High(perKfTiles) do
     begin
       SetLength(perKfTiles[kfIdx], perKFPos[kfIdx]);
       perKFPos[kfIdx] := 0;
+      WriteLn('KF: ', FKeyFrames[kfIdx].StartFrame:8,', TileCount: ', Length(perKfTiles[kfIdx]):8);
     end;
-    SetLength(globalTiles, globalPos);
-    globalPos := 0;
 
     // fill arrays with tile indexes
 
@@ -6079,8 +6090,9 @@ var
   end;
 
 var
-  StartPos, StreamSize, LastKF, KFCount, KFSize, BlkSkipCount: Integer;
+  StartPos, StreamSize, LastKF, KFFrmCnt, KFSize, BlkSkipCount: Integer;
   kfIdx, frmIdx, yx, yxs, cs, sx, sy: Integer;
+  bpsAcc: UInt64;
   IsKF: Boolean;
   KeyFrame: TKeyFrame;
   Frame: TFrame;
@@ -6092,14 +6104,15 @@ begin
   FillChar(Header, SizeOf(Header), 0);
   Header.FourCC := 'GTMv';
   Header.RIFFSize := SizeOf(Header) - SizeOf(Header.FourCC) - SizeOf(Header.RIFFSize);
-  Header.EncoderVersion := 5; // 2 -> fixed blending extents; 3 -> *AddlBlendTileIdx; 4 -> PredictMotion; 5 -> Blend
+  Header.EncoderVersion := 5; // 2 -> fixed blending extents; 3 -> *AddlBlendTileIdx; 4 -> PredictMotion; 5 -> Blend,Glob/KF
   Header.FramePixelWidth := FScreenWidth;
   Header.FramePixelHeight := FScreenHeight;
   Header.KFCount := Length(FKeyFrames);
   Header.FrameCount := Length(FFrames);
   Header.AverageBytesPerSec := 0;
   Header.KFMaxBytesPerSec := 0;
-  AStream.WriteBuffer(Header, SizeOf(Header));
+  Header.PSNRHVS := FReconstructPSNR;
+  AStream.Write(Header, SizeOf(Header));
 
   SetLength(KFInfo, Length(FKeyFrames));
   for kfIdx := 0 to High(FKeyFrames) do
@@ -6110,7 +6123,8 @@ begin
     KFInfo[kfIdx].KFIndex := kfIdx;
     KFInfo[kfIdx].FrameIndex := FKeyFrames[kfIdx].StartFrame;
     KFInfo[kfIdx].TimeCodeMillisecond := Round(1000.0 * FKeyFrames[kfIdx].StartFrame / FFramesPerSecond);
-    AStream.WriteBuffer(KFInfo[kfIdx], SizeOf(KFInfo[0]));
+    KFInfo[kfIdx].PSNRHVS := FKeyFrames[kfIdx].ReconstructPSNR;
+    AStream.Write(KFInfo[kfIdx], SizeOf(KFInfo[0]));
   end;
 
   Header.WholeHeaderSize := AStream.Size - StartPos;
@@ -6123,18 +6137,16 @@ begin
 
     WriteSettings;
     WriteDimensions;
-    WriteTiles(globalTiles);
+    WritePalettes;
+    WriteTiles(globalTiles, False);
 
+    bpsAcc := 0;
     LastKF := 0;
     for kfIdx := 0 to High(FKeyFrames) do
     begin
       KeyFrame := FKeyFrames[kfIdx];
 
-      WriteTiles(perKfTiles[kfIdx], Length(globalTiles));
-
-      // paletes must always be written after at least one tileset
-      if kfIdx = 0 then
-        WritePalettes;
+      WriteTiles(perKfTiles[kfIdx], True);
 
       for frmIdx := KeyFrame.StartFrame to KeyFrame.EndFrame do
       begin
@@ -6170,7 +6182,7 @@ begin
             begin
               //writeln('blk ', BlkSkipCount);
 
-              DoCmd(gtSkipBlock, BlkSkipCount - 1);
+              DoCmd(gtPredictedOffsetBlock0x0, BlkSkipCount - 1);
               Inc(cs, BlkSkipCount);
               Dec(BlkSkipCount);
             end
@@ -6195,7 +6207,7 @@ begin
 
         if IsKF then
         begin
-          KFCount := KeyFrame.EndFrame - LastKF + 1;
+          KFFrmCnt := KeyFrame.EndFrame - LastKF + 1;
           LastKF := KeyFrame.EndFrame + 1;
 
           AStream.Position := AStream.Size;
@@ -6206,11 +6218,10 @@ begin
 
           KFInfo[kfIdx].RawSize := ZStream.Size;
           KFInfo[kfIdx].CompressedSize := KFSize;
-          if (kfIdx > 0) or (Length(FKeyFrames) = 1) then
-            Header.KFMaxBytesPerSec := max(Header.KFMaxBytesPerSec, round(KFSize * FFramesPerSecond / KFCount));
-          Header.AverageBytesPerSec += KFSize;
+          Header.KFMaxBytesPerSec := max(Header.KFMaxBytesPerSec, round(KFSize * FFramesPerSecond / KFFrmCnt));
+          bpsAcc += KFSize;
 
-          WriteLn('KF: ', KeyFrame.StartFrame:8, ', FCnt: ', KFCount:4, ', Raw: ', KFInfo[kfIdx].RawSize / 1024:10:3, ' KB', ', Written: ', KFSize / 1024:10:3, ' KB', ', Bitrate: ', (KFSize / 1024.0 * 8.0 / KFCount):8:2, ' kbpf   (', (KFSize / 1024.0 * 8.0 / KFCount * FFramesPerSecond):8:2, ' kbps)');
+          WriteLn('KF: ', KeyFrame.StartFrame:8, ', FCnt: ', KFFrmCnt:4, ', Raw: ', KFInfo[kfIdx].RawSize / 1024:10:3, ' KB', ', Written: ', KFSize / 1024:10:3, ' KB', ', Bitrate: ', (KFSize / 1024.0 * 8.0 / KFFrmCnt):8:2, ' kbpf   (', (KFSize / 1024.0 * 8.0 / KFFrmCnt * FFramesPerSecond):8:2, ' kbps)');
 
           ZStream.Clear;
         end;
@@ -6220,11 +6231,11 @@ begin
     ZStream.Free;
   end;
 
-  Header.AverageBytesPerSec := round(Header.AverageBytesPerSec * FFramesPerSecond / Length(FFrames));
+  Header.AverageBytesPerSec := round(bpsAcc * FFramesPerSecond / Length(FFrames));
   AStream.Position := 0;
-  AStream.WriteBuffer(Header, SizeOf(Header));
+  AStream.Write(Header, SizeOf(Header));
   for kfIdx := 0 to High(FKeyFrames) do
-    AStream.WriteBuffer(KFInfo[kfIdx], SizeOf(KFInfo[0]));
+    AStream.Write(KFInfo[kfIdx], SizeOf(KFInfo[0]));
   AStream.Position := AStream.Size;
 
   StreamSize := AStream.Size - StartPos;
