@@ -1470,7 +1470,7 @@ begin
     CribbleEuclideanDCTPtr_asm(ADCT, PrevDCTPtr, @state, oy);
   end;
 
-  if not ATMI^.IsPredicted or (Result < ATMI^.Error) then
+  if not ATMI^.IsPredicted or (state.Error < ATMI^.Error) then
   begin
     ATMI^.IsPredicted := True;
     ATMI^.IsBlended := False;

@@ -157,7 +157,7 @@ type
 
 const
   cDCTScale = -Low(TDCTScalar) / ((1 shl cBitsPerComp) * Sqr(cTileWidth));
-  cBestPSNR = 20.0 * Ln((1 shl cBitsPerComp) - 1) / Ln(10.0);
+  cBestPSNR = 20.0 * Ln((1 shl cBitsPerComp) * cDCTScale - 1) / Ln(10.0);
 
 procedure SpinEnter(Lock: PSpinLock); assembler;
 procedure SpinLeave(Lock: PSpinLock); assembler;
