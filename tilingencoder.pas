@@ -12,7 +12,8 @@ interface
 
 uses
   windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, zstream, IniFiles, Graphics,
-  IntfGraphics, FPimage, FPCanvas, FPWritePNG, FPReadJPEG, mywritejpeg, GraphType, fgl, MTProcs, extern, tbbmalloc, bufstream, utils;
+  IntfGraphics, FPimage, FPCanvas, FPWritePNG, FPReadJPEG, mywritejpeg, GraphType, fgl, MTProcs, tbbmalloc, bufstream,
+  extern, utils;
 type
   TEncoderStep = (esAll = -1, esLoad = 0, esPredict, esReduce, esReconstruct, esReindex, esJPEG, esSave);
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
@@ -167,6 +168,9 @@ type
   TTileMapItems = array of TTileMapItem;
   TTileMapItems2 = array of TTileMapItems;
 
+  TTilingEncoder = class;
+  TKeyFrame = class;
+
   { TTileMapItemHelper }
 
   TTileMapItemHelper = record helper for TTileMapItem
@@ -202,32 +206,6 @@ type
 
   PTilingDataset = ^TTilingDataset;
 
-  { TMixingPlan }
-
-  TMixingPlan = record
-    // static
-    LumaPal: array of Integer;
-    Remap: array of Byte;
-    Y2Palette: array of array[0..3] of Integer;
-    Y2MixedColors: Integer;
-  end;
-
-  TTilingEncoder = class;
-  TKeyFrame = class;
-
-  { TPalette }
-
-  TPalette = record
-    UseCount: Integer;
-    PalIdx_Initial: Integer;
-    PaletteRGB: TIntegerDynArray;
-    MixingPlan: TMixingPlan;
-    TileCount, TileOffset: Integer;
-    CMPal: TCountIndexList;
-  end;
-
-  TPaletteArray = array of TPalette;
-
   { TFrameBuffer }
 
   TFrameBuffer = class
@@ -252,6 +230,26 @@ type
     function GetBuffer(ARelativeIndex: Integer): TDCTDynArray; overload;
     function GetBuffer: TDCTDynArray; overload;
     procedure AdvanceFrame;
+  end;
+
+  { TTilesJPEG }
+
+  TTilesJPEG = class
+    Quality: TMyJPEGCompressionQuality;
+    BaseWidthInTiles: Integer;
+    Size: TPoint;
+
+    TilesRef: PTileDynArray;
+    TilesToJPEGRef: PTileDynArray;
+    JPEG: TMemoryStream;
+
+    function GRPSNR(x: Double; Data: Pointer): Double;
+
+    constructor Create(const ATilesRef, ATilesToJPEGRef: PTileDynArray; ABaseWidthInTiles: Integer);
+    destructor Destroy; override;
+
+    procedure CompressJPEG(AQuality: TMyJPEGCompressionQuality); overload;
+    procedure CompressJPEG(AEncoder: TTilingEncoder; APSNR: Double); overload;
   end;
 
   { TFrame }
@@ -315,8 +313,8 @@ type
     ReconstructPSNRCml: Double;
     ReconstructLock: TSpinlock;
 
-    KFTiles: PTileDynArray;
-    KFJPEG: TMemoryStream;
+    LocalTiles: PTileDynArray;
+    TilesJPEG: TTilesJPEG;
 
     procedure LogPSNR;
 
@@ -338,9 +336,6 @@ type
 
     FCS: TRTLCriticalSection;
     FKeyFramesLeft: Integer;
-    FTileDS: PTilingDataset;
-    FGlobalTiles: PTileDynArray;
-    FGlobalJPEG: TMemoryStream;
 
     FGamma: array[0..1] of TFloat;
     FGammaCorLut: array[-1..1, 0..High(Byte)] of TFloat;
@@ -351,7 +346,10 @@ type
     FTiles: PTileDynArray;
     FKeyFrames: TKeyFrameArray;
     FFrames: TFrameArray;
-    FPalettes: TPaletteArray;
+
+    FTilingDataset: PTilingDataset;
+    FGlobalTiles: PTileDynArray;
+    FGlobalTilesJPEG: TTilesJPEG;
 
     // video properties
 
@@ -441,8 +439,8 @@ type
     generic procedure WaveletGS<T, PT>(Data: PT; Output: PT; dx, dy, depth: cardinal);
     generic procedure DeWaveletGS<T, PT>(wl: PT; pic: PT; dx, dy, depth: longint);
 
-    procedure ConvertToCpnPixels(const ATile: TTile; VMirror, HMirror: Boolean; out ACpnPixel: TCpnPixelsF); inline;
-    procedure ComputePsyVisFeatures(const ACpnPixels: TCpnPixelsF; Mode: TPsyVisMode; ADCT: PDCTScalar); inline;
+    class procedure ConvertToCpnPixels(const ATile: TTile; VMirror, HMirror: Boolean; out ACpnPixel: TCpnPixelsF);
+    procedure ComputePsyVisFeatures(const ACpnPixels: TCpnPixelsF; Mode: TPsyVisMode; ADCT: PDCTScalar);
 
     function GetTileCount(AActiveOnly: Boolean): Integer;
     function GetFrameTileCount(AFrame: TFrame): Integer;
@@ -474,7 +472,6 @@ type
     procedure MergeTiles(const TileIndexes: TIntegerDynArray; TileCount: Integer; BestIdx: Int64);
 
     procedure MapTiles;
-    procedure CompressJPEG(const ATiles: PTileDynArray; AStream: TMemoryStream; AQuality: Integer; AKeyFrame: TKeyFrame);
 
     procedure LoadStream(AStream: TStream);
     procedure SaveStream(AStream: TStream);
@@ -514,7 +511,6 @@ type
     property Tiles: PTileDynArray read GetTiles;
     property KeyFrames: TKeyFrameArray read FKeyFrames;
     property Frames: TFrameArray read FFrames;
-    property Palettes: TPaletteArray read FPalettes;
 
     // video properties
 
@@ -983,14 +979,13 @@ begin
   EndFrame := AEndFrame;
   FrameCount := AEndFrame - AStartFrame + 1;
 
-  KFJPEG := TMemoryStream.Create;
-
   SpinLeave(@ReconstructLock);
 end;
 
 destructor TKeyFrame.Destroy;
 begin
-  KFJPEG.Free;
+  TilesJPEG.Free;
+  TTile.Array1DDispose(LocalTiles);
 
   inherited Destroy;
 end;
@@ -1046,6 +1041,165 @@ end;
 procedure TDCTBuffer.AdvanceFrame;
 begin
   CurBufferIndex := (CurBufferIndex + 1) mod Length(DCTBuffer);
+end;
+
+{ TTilesJPEG }
+
+function TTilesJPEG.GRPSNR(x: Double; Data: Pointer): Double;
+var
+  Encoder: TTilingEncoder absolute Data;
+  tIdx: Integer;
+  err: Cardinal;
+  psnrAcc: Double;
+  CpnPixels: TCpnPixelsF;
+  JPEGDCT, PlainDCT: TDCT;
+begin
+  CompressJPEG(EnsureRange(Round(x), Low(TMyJPEGCompressionQuality), High(TMyJPEGCompressionQuality)));
+
+  psnrAcc := 0.0;
+  for tIdx := 0 to High(TilesToJPEGRef) do
+  begin
+    Encoder.ConvertToCpnPixels(TilesToJPEGRef[tIdx]^, False, False, CpnPixels);
+    Encoder.ComputePsyVisFeatures(CpnPixels, pvsWeightedDCT, JPEGDCT);
+
+    Encoder.ConvertToCpnPixels(TilesRef[TilesToJPEGRef[tIdx]^.TmpIndex]^, False, False, CpnPixels);
+    Encoder.ComputePsyVisFeatures(CpnPixels, pvsWeightedDCT, PlainDCT);
+
+    err := CompareEuclideanDCTPtr_asm(JPEGDCT, PlainDCT);
+    psnrAcc += EuclideanToPSNR(err);
+  end;
+
+  Result := DivDef(psnrAcc, Length(TilesToJPEGRef), cBestPSNR);
+
+  WriteLn('Quality: ', x:9:3, ', Mean PSNR: ', Result:9:3, ', FileSize: ', JPEG.Size / 1024:12:2, ' KBytes');
+end;
+
+constructor TTilesJPEG.Create(const ATilesRef, ATilesToJPEGRef: PTileDynArray; ABaseWidthInTiles: Integer);
+begin
+  TilesRef := ATilesRef;
+  TilesToJPEGRef := ATilesToJPEGRef;
+  BaseWidthInTiles := ABaseWidthInTiles;
+  JPEG := TMemoryStream.Create;
+end;
+
+destructor TTilesJPEG.Destroy;
+begin
+  JPEG.Free;
+  inherited Destroy;
+end;
+
+procedure TTilesJPEG.CompressJPEG(AQuality: TMyJPEGCompressionQuality);
+
+  procedure AdvancePos(var APos: Integer; AWidth: Integer);
+  begin
+    Inc(APos, cTileWidth);
+    if APos mod AWidth = 0 then
+    begin
+      Inc(APos, AWidth * (cTileWidth - 1));
+    end;
+  end;
+
+var
+  iMap, ty, tx, tyx, iy, imgPos, widthInTiles, heightInTiles, remx: Integer;
+  T: PTile;
+  Img: TImgRGB8Bit;
+  JPGWriter: TMyWriterJPEG;
+  JPGReader: TFPReaderJPEG;
+  px: PFPCompactImgRGB8BitValue;
+begin
+  JPEG.Clear;
+
+  if Length(TilesToJPEGRef) <= 0 then
+    Exit;
+
+  widthInTiles := BaseWidthInTiles;
+  heightInTiles := (Length(TilesToJPEGRef) - 1) div widthInTiles + 1;
+
+  Img := TImgRGB8Bit.Create(widthInTiles * cTileWidth, heightInTiles * cTileWidth);
+  JPGWriter := TMyWriterJPEG.Create;
+  JPGReader := TFPReaderJPEG.Create;
+  try
+    JPGWriter.CompressionQuality := EnsureRange(AQuality, Low(TJPEGQualityRange), High(TJPEGQualityRange));
+    JPGWriter.GrayScale := False;
+    JPGWriter.ProgressiveEncoding := True;
+    JPGWriter.ChromaSubsampling := False;
+
+    JPGReader.Performance := jpBestQuality;
+
+    imgPos := 0;
+    for iMap := 0 to High(TilesToJPEGRef) do
+    begin
+      T := TilesRef[TilesToJPEGRef[iMap]^.TmpIndex];
+
+      iy := 0;
+      for ty := 0 to cTileWidth - 1 do
+      begin
+        for tx := 0 to cTileWidth - 1 do
+        begin
+          tyx := (ty shl cTileWidthBits) + tx;
+          px := @Img.FData[imgPos + tx + iy];
+          px^.R := T^.Pixels[0, tyx];
+          px^.G := T^.Pixels[1, tyx];
+          px^.B := T^.Pixels[2, tyx];
+        end;
+        Inc(iy, Img.Width);
+      end;
+
+      AdvancePos(imgPos, Img.Width);
+    end;
+
+    iy := 0;
+    remx := (Img.Width - (imgPos mod Img.Width)) * cColorCpns;
+    for ty := 0 to cTileWidth - 1 do
+    begin
+      FillChar(Img.FData[imgPos + iy], remx, 0);
+      Inc(iy, Img.Width);
+    end;
+
+{$if defined(DEBUG) or defined(TEST)}
+    Img.SaveToFile(Format('JPEG_%d.jpg', [TilesToJPEGRef[0]^.TmpIndex]), JPGWriter);
+{$endif}
+
+    Img.SaveToStream(JPEG, JPGWriter);
+
+    JPEG.Position := 0;
+    Img.LoadFromStream(JPEG, JPGReader);
+
+    imgPos := 0;
+    for iMap := 0 to High(TilesToJPEGRef) do
+    begin
+      T := TilesToJPEGRef[iMap];
+
+      iy := 0;
+      for ty := 0 to cTileWidth - 1 do
+      begin
+        for tx := 0 to cTileWidth - 1 do
+        begin
+          tyx := (ty shl cTileWidthBits) + tx;
+          px := @Img.FData[imgPos + tx + iy];
+          T^.Pixels[0, tyx] := px^.R;
+          T^.Pixels[1, tyx] := px^.G;
+          T^.Pixels[2, tyx] := px^.B;
+        end;
+        Inc(iy, Img.Width);
+      end;
+
+      AdvancePos(imgPos, Img.Width);
+    end;
+
+    Quality := AQuality;
+    Size.X := Img.Width;
+    Size.Y := Img.Height;
+  finally
+    JPGReader.Free;
+    JPGWriter.Free;
+    Img.Free;
+  end;
+end;
+
+procedure TTilesJPEG.CompressJPEG(AEncoder: TTilingEncoder; APSNR: Double);
+begin
+  GoldenRatioSearch(@GRPSNR, Low(TMyJPEGCompressionQuality), High(TMyJPEGCompressionQuality), APSNR, 0.5, 0.01, AEncoder);
 end;
 
 { TFrame }
@@ -1712,7 +1866,7 @@ var
   end;
 
 begin
-  DS := Encoder.FTileDS;
+  DS := Encoder.FTilingDataset;
   if DS^.KNNSize <= 0 then
     Exit;
 
@@ -2073,11 +2227,30 @@ begin
 
   ProgressRedraw(1, 'MapTiles');
 
-  CompressJPEG(FGlobalTiles, FGlobalJPEG, FJPEGQuality, nil);
+  FGlobalTilesJPEG.Free;
+  FGlobalTilesJPEG := TTilesJPEG.Create(FTiles, FGlobalTiles, FTileMapWidth);
+  if FGlobalTilingUseTargetPSNR then
+    FGlobalTilesJPEG.CompressJPEG(Self, FGlobalTilingTargetPSNR)
+  else
+    FGlobalTilesJPEG.CompressJPEG(FJPEGQuality);
+
   for kfIdx := 0 to High(FKeyFrames) do
   begin
     KF := FKeyFrames[kfIdx];
-    CompressJPEG(KF.KFTiles, KF.KFJPEG, FJPEGQuality, KF);
+
+    KF.TilesJPEG.Free;
+    KF.TilesJPEG := TTilesJPEG.Create(FTiles, KF.LocalTiles, FTileMapWidth);
+    if FGlobalTilingUseTargetPSNR then
+      KF.TilesJPEG.CompressJPEG(Self, FGlobalTilingTargetPSNR)
+    else
+      KF.TilesJPEG.CompressJPEG(FJPEGQuality);
+  end;
+
+  WriteLn('Global      , TileCount: ', Length(FGlobalTiles):8, ', Size: ', FGlobalTilesJPEG.Size.X:6, ' x ', FGlobalTilesJPEG.Size.Y:6, ', Quality: ', FGlobalTilesJPEG.Quality:3, ', FileSize: ', FGlobalTilesJPEG.JPEG.Size / 1024:12:2, ' KBytes');
+  for kfIdx := 0 to High(FKeyFrames) do
+  begin
+    KF := FKeyFrames[kfIdx];
+    WriteLn('KF: ', KF.StartFrame:8,', TileCount: ', Length(KF.LocalTiles):8, ', Size: ', KF.TilesJPEG.Size.X:6, ' x ', KF.TilesJPEG.Size.Y:6, ', Quality: ', KF.TilesJPEG.Quality:3, ', FileSize: ', KF.TilesJPEG.JPEG.Size / 1024:12:2, ' KBytes');
   end;
 
   ProgressRedraw(2, 'CompressJPEGs');
@@ -2682,7 +2855,7 @@ begin
   FMotionPredictMaxBufferedFrames := EnsureRange(AValue, 1, 7);
 end;
 
-procedure TTilingEncoder.ConvertToCpnPixels(const ATile: TTile; VMirror, HMirror: Boolean; out ACpnPixel: TCpnPixelsF);
+class procedure TTilingEncoder.ConvertToCpnPixels(const ATile: TTile; VMirror, HMirror: Boolean; out ACpnPixel: TCpnPixelsF);
 
   procedure ToCpn(col, yx: Integer);
   var
@@ -2924,6 +3097,9 @@ begin
 
   FreeAndNil(FRenderFrameBuffer);
 
+  TTile.Array1DDispose(FGlobalTiles);
+  FreeAndNil(FGlobalTilesJPEG);
+
   TTile.Array1DDispose(FTiles);
 end;
 
@@ -3025,7 +3201,7 @@ procedure TTilingEncoder.Render;
     KFTiles: PTileDynArray;
   begin
     Result := FTiles[ATileIdx];
-    KFTiles := FFrames[FRenderFrameIndex].PKeyFrame.KFTiles;
+    KFTiles := FFrames[FRenderFrameIndex].PKeyFrame.LocalTiles;
     if FRenderUseJPEG and Assigned(KFTiles) then
       if Result^.TmpIndex >= Length(FGlobalTiles) then
         Result := KFTiles[Result^.TmpIndex - Length(FGlobalTiles)]
@@ -3374,7 +3550,7 @@ begin
   MotionPredictMaxBufferedFrames := 3;
 
   GlobalTilingUseTargetPSNR := True;
-  GlobalTilingTargetPSNR := 36.0;
+  GlobalTilingTargetPSNR := 30.0;
   GlobalTilingQualityBasedTileCount := 3.0;
   GlobalTilingTileCount := 0; // after GlobalTilingQualityBasedTileCount because has priority
 
@@ -3577,11 +3753,8 @@ begin
 end;
 
 function TTilingEncoder.SolveTileCount(ATileCount: Integer): Integer;
-var
-  err: Double;
 begin
-  err := Max(0.5, ATileCount * 0.001);
-  Result := Round(GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, ATileCount - err, cPsyVEpsilon, err, Pointer(True)).Y);
+  Result := Round(GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, ATileCount, cPsyVEpsilon, 0.5, Pointer(True)).Y);
 end;
 
 function TTilingEncoder.SolveAvgPSNR(AAvgPSNR: Double): Integer;
@@ -3686,7 +3859,7 @@ begin
 
   // Dataset is ready
 
-  FTileDS := DS;
+  FTilingDataset := DS;
 
   // init for LogPSNR
 
@@ -3699,13 +3872,13 @@ end;
 
 procedure TTilingEncoder.FinishReconstruct;
 begin
-  if Length(FTileDS^.Dataset) > 0 then
-    ann_kdtree_short_destroy(FTileDS^.ANN);
-  FTileDS^.ANN := nil;
-  SetLength(FTileDS^.Dataset, 0);
-  Dispose(FTileDS);
+  if Length(FTilingDataset^.Dataset) > 0 then
+    ann_kdtree_short_destroy(FTilingDataset^.ANN);
+  FTilingDataset^.ANN := nil;
+  SetLength(FTilingDataset^.Dataset, 0);
+  Dispose(FTilingDataset);
 
-  FTileDS := nil;
+  FTilingDataset := nil;
 end;
 
 procedure TTilingEncoder.ReindexTiles;
@@ -4006,8 +4179,8 @@ begin
 
   for kfIdx := 0 to High(FKeyFrames) do
   begin
-    TTile.Array1DDispose(FKeyFrames[kfIdx].KFTiles);
-    FKeyFrames[kfIdx].KFTiles := TTile.Array1DNew(perKFPos[kfIdx]);
+    TTile.Array1DDispose(FKeyFrames[kfIdx].LocalTiles);
+    FKeyFrames[kfIdx].LocalTiles := TTile.Array1DNew(perKFPos[kfIdx]);
     perKFPos[kfIdx] := 0;
   end;
   TTile.Array1DDispose(FGlobalTiles);
@@ -4025,7 +4198,7 @@ begin
     begin
       if kfIdx < High(Integer) then
       begin
-        FinalT := FKeyFrames[kfIdx].KFTiles[perKFPos[kfIdx]];
+        FinalT := FKeyFrames[kfIdx].LocalTiles[perKFPos[kfIdx]];
         FinalT^.CopyFrom(T^);
 
         T^.TmpIndex := Length(FGlobalTiles) + perKFPos[kfIdx];
@@ -4044,119 +4217,6 @@ begin
         Inc(globalPos);
       end;
     end;
-  end;
-end;
-
-procedure TTilingEncoder.CompressJPEG(const ATiles: PTileDynArray; AStream: TMemoryStream; AQuality: Integer; AKeyFrame: TKeyFrame);
-
-  procedure AdvancePos(var APos: Integer; AWidth: Integer);
-  begin
-    Inc(APos, cTileWidth);
-    if APos mod AWidth = 0 then
-    begin
-      Inc(APos, AWidth * (cTileWidth - 1));
-    end;
-  end;
-
-var
-  iMap, ty, tx, tyx, iy, imgPos, widthInTiles, heightInTiles, remx: Integer;
-  T: PTile;
-  Img: TImgRGB8Bit;
-  JPGWriter: TMyWriterJPEG;
-  JPGReader: TFPReaderJPEG;
-  px: PFPCompactImgRGB8BitValue;
-begin
-  AStream.Clear;
-
-  if Length(ATiles) <= 0 then
-    Exit;
-
-  widthInTiles := FTileMapWidth;
-  heightInTiles := (Length(ATiles) - 1) div widthInTiles + 1;
-
-  Img := TImgRGB8Bit.Create(widthInTiles * cTileWidth, heightInTiles * cTileWidth);
-  JPGWriter := TMyWriterJPEG.Create;
-  JPGReader := TFPReaderJPEG.Create;
-  try
-    JPGWriter.CompressionQuality := EnsureRange(AQuality, Low(TJPEGQualityRange), High(TJPEGQualityRange));
-    JPGWriter.GrayScale := False;
-    JPGWriter.ProgressiveEncoding := True;
-    JPGWriter.ChromaSubsampling := False;
-
-    JPGReader.Performance := jpBestQuality;
-
-    imgPos := 0;
-    for iMap := 0 to High(ATiles) do
-    begin
-      T := FTiles[ATiles[iMap]^.TmpIndex];
-
-      iy := 0;
-      for ty := 0 to cTileWidth - 1 do
-      begin
-        for tx := 0 to cTileWidth - 1 do
-        begin
-          tyx := (ty shl cTileWidthBits) + tx;
-          px := @Img.FData[imgPos + tx + iy];
-          px^.R := T^.Pixels[0, tyx];
-          px^.G := T^.Pixels[1, tyx];
-          px^.B := T^.Pixels[2, tyx];
-        end;
-        Inc(iy, Img.Width);
-      end;
-
-      AdvancePos(imgPos, Img.Width);
-    end;
-
-    iy := 0;
-    remx := (Img.Width - (imgPos mod Img.Width)) * cColorCpns;
-    for ty := 0 to cTileWidth - 1 do
-    begin
-      FillChar(Img.FData[imgPos + iy], remx, 0);
-      Inc(iy, Img.Width);
-    end;
-
-{$if defined(DEBUG) or defined(TEST)}
-    Img.SaveToFile(Format('%s_%.4d.jpg', [ChangeFileExt(FOutputFileName, ''), ATiles[0]^.TmpIndex]), JPGWriter);
-{$endif}
-
-    Img.SaveToStream(AStream, JPGWriter);
-
-    AStream.Position := 0;
-    Img.LoadFromStream(AStream, JPGReader);
-
-    imgPos := 0;
-    for iMap := 0 to High(ATiles) do
-    begin
-      T := ATiles[iMap];
-
-      iy := 0;
-      for ty := 0 to cTileWidth - 1 do
-      begin
-        for tx := 0 to cTileWidth - 1 do
-        begin
-          tyx := (ty shl cTileWidthBits) + tx;
-          px := @Img.FData[imgPos + tx + iy];
-          T^.Pixels[0, tyx] := px^.R;
-          T^.Pixels[1, tyx] := px^.G;
-          T^.Pixels[2, tyx] := px^.B;
-        end;
-        Inc(iy, Img.Width);
-      end;
-
-      AdvancePos(imgPos, Img.Width);
-    end;
-
-    if Assigned(AKeyFrame) then
-      Write('KF: ', AKeyFrame.StartFrame:8)
-    else
-      Write('Global      ');
-
-    WriteLn(', TileCount: ', Length(ATiles):8, ', Size: ', Img.Width:6, ' x ', Img.Height:6, ', Quality: ', AQuality:3, ', FileSize: ', AStream.Size / 1024:12:2, ' KBytes');
-
-  finally
-    JPGReader.Free;
-    JPGWriter.Free;
-    Img.Free;
   end;
 end;
 
@@ -4249,8 +4309,8 @@ var
     if InRange(tileIdx, 0, High(FTiles)) then
       Inc(FTiles[tileIdx]^.UseCount);
 
-    if InRange(palIdx, 0, High(FPalettes)) then
-      Inc(FPalettes[palIdx].UseCount);
+    //if InRange(palIdx, 0, High(FPalettes)) then
+    //  Inc(FPalettes[palIdx].UseCount);
   end;
 
   function NextFrame(KF: TKeyFrame): TFrame;
@@ -4556,17 +4616,17 @@ var
     end;
   end;
 
-  procedure WriteTiles(AStrm: TMemoryStream; AStart, ACount: Integer; AGlobal: Boolean);
+  procedure WriteTiles(ATilesJPEG: TTilesJPEG; AStart, ACount: Integer; AGlobal: Boolean);
   begin
-    if AStrm.Size > 0 then
+    if ATilesJPEG.JPEG.Size > 0 then
     begin
       DoCmd(gtTileSet, ((cColorCpns - 1) shl 5) or ((cBitsPerComp - 1) shl 1) or Ord(AGlobal));
       DoDWord(AStart); // start tile
       DoDWord(AStart + ACount); // end tile
-      DoDWord(AStrm.Size); // JPEG size
+      DoDWord(ATilesJPEG.JPEG.Size); // JPEG size
 
-      AStrm.Position := 0;
-      ZStream.CopyFrom(AStrm, AStrm.Size);
+      ATilesJPEG.JPEG.Position := 0;
+      ZStream.CopyFrom(ATilesJPEG.JPEG, ATilesJPEG.JPEG.Size);
     end;
   end;
 
@@ -4576,7 +4636,7 @@ var
   begin
     maxTileCount := 0;
     for kfIdx := 0 to High(FKeyFrames) do
-      maxTileCount := max(maxTileCount, Length(FKeyFrames[kfIdx].KFTiles));
+      maxTileCount := max(maxTileCount, Length(FKeyFrames[kfIdx].LocalTiles));
 
     DoCmd(gtSetDimensions, 0);
     DoDWord(FTileMapWidth); // frame tilemap width
@@ -4635,14 +4695,14 @@ begin
   try
     WriteSettings;
     WriteDimensions;
-    WriteTiles(FGlobalJPEG, 0, Length(FGlobalTiles), True);
+    WriteTiles(FGlobalTilesJPEG, 0, Length(FGlobalTiles), True);
 
     LastKF := 0;
     for kfIdx := 0 to High(FKeyFrames) do
     begin
       KeyFrame := FKeyFrames[kfIdx];
 
-      WriteTiles(KeyFrame.KFJPEG, 0, Length(KeyFrame.KFTiles), False);
+      WriteTiles(KeyFrame.TilesJPEG, 0, Length(KeyFrame.LocalTiles), False);
 
       for frmIdx := KeyFrame.StartFrame to KeyFrame.EndFrame do
       begin
@@ -4760,8 +4820,6 @@ begin
   ReframeUI(80, 45);
   FFramesPerSecond := 24.0;
 
-  FGlobalJPEG := TMemoryStream.Create;
-
   LoadDefaultSettings;
 end;
 
@@ -4770,8 +4828,6 @@ begin
   ClearAll(False);
 
   DeleteCriticalSection(FCS);
-
-  FGlobalJPEG.Free;
 
   FInputBitmap.Free;
   FOutputBitmap.Free;
