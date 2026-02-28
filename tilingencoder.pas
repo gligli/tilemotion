@@ -12,15 +12,16 @@ interface
 
 uses
   windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, zstream, IniFiles, Graphics,
-  IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, MTProcs, extern, tbbmalloc, bufstream, utils, kmodes, powell, sle;
+  IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, MTProcs, bufstream,
+  tbbmalloc, extern, utils, kmodes, powell, sle;
 type
-  TEncoderStep = (esAll = -1, esLoad = 0, esPredictMotion, esReduce, esPreparePalettes, esDither, esReconstruct, esReindex, esSave);
+  TEncoderStep = (esAll = -1, esLoad = 0, esPredict, esReduce, esPreparePalettes, esDither, esReconstruct, esReindex, esSave);
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
   TRenderPage = (rpNone, rpInput, rpOutput, rpTilesPalette);
   TPsyVisMode = (pvsDCT, pvsWeightedDCT, pvsWavelets, pvsSpeDCT, pvsWeightedSpeDCT);
 
 const
-  cEncoderStepLen: array[TEncoderStep] of Integer = ({esAll} -1, {esLoad} 5, {esPredictMotion} 1, {esReduce} 4, {esPreparePalettes} 4, {esDither} 2, {esReconstruct} 2, {esReindex} 3, {esSave} 1);
+  cEncoderStepLen: array[TEncoderStep] of Integer = ({esAll} -1, {esLoad} 5, {esPredict} 1, {esReduce} 3, {esPreparePalettes} 4, {esDither} 2, {esReconstruct} 2, {esReindex} 3, {esSave} 1);
 
 type
   // GliGli's TileMotion header structs and commands
@@ -181,7 +182,7 @@ type
   TTileMapItem = packed record
     TileIdx: Integer; // 4
     PalIdx: Integer; // 4
-    PSNR: TFloat; // 4
+    Error: Cardinal; // 4
     Attrs: record case Boolean of // 3 * 1
       False: (MotionX, MotionY: ShortInt; MotionBackBufferOffset: Byte);
       True: (BlendWeightM1, BlendWeightM2, Dummy: Byte);
@@ -321,14 +322,16 @@ type
     procedure AcquireFrameTiles;
     procedure ReleaseFrameTiles;
 
+    function GetUsedTileCount: Integer;
+    function GetUnpredictedTileCount: Integer;
     procedure ResetTileMap(AKeepMirrors: Boolean);
 
     procedure GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
 
     procedure PrepareDCTs(const ADCTs: TDCTDynArray; const ABuffer: TIntegerDynArray2);
-    function PredictTileBlending(ADY, ADX: Integer; ATMI: PTileMapItem; const  ADCT: TDCT; ADCTBuffer: TDCTBuffer): Integer;
-    function PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Integer;
-    function PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const  ADCT: TDCT; const ADCTs: TDCTDynArray): Integer;
+    function PredictTileBlending(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; ADCTBuffer: TDCTBuffer): Cardinal;
+    function PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Cardinal;
+    function PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Cardinal;
 
     // processes
 
@@ -349,8 +352,9 @@ type
     Reason: TKeyFrameReason;
 
     ReconstructFramesLeft: Integer;
-    ReconstructPSNRCml: Double;
+    ReconstructErrCml: UInt64;
     ReconstructLock: TSpinlock;
+    ReconstructPSNR: Double;
 
     procedure LogPSNR;
 
@@ -370,7 +374,7 @@ type
 
     FCS: TRTLCriticalSection;
     FKeyFramesLeft: Integer;
-    FTileDS: PTilingDataset;
+    FReconstructPSNR: Double;
 
     FGamma: array[0..1] of TFloat;
     FGammaCorLut: array[-1..1, 0..High(Byte)] of TFloat;
@@ -383,6 +387,8 @@ type
     FKeyFrames: TKeyFrameArray;
     FFrames: TFrameArray;
     FPalettes: TPaletteArray;
+
+    FTilingDataset: PTilingDataset;
 
     // video properties
 
@@ -498,7 +504,6 @@ type
     procedure DeviseBestMixingPlanThomasKnoll(var Plan: TMixingPlan; col: Integer; var List: array of Byte);
 
     function GetTileCount(AActiveOnly: Boolean): Integer;
-    function GetFrameTileCount(AFrame: TFrame): Integer;
     procedure DitherTile(var ATile: TTile; var Plan: TMixingPlan);
     class function GetTileZoneSum(const ATile: TTile; AOnPal: Boolean; x, y, w, h: Integer): Integer;
     class procedure GetTileHVMirrorHeuristics(const ATile: TTile; AOnPal: Boolean; out AHMirror, AVMirror: Boolean);
@@ -512,9 +517,10 @@ type
     procedure LoadInputVideo;
     procedure FindKeyFrames(AManualMode: Boolean);
 
-    function GRTileCountFromPSNR(x: Double; Data: Pointer): Double;
-    function SolveTileCount(ATileCount: Integer; AKFFirstFrameOnly: Boolean): Double;
-    procedure TransferTiles(ATileCount: Integer; AKFFirstFrameOnly: Boolean);
+    function GRPSNR(x: Double; Data: Pointer): Double;
+    function SolveTileCount(ATileCount: Integer): Integer;
+    function SolveAvgPSNR(AAvgPSNR: Double): Integer;
+    procedure TransferTiles;
 
     procedure DoPalettization;
     function MinimizeOP(const x: TDoubleDynArray; data: Pointer): Double;
@@ -682,7 +688,7 @@ procedure TTileMapItemHelper.Reset(AKeepMirrors: Boolean);
 begin
   TileIdx := -1;
   PalIdx := -1;
-  PSNR := Infinity;
+  Error := 0;
   Attrs.MotionX := 0;
   Attrs.MotionY := 0;
   Attrs.MotionBackBufferOffset := 0;
@@ -1155,23 +1161,23 @@ end;
 procedure TKeyFrame.LogPSNR;
 var
   kfIdx: Integer;
-  tileResd, errCml: Double;
+  errCml: UInt64;
 begin
   InterLockedDecrement(ReconstructFramesLeft);
   if ReconstructFramesLeft <= 0 then
   begin
-    tileResd := ReconstructPSNRCml / (Encoder.FTileMapSize * FrameCount);
-    WriteLn('KF: ', StartFrame:8, ' PSNR-HVS: ', tileResd:12:6, ' (by tile)');
+    ReconstructPSNR := EuclideanToPSNR(ReconstructErrCml / (Encoder.FTileMapSize * FrameCount));
+    WriteLn('KF: ', StartFrame:8, ' PSNR-HVS: ', ReconstructPSNR:12:6, ' (by tile)');
 
     InterLockedDecrement(Encoder.FKeyFramesLeft);
     if Encoder.FKeyFramesLeft <= 0 then
     begin
-      errCml := 0.0;
+      errCml := 0;
       for kfIdx := 0 to High(Encoder.FKeyFrames) do
-        errCml += Encoder.FKeyFrames[kfIdx].ReconstructPSNRCml;
+        errCml += Encoder.FKeyFrames[kfIdx].ReconstructErrCml;
 
-      tileResd := errCml / (Encoder.FTileMapSize * Length(Encoder.FFrames));
-      WriteLn('All:', Length(Encoder.FFrames):8, ' PSNR-HVS: ', tileResd:12:6, ' (by tile)');
+      Encoder.FReconstructPSNR := EuclideanToPSNR(errCml / (Encoder.FTileMapSize * Length(Encoder.FFrames)));
+      WriteLn('All:', Length(Encoder.FFrames):8, ' PSNR-HVS: ', Encoder.FReconstructPSNR:12:6, ' (by tile)');
     end;
   end;
 end;
@@ -1343,6 +1349,49 @@ begin
   end;
 end;
 
+function TFrame.GetUsedTileCount: Integer;
+var
+  Used: TByteDynArray;
+  sx, sy: Integer;
+  TMI: PTileMapItem;
+begin
+  Result := 0;
+
+  if Length(Encoder.Tiles) = 0 then
+    Exit;
+
+  SetLength(Used, Length(Encoder.Tiles));
+  FillByte(Used[0], Length(Encoder.Tiles), 0);
+
+  for sy := 0 to Encoder.FTileMapHeight - 1 do
+    for sx := 0 to Encoder.FTileMapWidth - 1 do
+    begin
+      TMI := @TileMap[sy, sx];
+
+      if TMI^.TileIdx >= 0 then
+        Used[TMI^.TileIdx] := 1;
+    end;
+
+  for sx := 0 to High(Used) do
+    Inc(Result, Used[sx]);
+end;
+
+function TFrame.GetUnpredictedTileCount: Integer;
+var
+  sy, sx: Integer;
+  TMI: PTileMapItem;
+begin
+  Result := 0;
+  for sy := 0 to Encoder.FTileMapHeight - 1 do
+    for sx := 0 to Encoder.FTileMapWidth - 1 do
+    begin
+      TMI := @TileMap[sy, sx];
+
+      if not TMI^.IsPredicted then
+        Inc(Result);
+    end;
+end;
+
 procedure TFrame.ResetTileMap(AKeepMirrors: Boolean);
 var
   sy, sx: Integer;
@@ -1393,13 +1442,12 @@ begin
   ProcThreadPool.DoParallelLocalProc(@DoDCTs, 0, Encoder.FScreenHeight - cTileWidth);
 end;
 
-function TFrame.PredictTileBlending(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; ADCTBuffer: TDCTBuffer): Integer;
+function TFrame.PredictTileBlending(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; ADCTBuffer: TDCTBuffer): Cardinal;
 var
   i, bm1, bm2, yx, err, bestM1, bestM2: Integer;
-  psnr: TFloat;
   prevDCTM1, prevDCTM2: TDCT;
 begin
-  Result := MaxInt;
+  Result := High(Cardinal);
   bestM1 := MaxInt;
   bestM2 := MaxInt;
 
@@ -1423,31 +1471,28 @@ begin
       end;
     end;
 
-  psnr := EuclideanToPSNR(Result);
-
-  if not ATMI^.IsPredicted or (psnr > ATMI^.PSNR) then
+  if not ATMI^.IsPredicted or (Result < ATMI^.Error) then
   begin
     ATMI^.IsPredicted := True;
     ATMI^.IsBlended := True;
-    ATMI^.PSNR := psnr;
+    ATMI^.Error := Result;
     ATMI^.Attrs.BlendWeightM1 := bestM1;
     ATMI^.Attrs.BlendWeightM2 := bestM2;
   end
   else
   begin
-    Result := MaxInt;
+    Result := High(Cardinal);
   end;
 end;
 
-function TFrame.PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Integer;
+function TFrame.PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Cardinal;
 var
   oy, yx: Integer;
   state: TDCTCribbleState;
   PrevDCTPtr: PDCTScalar;
-  psnr: TFloat;
 begin
-  Result := MaxInt;
-  state.Error := MaxInt;
+  Result := High(Cardinal);
+  state.Error := High(Cardinal);
   state.Y := MaxInt;
   state.X := MaxInt;
   state.DY := ADY;
@@ -1464,13 +1509,11 @@ begin
     CribbleEuclideanDCTPtr_asm(ADCT, PrevDCTPtr, @state, oy);
   end;
 
-  psnr := EuclideanToPSNR(state.Error);
-
-  if not ATMI^.IsPredicted or (psnr > ATMI^.PSNR) then
+  if not ATMI^.IsPredicted or (state.Error < ATMI^.Error) then
   begin
     ATMI^.IsPredicted := True;
     ATMI^.IsBlended := False;
-    ATMI^.PSNR := psnr;
+    ATMI^.Error := state.Error;
     ATMI^.Attrs.MotionY := state.Y - ADY;
     ATMI^.Attrs.MotionX := state.X - ADX;
     ATMI^.Attrs.MotionBackBufferOffset := ABackBufferOffset;
@@ -1478,7 +1521,7 @@ begin
   end;
 end;
 
-function TFrame.PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Integer;
+function TFrame.PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Cardinal;
 var
   oy, ox, oymn, oymx, oxmn, oxmx, yx, bestX, bestY: Integer;
   PSNRAcc: TFloat;
@@ -1487,7 +1530,7 @@ var
 begin
   GetPredictExtents(ARadius, ADY, ADX, oxmn, oxmx, oymn, oymx);
 
-  Result := MaxInt;
+  Result := High(Cardinal);
   bestY := MaxInt;
   bestX := MaxInt;
 
@@ -1526,7 +1569,7 @@ begin
 
   ATMI^.IsPredicted := True;
   ATMI^.IsBlended := False;
-  ATMI^.PSNR := PSNRAcc / PSNRCnt;
+  ATMI^.Error := PSNRToEuclidean(PSNRAcc / PSNRCnt);
   ATMI^.Attrs.MotionY := bestY - ADY;
   ATMI^.Attrs.MotionX := bestX - ADX;
 end;
@@ -1862,7 +1905,7 @@ var
   var
     sx, sy, dx, dy, ty, tx, tileEpuIdx, palEpuIdx, prevTileIdx, prevPalIdx: Integer;
     knnErr, err: Cardinal;
-    knnPSNR, mpPSNR: TFloat;
+    knnPSNR, mpPSNR: Double;
 
     FrameTile, Tile: PTile;
     TMI: PTileMapItem;
@@ -1892,7 +1935,7 @@ var
 
     mpPSNR := -Infinity;
     if (Index <> PKeyFrame.StartFrame) and (ARadius >= 0) then
-      mpPSNR := TMI^.PSNR;
+      mpPSNR := EuclideanToPSNR(TMI^.Error);
 
     if CompareValue(mpPSNR, cBestPSNR, cPSNREpsilon) > LessThanValue  then
     begin
@@ -1974,33 +2017,24 @@ var
 
     // devise which is best
 
-    if knnErr = High(Cardinal) then
-      knnPSNR := -Infinity
+    if knnErr <> High(Cardinal) then
+      knnPSNR := EuclideanToPSNR(knnErr)
     else
-      knnPSNR := EuclideanToPSNR(knnErr);
+      knnPSNR := -Infinity;
 
     case CompareValue(knnPSNR, mpPSNR, cPSNREpsilon) of
       GreaterThanValue:
       begin
         // KNN is best
 
-        TMI^.PSNR := knnPSNR;
+        TMI^.Error := knnErr;
         TMI^.IsPredicted := False;
       end;
-      EqualsValue:
-      begin
-        // motion prediction has priority in case of ties (less bitrate)
-
-        TMI^.PSNR := mpPSNR;
-        TMI^.IsPredicted := True;
-        TMI^.PalIdx := -1;
-        TMI^.TileIdx := -1;
-      end;
+      EqualsValue, // motion prediction has priority in case of ties (less bitrate)
       LessThanValue:
       begin
         // motion prediction is best
 
-        TMI^.PSNR := mpPSNR;
         TMI^.IsPredicted := True;
         TMI^.PalIdx := -1;
         TMI^.TileIdx := -1;
@@ -2047,12 +2081,12 @@ var
     end;
 
     SpinEnter(@PKeyFrame.ReconstructLock);
-    PKeyFrame.ReconstructPSNRCml += TMI^.PSNR;
+    PKeyFrame.ReconstructErrCml += TMI^.Error;
     SpinLeave(@PKeyFrame.ReconstructLock);
   end;
 
 begin
-  DS := Encoder.FTileDS;
+  DS := Encoder.FTilingDataset;
   if DS^.KNNSize <= 0 then
     Exit;
 
@@ -2303,43 +2337,29 @@ begin
   ProgressRedraw(0, '', esReduce);
 
   if FGlobalTilingUseTargetPSNR then
-  begin
-    GRTileCountFromPSNR(FGlobalTilingTargetPSNR, @FGlobalTilingUseTargetPSNR)
-  end
+    SolveAvgPSNR(FGlobalTilingTargetPSNR)
   else
-  begin
-    // allocate theoretically half the tiles for key frames first frames
-    tileCount := FGlobalTilingTileCount;
-    if Length(FFrames) > 1 then
-      tileCount := tileCount shr 1;
+    SolveTileCount(FGlobalTilingTileCount);
 
-    SolveTileCount(tileCount, True);
-  end;
-
-  ProgressRedraw(1, 'KFSolveTileCount');
+  ProgressRedraw(1, 'Solve');
 
   for kfIdx := 0 to High(FKeyFrames) do
   begin
     KF := FKeyFrames[kfIdx];
     Frame := FFrames[KF.StartFrame];
 
-    Frame.IntraReduce(max(1, GetFrameTileCount(Frame)));
+    Frame.IntraReduce(max(2, Frame.GetUnpredictedTileCount));
 
     Write(kfIdx + 1:8, ' / ', Length(FKeyFrames):8, #13);
   end;
 
-  ProgressRedraw(2, 'KFIntraReduce');
+  ProgressRedraw(2, 'KeyFrameFirstFrameReduce');
 
-  if FGlobalTilingUseTargetPSNR then
-    GRTileCountFromPSNR(FGlobalTilingTargetPSNR, nil)
-  else
-    SolveTileCount(FGlobalTilingTileCount, False);
-
-  ProgressRedraw(3, 'SolveTileCount');
-
+  TransferTiles;
+  MakeTilesUnique(True);
   ReindexTiles(True);
 
-  ProgressRedraw(4, 'ReindexTiles');
+  ProgressRedraw(3, 'TransferTiles');
 end;
 
 procedure TTilingEncoder.PredictMotion;
@@ -2353,7 +2373,7 @@ begin
   if (Length(FFrames) = 0) or (FMotionPredictRadius <= 0) then
     Exit;
 
-  ProgressRedraw(0, '', esPredictMotion);
+  ProgressRedraw(0, '', esPredict);
 
   FrameBuffer := TFrameBuffer.Create(FMotionPredictMaxBufferedFrames + 1, FScreenHeight, FScreenWidth);
   DCTBuffer := TDCTBuffer.Create(FMotionPredictMaxBufferedFrames, (FScreenHeight - cTileWidth + 1) * (FScreenWidth - cTileWidth + 1));
@@ -4027,7 +4047,7 @@ var
   i, j, sx, sy, globalTileCount, col, off, siz: Integer;
   hmir, vmir: Boolean;
   tidx: Int64;
-  q: Double;
+  errCml: UInt64;
   pFB: PInteger;
   TempTile, tilePtr: PTile;
   TempBuf: TIntegerDynArray2;
@@ -4052,7 +4072,7 @@ begin
 
     globalTileCount := GetTileCount(False);
 
-    FRenderTitleText := 'Global: ' + IntToStr(globalTileCount) + ' / Frame #' + IntToStr(FRenderFrameIndex) + IfThen(Frame.PKeyFrame.StartFrame = FRenderFrameIndex, ' [KF]', '     ') + ' : ' + IntToStr(GetFrameTileCount(Frame));
+    FRenderTitleText := 'Global: ' + IntToStr(globalTileCount) + ' / Frame #' + IntToStr(FRenderFrameIndex) + IfThen(Frame.PKeyFrame.StartFrame = FRenderFrameIndex, ' [KF]', '     ') + ' : ' + IntToStr(Frame.GetUsedTileCount);
 
     // "Input" tab
 
@@ -4298,23 +4318,16 @@ begin
 
     // PSNR indicator
 
-    q := 0.0;
-    i := 0;
+    errCml := 0;
     for sy := 0 to FTileMapHeight - 1 do
       for sx := 0 to FTileMapWidth - 1 do
       begin
         TMI := @Frame.TileMap[sy, sx];
-
-        if not IsInfinite(TMI^.PSNR) then
-        begin
-          q += TMI^.PSNR;
-          Inc(i);
-        end;
+        errCml += TMI^.Error;
       end;
-    if i <> 0 then
-      q /= i;
+    errCml := errCml div FTileMapSize;
 
-    FRenderPsychoVisualQuality := q;
+    FRenderPsychoVisualQuality := EuclideanToPSNR(errCml);
 
   finally
     FRenderPrevFrameIndex := FRenderFrameIndex;
@@ -4336,6 +4349,7 @@ begin
     ini.WriteFloat('Load', 'Scaling', Scaling);
 
     ini.WriteInteger('MotionPredict', 'MotionPredictRadius', MotionPredictRadius);
+    ini.WriteInteger('MotionPredict', 'MotionPredictMaxBufferedFrames', MotionPredictMaxBufferedFrames);
 
     ini.WriteBool('GlobalTiling', 'GlobalTilingUseTargetPSNR', GlobalTilingUseTargetPSNR);
     ini.WriteFloat('GlobalTiling', 'GlobalTilingTargetPSNR', GlobalTilingTargetPSNR);
@@ -4376,6 +4390,7 @@ begin
     Scaling := ini.ReadFloat('Load', 'Scaling', Scaling);
 
     MotionPredictRadius := ini.ReadInteger('MotionPredict', 'MotionPredictRadius', MotionPredictRadius);
+    MotionPredictMaxBufferedFrames := ini.ReadInteger('MotionPredict', 'MotionPredictMaxBufferedFrames', MotionPredictMaxBufferedFrames);
 
     GlobalTilingUseTargetPSNR := ini.ReadBool('GlobalTiling', 'GlobalTilingUseTargetPSNR', GlobalTilingUseTargetPSNR);
     GlobalTilingTargetPSNR := ini.ReadFloat('GlobalTiling', 'GlobalTilingTargetPSNR', GlobalTilingTargetPSNR);
@@ -4422,8 +4437,8 @@ begin
   MotionPredictRadius := 32;
   MotionPredictMaxBufferedFrames := 3;
 
-  GlobalTilingUseTargetPSNR := False;
-  GlobalTilingTargetPSNR := 20.0;
+  GlobalTilingUseTargetPSNR := True;
+  GlobalTilingTargetPSNR := 30.0;
   GlobalTilingQualityBasedTileCount := 3.0;
   GlobalTilingTileCount := 0; // after GlobalTilingQualityBasedTileCount because has priority
 
@@ -4459,17 +4474,17 @@ begin
     RGBToYUV(rr, gg, bb, y, u, v, 1.0);
     assert(rng = YUVToRGB(y, u, v, 1.0), 'RGBToYUV/YUVToRGB mismatch');
 
-    RGBToYUV(rr, gg, bb, y, u, v, cYUVScale);
-    assert(rng = YUVToRGB(y, u, v, cYUVScale), 'RGBToYUV/YUVToRGB mismatch');
+    RGBToYUV(rr, gg, bb, y, u, v, 2.0);
+    assert(rng = YUVToRGB(y, u, v, 2.0), 'RGBToYUV/YUVToRGB mismatch');
 
     RGBToYUV(rr, gg, bb, y, u, v, 1.0);
-    RGBToYUV(rr, gg, bb, l, a, b, cYUVScale);
+    RGBToYUV(rr, gg, bb, l, a, b, 2.0);
     assert((l <> y) or (a <> u) or (b <> v), 'RGBToYUV scale failure');
 
     if (rr <> 0) and (gg <> 0) and (bb <> 0) then
     begin
       RGBToYUV(rr, gg, bb, y, u, v, 1.0);
-      assert(YUVToRGB(y, u, v, 1.0) <> YUVToRGB(y, u, v, cYUVScale), 'YUVToRGB scale failure');
+      assert(YUVToRGB(y, u, v, 1.0) <> YUVToRGB(y, u, v, 2.0), 'YUVToRGB scale failure');
     end;
 
     assert(SameValue(i, PSNRToEuclidean(EuclideanToPSNR(i)), PSNRToEuclidean(cBestPSNR - cPsyVEpsilon)), 'EuclideanToPSNR/PSNRToEuclidean mismatch');
@@ -4593,79 +4608,81 @@ begin
     FOnProgress(Self, FProgressSyncPos, FProgressSyncMax, FProgressSyncHG);
 end;
 
-function TTilingEncoder.GetFrameTileCount(AFrame: TFrame): Integer;
+type
+  TGRPSNRData = record
+    OnTileCount: Boolean;
+    MeanPSNR: Double;
+    UnpredictedTileCount: Integer;
+  end;
+
+  PGRPSNRData = ^TGRPSNRData;
+
+function TTilingEncoder.GRPSNR(x: Double; Data: Pointer): Double;
 var
-  Used: TByteDynArray;
-  sx, sy: Integer;
-  TMI: PTileMapItem;
-begin
-  Result := 0;
-
-  if Length(Tiles) = 0 then
-    Exit;
-
-  SetLength(Used, Length(Tiles));
-  FillByte(Used[0], Length(Tiles), 0);
-
-  for sy := 0 to FTileMapHeight - 1 do
-    for sx := 0 to FTileMapWidth - 1 do
-    begin
-      TMI := @AFrame.TileMap[sy, sx];
-      if TMI^.TileIdx >= 0 then
-        Used[TMI^.TileIdx] := 1;
-    end;
-
-  for sx := 0 to High(Used) do
-    Inc(Result, Used[sx]);
-end;
-
-function TTilingEncoder.GRTileCountFromPSNR(x: Double; Data: Pointer): Double;
-var
-  KFFirstFrameOnly: PBoolean absolute Data;
-  frmIdx, sy, sx, unpredictedTileCount: Integer;
+  GRData: PGRPSNRData absolute Data;
+  frmIdx, sy, sx: Integer;
+  errThres: Cardinal;
+  meanErr: UInt64;
   Frame: TFrame;
   TMI: PTileMapItem;
 begin
-  unpredictedTileCount := 0;
+  errThres := PSNRToEuclidean(x);
+
+  meanErr := 0;
+  GRData^.MeanPSNR := 0.0;
+  GRData^.UnpredictedTileCount := 0;
+
   for frmIdx := 0 to High(FFrames) do
   begin
     Frame := FFrames[frmIdx];
 
-    if Assigned(KFFirstFrameOnly) and KFFirstFrameOnly^ and (frmIdx <> Frame.PKeyFrame.StartFrame) then
-      Continue;
+    for sy := 0 to FTileMapHeight - 1 do
+      for sx := 0 to FTileMapWidth - 1 do
+      begin
+        TMI := @Frame.TileMap[sy, sx];
 
-    if Assigned(Frame.IntraReducedTiles) then
-    begin
-      Inc(unpredictedTileCount, Length(Frame.IntraReducedTiles));
-    end
-    else
-    begin
-      for sy := 0 to FTileMapHeight - 1 do
-        for sx := 0 to FTileMapWidth - 1 do
-        begin
-          TMI := @Frame.TileMap[sy, sx];
+        // trim high (unfit) Errors
+        TMI^.IsPredicted := TMI^.Error < errThres;
 
-          // trim bad (unfit) PSNRs
-          TMI^.IsPredicted := TMI^.PSNR > x;
-
-          inc(unpredictedTileCount, Ord(not TMI^.IsPredicted));
-        end;
-    end;
+        meanErr += IfThen(TMI^.IsPredicted, TMI^.Error);
+        Inc(GRData^.UnpredictedTileCount, Ord(not TMI^.IsPredicted));
+      end;
   end;
 
-  TransferTiles(unpredictedTileCount, Assigned(KFFirstFrameOnly) and KFFirstFrameOnly^);
+  meanErr := iDivDef(meanErr, Length(FFrames) * FTileMapSize - GRData^.UnpredictedTileCount, 0);
+  GRData^.MeanPSNR := EuclideanToPSNR(meanErr);
 
-  MakeTilesUnique(True);
+  WriteLn('Threshold: ', x:9:3, ', Mean PSNR: ', GRData^.MeanPSNR:9:3, ', TileCount: ', GRData^.UnpredictedTileCount:8);
 
-  Result := GetTileCount(True);
+  if GRData^.OnTileCount then
+    Result := GRData^.UnpredictedTileCount
+  else
+    Result := GRData^.MeanPSNR;
 end;
 
-function TTilingEncoder.SolveTileCount(ATileCount: Integer; AKFFirstFrameOnly: Boolean): Double;
+function TTilingEncoder.SolveTileCount(ATileCount: Integer): Integer;
+var
+  GRData: TGRPSNRData;
 begin
-  Result := GoldenRatioSearch(@GRTileCountFromPSNR, 0.0, cBestPSNR, ATileCount, cPsyVEpsilon, 0.5, @AKFFirstFrameOnly);
+  GRData.OnTileCount := True;
+  GRData.MeanPSNR := 0;
+  GRData.UnpredictedTileCount := 0;
+  GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, ATileCount, cPsyVEpsilon, 0.5, @GRData);
+  Result := GRData.UnpredictedTileCount;
 end;
 
-procedure TTilingEncoder.TransferTiles(ATileCount: Integer; AKFFirstFrameOnly: Boolean);
+function TTilingEncoder.SolveAvgPSNR(AAvgPSNR: Double): Integer;
+var
+  GRData: TGRPSNRData;
+begin
+  GRData.OnTileCount := False;
+  GRData.MeanPSNR := 0;
+  GRData.UnpredictedTileCount := 0;
+  GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, AAvgPSNR, cPsyVEpsilon, 0.01, @GRData);
+  Result := GRData.UnpredictedTileCount;
+end;
+
+procedure TTilingEncoder.TransferTiles;
 var
   doneFrameCount: Integer;
   newTIdx: Integer;
@@ -4724,8 +4741,7 @@ var
             end;
           end;
 
-        if not AKFFirstFrameOnly then
-          Write(InterLockedIncrement(doneFrameCount):8, ' / ', Length(FFrames):8, #13);
+        Write(InterLockedIncrement(doneFrameCount):8, ' / ', Length(FFrames):8, #13);
 
       finally
         Frame.ReleaseFrameTiles;
@@ -4733,29 +4749,30 @@ var
     end;
   end;
 
-  procedure DoTransferKFFF(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+var
+  frmIdx, tileCount: Integer;
+  Frame: TFrame;
+begin
+  tileCount := 0;
+  for frmIdx := 0 to High(FFrames) do
   begin
-    if not InRange(AIndex, 0, High(FKeyFrames)) then
-      Exit;
+    Frame := FFrames[frmIdx];
 
-    DoTransfer(FKeyFrames[AIndex].StartFrame, nil, nil);
-
-    Write(InterLockedIncrement(doneFrameCount):8, ' / ', Length(FKeyFrames):8, #13);
+    if Length(Frame.IntraReducedTiles) <> 0 then
+      tileCount += Length(Frame.IntraReducedTiles)
+    else
+      tileCount += Frame.GetUnpredictedTileCount;
   end;
 
-begin
   TTile.Array1DDispose(FTiles);
-  FTiles := TTile.Array1DNew(ATileCount, True, True);
+  FTiles := TTile.Array1DNew(tileCount, True, True);
 
   doneFrameCount := 0;
   newTIdx := 0;
 
-  if AKFFirstFrameOnly then
-    ProcThreadPool.DoParallelLocalProc(@DoTransferKFFF, 0, High(FKeyFrames))
-  else
-    ProcThreadPool.DoParallelLocalProc(@DoTransfer, 0, High(FFrames));
+  ProcThreadPool.DoParallelLocalProc(@DoTransfer, 0, High(FFrames));
 
-  Assert(newTIdx = ATileCount);
+  Assert(newTIdx = tileCount);
 end;
 
 procedure TTilingEncoder.DoPalettization;
@@ -5127,7 +5144,7 @@ begin
     end;
 
     CMItem^.Count := 0;
-    RGBToHSV(ToRGB(CMItem^.R, CMItem^.G, CMItem^.B), CMItem^.Hue, CMItem^.Sat, CMItem^.Val);
+    RGBToHSV(CMItem^.R, CMItem^.G, CMItem^.B, CMItem^.Hue, CMItem^.Sat, CMItem^.Val);
     CMPal.Add(CMItem);
   end;
 end;
@@ -5202,26 +5219,26 @@ begin
 
   // Dataset is ready
 
-  FTileDS := DS;
+  FTilingDataset := DS;
 
   // init for LogPSNR
 
   for kfIdx := 0 to High(FKeyFrames) do
   begin
-    FKeyFrames[kfIdx].ReconstructPSNRCml := 0;
+    FKeyFrames[kfIdx].ReconstructErrCml := 0;
     FKeyFrames[kfIdx].ReconstructFramesLeft := FKeyFrames[kfIdx].FrameCount;
   end;
 end;
 
 procedure TTilingEncoder.FinishReconstruct;
 begin
-  if Length(FTileDS^.Dataset) > 0 then
-    ann_kdtree_short_destroy(FTileDS^.ANN);
-  FTileDS^.ANN := nil;
-  SetLength(FTileDS^.Dataset, 0);
-  Dispose(FTileDS);
+  if Length(FTilingDataset^.Dataset) > 0 then
+    ann_kdtree_short_destroy(FTilingDataset^.ANN);
+  FTilingDataset^.ANN := nil;
+  SetLength(FTilingDataset^.Dataset, 0);
+  Dispose(FTilingDataset);
 
-  FTileDS := nil;
+  FTilingDataset := nil;
 end;
 
 procedure TTilingEncoder.ReindexTiles(OnRGBPixels: Boolean);
@@ -5297,6 +5314,11 @@ begin
       end;
   end;
 
+  // cleanup
+
+  for tIdx := 0 to High(FTiles) do
+    FTiles[tIdx]^.TmpIndex := -1;
+
   WriteLn('ReindexTiles: ', Length(Tiles):12, ' / ', Length(FFrames) * FTileMapSize:12,  ' final tiles, (', Length(Tiles) * 100.0 / (Length(FFrames) * FTileMapSize):4:3, '%)');
 end;
 
@@ -5320,7 +5342,7 @@ end;
 
 procedure TTilingEncoder.MakeTilesUnique(OnRGBPixels: Boolean);
 var
-  i, pos, firstSameIdx: Int64;
+  sortIdx, pos, firstSameIdx: Int64;
   sortList: TFPList;
   sameIdx: array of Int64;
 
@@ -5328,16 +5350,17 @@ var
   var
     j: Int64;
   begin
-    if i - firstSameIdx >= 2 then
+    if sortIdx - firstSameIdx >= 2 then
     begin
-      for j := firstSameIdx to i - 1 do
+      for j := firstSameIdx to sortIdx - 1 do
         sameIdx[j - firstSameIdx] := PTile(sortList[j])^.TmpIndex;
-      MergeTiles(sameIdx, i - firstSameIdx, sameIdx[0], nil, nil);
+      MergeTiles(sameIdx, sortIdx - firstSameIdx, sameIdx[0], nil, nil);
     end;
-    firstSameIdx := i;
+    firstSameIdx := sortIdx;
   end;
 
 var
+  tIdx: Integer;
   PixelLSC: TListSortCompare;
 begin
   PixelLSC := @CompareTilePalPixels;
@@ -5354,11 +5377,11 @@ begin
 
     sortList.Count := Length(FTiles);
     pos := 0;
-    for i := 0 to High(FTiles) do
-      if FTiles[i]^.Active then
+    for tIdx := 0 to High(FTiles) do
+      if FTiles[tIdx]^.Active then
       begin
-        sortList[pos] := FTiles[i];
-        PTile(sortList[pos])^.TmpIndex := i;
+        sortList[pos] := FTiles[tIdx];
+        PTile(sortList[pos])^.TmpIndex := tIdx;
         Inc(pos);
       end;
     sortList.Count := pos;
@@ -5368,12 +5391,17 @@ begin
     // merge exactly similar tiles (so, consecutive after prev code)
 
     firstSameIdx := 0;
-    for i := 1 to sortList.Count - 1 do
-      if PixelLSC(sortList[i - 1], sortList[i]) <> 0 then
+    for sortIdx := 1 to sortList.Count - 1 do
+      if PixelLSC(sortList[sortIdx - 1], sortList[sortIdx]) <> 0 then
         DoOneMerge;
 
-    i := sortList.Count;
+    sortIdx := sortList.Count;
     DoOneMerge;
+
+    // cleanup
+
+    for tIdx := 0 to High(FTiles) do
+      FTiles[tIdx]^.TmpIndex := -1;
 
   finally
     sortList.Free;
@@ -6064,7 +6092,7 @@ begin
   FillChar(Header, SizeOf(Header), 0);
   Header.FourCC := 'GTMv';
   Header.RIFFSize := SizeOf(Header) - SizeOf(Header.FourCC) - SizeOf(Header.RIFFSize);
-  Header.EncoderVersion := 4; // 2 -> fixed blending extents; 3 -> *AddlBlendTileIdx; 4 -> PredictMotion;
+  Header.EncoderVersion := 5; // 2 -> fixed blending extents; 3 -> *AddlBlendTileIdx; 4 -> PredictMotion; 5 -> Blend
   Header.FramePixelWidth := FScreenWidth;
   Header.FramePixelHeight := FScreenHeight;
   Header.KFCount := Length(FKeyFrames);
@@ -6182,7 +6210,7 @@ begin
             Header.KFMaxBytesPerSec := max(Header.KFMaxBytesPerSec, round(KFSize * FFramesPerSecond / KFCount));
           Header.AverageBytesPerSec += KFSize;
 
-          WriteLn('KF: ', KeyFrame.StartFrame:8, ' FCnt: ', KFCount:4, ' Raw: ', KFInfo[kfIdx].RawSize:8, ' Written: ', KFSize:8, ' Bitrate: ', (KFSize / 1024.0 * 8.0 / KFCount):8:2, ' kbpf   (', (KFSize / 1024.0 * 8.0 / KFCount * FFramesPerSecond):8:2, ' kbps)');
+          WriteLn('KF: ', KeyFrame.StartFrame:8, ', FCnt: ', KFCount:4, ', Raw: ', KFInfo[kfIdx].RawSize / 1024:10:3, ' KB', ', Written: ', KFSize / 1024:10:3, ' KB', ', Bitrate: ', (KFSize / 1024.0 * 8.0 / KFCount):8:2, ' kbpf   (', (KFSize / 1024.0 * 8.0 / KFCount * FFramesPerSecond):8:2, ' kbps)');
 
           ZStream.Clear;
         end;
@@ -6201,7 +6229,7 @@ begin
 
   StreamSize := AStream.Size - StartPos;
 
-  WriteLn('Written: ', StreamSize:12, ' Bitrate: ', (StreamSize / 1024.0 * 8.0 / Length(FFrames)):8:2, ' kbpf  (', (StreamSize / 1024.0 * 8.0 / Length(FFrames) * FFramesPerSecond):8:2, ' kbps)');
+  WriteLn('Written: ', StreamSize / 1024:10:3, ' KBytes', ', Bitrate: ', (StreamSize / 1024.0 * 8.0 / Length(FFrames)):8:2, ' kbpf  (', (StreamSize / 1024.0 * 8.0 / Length(FFrames) * FFramesPerSecond):8:2, ' kbps)');
 end;
 
 constructor TTilingEncoder.Create;
@@ -6259,7 +6287,7 @@ begin
       Dither;
     esReconstruct:
       Reconstruct;
-    esPredictMotion:
+    esPredict:
       PredictMotion;
     esReindex:
       Reindex;

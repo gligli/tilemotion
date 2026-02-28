@@ -237,7 +237,7 @@ end;
 
 procedure TMainForm.btnPredictMotionClick(Sender: TObject);
 begin
-  FTilingEncoder.Run(esPredictMotion);
+  FTilingEncoder.Run(esPredict);
   UpdateVideo(nil);
 end;
 
@@ -412,7 +412,7 @@ begin
   if OkStep(esLoad) then
     btnGlobalLoadClick(nil);
 
-  if OkStep(esPredictMotion) then
+  if OkStep(esPredict) then
     btnPredictMotionClick(nil);
 
   if OkStep(esReduce) then

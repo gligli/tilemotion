@@ -27,7 +27,8 @@ const
 
   cLumaDiv = cRedMul + cGreenMul + cBlueMul;
 
-  cBitsPerComp = 8;
+  cBitsPerCompBits = 3;
+  cBitsPerComp = 1 shl cBitsPerCompBits;
   cVecInvWidth = 16;
   cTileWidthBits = 3;
   cTileWidth = 1 shl cTileWidthBits;
@@ -132,7 +133,7 @@ type
   { TDCTCribbleState }
 
   TDCTCribbleState = packed record
-    Error: Integer;
+    Error: Cardinal;
     X, Y: Integer;
     DX, DY: Integer;
     oxmn, oxmx: Integer;
@@ -144,6 +145,10 @@ type
 
   TEvalFunc = function(const arg: TDoubleDynArray; data: Pointer): Double of object;
   TGRSEvalFunc = function(x: Double; Data: Pointer): Double of object;
+
+  TGRSResult = record
+    X, Y: Double;
+  end;
 
   TDCTScalar = SmallInt;
   PDCTScalar = ^TDCTScalar;
@@ -166,11 +171,11 @@ function SwapRB(c: Integer): Integer; inline;
 function ToRGB(r, g, b: Byte): Integer; inline;
 procedure FromRGB(col: Integer; out r, g, b: Integer); inline; overload;
 procedure FromRGB(col: Integer; out r, g, b: Byte); inline; overload;
-function ToLuma(r, g, b: Byte): Integer; inline;
+function ToLuma(r, g, b: Integer): Integer; inline;
 function ToBW(col: Integer): Integer;
 function HSVToRGB(h, s, v: Byte): Integer;
-procedure RGBToHSV(col: Integer; out h, s, v: Byte); overload;
-procedure RGBToHSV(col: Integer; out h, s, v: TFloat); overload;
+procedure RGBToHSV(r, g, b: Byte; out h, s, v: Byte); overload;
+procedure RGBToHSV(r, g, b: Byte; out h, s, v: TFloat); overload;
 procedure RGBToYUV(col: Integer; out y, u, v: TFloat; scl: TFloat);
 procedure RGBToYUV(r, g, b: Byte; out y, u, v: TFloat; scl: TFloat);
 procedure RGBToLAB(r, g, b: TFloat; out ol, oa, ob: TFloat);
@@ -197,9 +202,8 @@ procedure CribbleEuclideanDCTPtr_asm(cur_rcx: PDCTScalar; prev_rdx: PDCTScalar; 
 generic function DCTInner<T>(pCpn, pLut: T; count: Integer): Double;
 function DCTInner_asm(pCpn_rcx, pLut_rdx: PFloat): Double; register; assembler;
 function EqualQualityTileCount(tileCount: Double): Integer;
-function GoldenRatioSearch(Func: TGRSEvalFunc; MinX, MaxX: Double; ObjectiveY: Double;
-  EpsilonX, EpsilonY: Double; Data: Pointer): Double;
-function EuclideanToPSNR(AEuclidean: Cardinal): Double;
+function GoldenRatioSearch(Func: TGRSEvalFunc; MinX, MaxX: Double; ObjectiveY: Double; EpsilonX, EpsilonY: Double; Data: Pointer): TGRSResult;
+function EuclideanToPSNR(AEuclidean: Double): Double;
 function PSNRToEuclidean(APSNR: Double): Cardinal;
 
 implementation
@@ -289,7 +293,7 @@ begin
   b := (col shr 16) and $ff;
 end;
 
-function ToLuma(r, g, b: Byte): Integer; inline;
+function ToLuma(r, g, b: Integer): Integer; inline;
 begin
   Result := r * cRedMul + g * cGreenMul + b * cBlueMul;
 end;
@@ -305,29 +309,25 @@ begin
 end;
 
 // from https://www.delphipraxis.net/157099-fast-integer-rgb-hsl.html
-procedure RGBToHSV(col: Integer; out h, s, v: Byte);
-var
-  rr, gg, bb: Integer;
+procedure RGBToHSV(r, g, b: Byte; out h, s, v: Byte);
 
   function RGBMaxValue: Integer;
   begin
-    Result := rr;
-    if (Result < gg) then Result := gg;
-    if (Result < bb) then Result := bb;
+    Result := r;
+    if (Result < g) then Result := g;
+    if (Result < b) then Result := b;
   end;
 
   function RGBMinValue : Integer;
   begin
-    Result := rr;
-    if (Result > gg) then Result := gg;
-    if (Result > bb) then Result := bb;
+    Result := r;
+    if (Result > g) then Result := g;
+    if (Result > b) then Result := b;
   end;
 
 var
   Delta, mx, mn, hh, ss, ll: Integer;
 begin
-  FromRGB(col, rr, gg, bb);
-
   mx := RGBMaxValue;
   mn := RGBMinValue;
 
@@ -339,12 +339,12 @@ begin
     Delta := ll - mn;
     ss := MulDiv(Delta, 255, ll);
 
-    if (rr = ll) then
-      hh := MulDiv(42, gg - bb, Delta)
-    else if (gg = ll) then
-      hh := MulDiv(42, bb - rr, Delta) + 84
-    else if (bb = ll) then
-      hh := MulDiv(42, rr - gg, Delta) + 168;
+    if (r = ll) then
+      hh := MulDiv(42, g - b, Delta)
+    else if (g = ll) then
+      hh := MulDiv(42, b - r, Delta) + 84
+    else if (b = ll) then
+      hh := MulDiv(42, r - g, Delta) + 168;
 
     hh := hh mod 252;
   end;
@@ -390,12 +390,12 @@ begin
   end;
 end;
 
-procedure RGBToHSV(col: Integer; out h, s, v: TFloat);
+procedure RGBToHSV(r, g, b: Byte; out h, s, v: TFloat);
 var
   bh, bs, bv: Byte;
 begin
   bh := 0; bs := 0; bv := 0;
-  RGBToHSV(col, bh, bs, bv);
+  RGBToHSV(r, g, b, bh, bs, bv);
   h := bh / 255.0;
   s := bs / 255.0;
   v := bv / 255.0;
@@ -1194,14 +1194,14 @@ begin
 end;
 
 
-function GoldenRatioSearch(Func: TGRSEvalFunc; MinX, MaxX: Double; ObjectiveY: Double;
-  EpsilonX, EpsilonY: Double; Data: Pointer): Double;
+function GoldenRatioSearch(Func: TGRSEvalFunc; MinX, MaxX: Double; ObjectiveY: Double; EpsilonX, EpsilonY: Double; Data: Pointer): TGRSResult;
 var
   x, y: Double;
 begin
   if SameValue(MinX, MaxX, EpsilonX) then
   begin
-    Result := MinX;
+    Result.X := MinX;
+    Result.Y := Func(MinX, Data);
     Exit;
   end;
 
@@ -1212,7 +1212,7 @@ begin
 
   y := Func(x, Data);
 
-  WriteLn('X: ', x:15:6, ' Y: ', y:15:6, ' Mini: ', MinX:15:6, ' Maxi: ', MaxX:15:6);
+  //WriteLn('X: ', x:15:6, ' Y: ', y:15:6, ' Mini: ', MinX:15:6, ' Maxi: ', MaxX:15:6);
 
   case CompareValue(y, ObjectiveY, EpsilonY) of
     LessThanValue:
@@ -1220,11 +1220,12 @@ begin
     GreaterThanValue:
       Result := GoldenRatioSearch(Func, MinX, x, ObjectiveY, EpsilonX, EpsilonY, Data);
   else
-      Result := x;
+      Result.X := x;
+      Result.Y := y;
   end;
 end;
 
-function EuclideanToPSNR(AEuclidean: Cardinal): Double;
+function EuclideanToPSNR(AEuclidean: Double): Double;
 begin
   Result := AEuclidean * (1 / cTileDCTSize);
   Result := cBestPSNR - 10.0 * Log10(Max(1.0, Result));
