@@ -2260,7 +2260,7 @@ procedure TTilingEncoder.JPEG;
     end;
 
     if FGlobalTilingUseTargetPSNR then
-      TilesJPEG.CompressJPEG(Self, FReconstructPSNR)
+      TilesJPEG.CompressJPEG(Self, FGlobalTilingTargetPSNR)
     else
       TilesJPEG.CompressJPEG(FJPEGQuality);
   end;
