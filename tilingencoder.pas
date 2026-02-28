@@ -316,6 +316,7 @@ type
     ReconstructFramesLeft: Integer;
     ReconstructErrCml: UInt64;
     ReconstructLock: TSpinlock;
+    ReconstructPSNR: Double;
 
     LocalTiles: PTileDynArray;
     TilesJPEG: TTilesJPEG;
@@ -340,6 +341,7 @@ type
 
     FCS: TRTLCriticalSection;
     FKeyFramesLeft: Integer;
+    FReconstructPSNR: Double;
 
     FGamma: array[0..1] of TFloat;
     FGammaCorLut: array[-1..1, 0..High(Byte)] of TFloat;
@@ -967,23 +969,23 @@ end;
 procedure TKeyFrame.LogPSNR;
 var
   kfIdx: Integer;
-  tilePsnr, errCml: Double;
+  errCml: UInt64;
 begin
   InterLockedDecrement(ReconstructFramesLeft);
   if ReconstructFramesLeft <= 0 then
   begin
-    tilePsnr := EuclideanToPSNR(ReconstructErrCml / (Encoder.FTileMapSize * FrameCount));
-    WriteLn('KF: ', StartFrame:8, ' PSNR-HVS: ', tilePsnr:12:6, ' (by tile)');
+    ReconstructPSNR := EuclideanToPSNR(ReconstructErrCml / (Encoder.FTileMapSize * FrameCount));
+    WriteLn('KF: ', StartFrame:8, ' PSNR-HVS: ', ReconstructPSNR:12:6, ' (by tile)');
 
     InterLockedDecrement(Encoder.FKeyFramesLeft);
     if Encoder.FKeyFramesLeft <= 0 then
     begin
-      errCml := 0.0;
+      errCml := 0;
       for kfIdx := 0 to High(Encoder.FKeyFrames) do
         errCml += Encoder.FKeyFrames[kfIdx].ReconstructErrCml;
 
-      tilePsnr := EuclideanToPSNR(errCml / (Encoder.FTileMapSize * Length(Encoder.FFrames)));
-      WriteLn('All:', Length(Encoder.FFrames):8, ' PSNR-HVS: ', tilePsnr:12:6, ' (by tile)');
+      Encoder.FReconstructPSNR := EuclideanToPSNR(errCml / (Encoder.FTileMapSize * Length(Encoder.FFrames)));
+      WriteLn('All:', Length(Encoder.FFrames):8, ' PSNR-HVS: ', Encoder.FReconstructPSNR:12:6, ' (by tile)');
     end;
   end;
 end;
@@ -1150,7 +1152,7 @@ begin
     JPGWriter.ChromaSubsampling := False;
     JPGWriter.WriteMarkers := False;
 
-    JPGReader.Performance := jpBestSpeed;
+    JPGReader.Performance := jpBestQuality;
 
     imgPos := 0;
     for iMap := 0 to High(TilesToJPEGRef) do
@@ -2256,7 +2258,7 @@ procedure TTilingEncoder.JPEG;
     end;
 
     if FGlobalTilingUseTargetPSNR then
-      TilesJPEG.CompressJPEG(Self, FGlobalTilingTargetPSNR)
+      TilesJPEG.CompressJPEG(Self, FReconstructPSNR)
     else
       TilesJPEG.CompressJPEG(FJPEGQuality);
   end;
