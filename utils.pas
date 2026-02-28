@@ -132,7 +132,7 @@ type
   { TDCTCribbleState }
 
   TDCTCribbleState = packed record
-    Error: Integer;
+    Error: Cardinal;
     X, Y: Integer;
     DX, DY: Integer;
     oxmn, oxmx: Integer;
