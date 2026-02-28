@@ -107,11 +107,11 @@ type
 
   { TTile }
 
-  TTile = packed record // /!\ update TTileHelper.CopyFrom each time this structure is changed /!\
+  TTile = packed record
     UseCount: Cardinal;
     JPEGError: Cardinal;
-    MapIndex, TmpIndex, MergeIndex: Integer;
-    Flags: set of (tfActive, tfHMirror_Initial, tfVMirror_Initial, tfLocalToKeyFrame);
+    TmpIndex, MergeIndex, MapTileIndex, MapKFIndex: Integer;
+    Flags: set of (tfActive, tfHMirror_Initial, tfVMirror_Initial, tfFinalized);
     Pixels: TCpnPixelsB;
   end;
 
@@ -121,11 +121,11 @@ type
   private
     function GetActive: Boolean;
     function GetHMirror_Initial: Boolean;
-    function GetLocalToKeyFrame: Boolean;
+    function GetFinalized: Boolean;
     function GetVMirror_Initial: Boolean;
     procedure SetActive(AValue: Boolean);
     procedure SetHMirror_Initial(AValue: Boolean);
-    procedure SetLocalToKeyFrame(AValue: Boolean);
+    procedure SetFinalized(AValue: Boolean);
     procedure SetVMirror_Initial(AValue: Boolean);
   public
 
@@ -143,7 +143,7 @@ type
     function CompareHSVPixelsTo(const ATile: TTile): Integer;
 
     property Active: Boolean read GetActive write SetActive;
-    property LocalToKeyFrame: Boolean read GetLocalToKeyFrame write SetLocalToKeyFrame;
+    property Finalized: Boolean read GetFinalized write SetFinalized;
     property HMirror_Initial: Boolean read GetHMirror_Initial write SetHMirror_Initial;
     property VMirror_Initial: Boolean read GetVMirror_Initial write SetVMirror_Initial;
   end;
@@ -726,9 +726,9 @@ begin
   Result := tfHMirror_Initial in Flags;
 end;
 
-function TTileHelper.GetLocalToKeyFrame: Boolean;
+function TTileHelper.GetFinalized: Boolean;
 begin
-  Result := tfLocalToKeyFrame in Flags;
+  Result := tfFinalized in Flags;
 end;
 
 function TTileHelper.GetVMirror_Initial: Boolean;
@@ -752,12 +752,12 @@ begin
     Flags -= [tfHMirror_Initial];
 end;
 
-procedure TTileHelper.SetLocalToKeyFrame(AValue: Boolean);
+procedure TTileHelper.SetFinalized(AValue: Boolean);
 begin
   if AValue then
-    Flags += [tfLocalToKeyFrame]
+    Flags += [tfFinalized]
   else
-    Flags -= [tfLocalToKeyFrame];
+    Flags -= [tfFinalized];
 end;
 
 procedure TTileHelper.SetVMirror_Initial(AValue: Boolean);
@@ -1080,7 +1080,7 @@ begin
   for tIdx := 0 to High(TilesToJPEGRef) do
   begin
     JT := TilesToJPEGRef[tIdx];
-    T := TilesRef[JT^.MapIndex];
+    T := TilesRef[JT^.MapTileIndex];
 
     Encoder.ConvertToCpnPixels(JT^, False, False, CpnPixels);
     Encoder.ComputePsyVisFeatures(CpnPixels, pvsWeightedDCT, JPEGDCT);
@@ -1157,7 +1157,7 @@ begin
     imgPos := 0;
     for iMap := 0 to High(TilesToJPEGRef) do
     begin
-      T := TilesRef[TilesToJPEGRef[iMap]^.MapIndex];
+      T := TilesRef[TilesToJPEGRef[iMap]^.MapTileIndex];
 
       iy := 0;
       for ty := 0 to cTileWidth - 1 do
@@ -1188,7 +1188,7 @@ begin
     end;
 
 {$if defined(DEBUG) or defined(TEST)}
-    Img.SaveToFile(Format('JPEG_%d.jpg', [TilesToJPEGRef[0]^.MapIndex]), JPGWriter);
+    Img.SaveToFile(Format('JPEG_%d.jpg', [TilesToJPEGRef[0]^.MapTileIndex]), JPGWriter);
 {$endif}
 
     Img.SaveToStream(JPEG, JPGWriter);
@@ -1725,8 +1725,10 @@ begin
 
     FT^.Active := True;
     FT^.UseCount := 1;
-    FT^.MapIndex := -1;
     FT^.TmpIndex := -1;
+    FT^.MergeIndex := -1;
+    FT^.MapTileIndex := -1;
+    FT^.MapKFIndex := -1;
     FT^.HMirror_Initial := HMirror;
     FT^.VMirror_Initial := VMirror;
 
@@ -3234,12 +3236,18 @@ procedure TTilingEncoder.Render;
     if InRange(ATileIdx, 0, High(FTiles)) then
     begin
       Result := FTiles[ATileIdx];
-      if FRenderUseJPEG and (Result^.MapIndex >= 0) then
+      if FRenderUseJPEG and Result^.Finalized then
       begin
-        if Result^.LocalToKeyFrame then
-          Result := FFrames[FRenderFrameIndex].PKeyFrame.LocalTiles[Result^.MapIndex]
+        if InRange(Result^.MapKFIndex, 0, High(FKeyFrames)) then
+        begin
+          if InRange(Result^.MapTileIndex, 0, High(FKeyFrames[Result^.MapKFIndex].LocalTiles)) then
+            Result := FKeyFrames[Result^.MapKFIndex].LocalTiles[Result^.MapTileIndex];
+        end
         else
-          Result := FGlobalTiles[Result^.MapIndex];
+        begin
+          if InRange(Result^.MapTileIndex, 0, High(FGlobalTiles)) then
+            Result := FGlobalTiles[Result^.MapTileIndex];
+        end;
       end;
     end;
   end;
@@ -3342,16 +3350,19 @@ begin
         begin
           tilePtr := GetFinalTile(TMI^.TileIdx);
 
-          hmir := TMI^.HMirror;
-          vmir := TMI^.VMirror;
-
-          if not FRenderMirrored then
+          if Assigned(tilePtr) then
           begin
-            hmir := False;
-            vmir := False;
-          end;
+            hmir := TMI^.HMirror;
+            vmir := TMI^.VMirror;
 
-          DrawTile(FRenderFrameBuffer.GetBuffer, tilePtr, sy, sx, hmir, vmir, False);
+            if not FRenderMirrored then
+            begin
+              hmir := False;
+              vmir := False;
+            end;
+
+            DrawTile(FRenderFrameBuffer.GetBuffer, tilePtr, sy, sx, hmir, vmir, False);
+          end;
         end
         else
         begin
@@ -3453,7 +3464,7 @@ begin
 
             if Assigned(tilePtr) then
             begin
-
+              hmir := tilePtr^.HMirror_Initial;
               vmir := tilePtr^.VMirror_Initial;
 
               if not FRenderMirrored then
@@ -4186,7 +4197,7 @@ begin
   // init
 
   for tIdx := 0 to High(FTiles) do
-    FTiles[tIdx]^.MapIndex := -1;
+    FTiles[tIdx]^.MapKFIndex := -1;
 
   // tag tiles with unique KF index
 
@@ -4203,10 +4214,10 @@ begin
         T := FTiles[tIdx];
         kfIdx := FFrames[frmIdx].PKeyFrame.Index;
 
-        if T^.MapIndex < 0 then
-          T^.MapIndex := kfIdx
-        else if T^.MapIndex <> kfIdx then
-          T^.MapIndex := High(Integer);
+        if T^.MapKFIndex < 0 then
+          T^.MapKFIndex := kfIdx
+        else if T^.MapKFIndex <> kfIdx then
+          T^.MapKFIndex := High(Integer);
       end;
 
   // count tiles
@@ -4216,7 +4227,7 @@ begin
   for tIdx := 0 to High(FTiles) do
   begin
     T := FTiles[tIdx];
-    kfIdx := T^.MapIndex;
+    kfIdx := T^.MapKFIndex;
 
     if kfIdx >= 0 then
     begin
@@ -4244,7 +4255,7 @@ begin
   for tIdx := 0 to High(FTiles) do
   begin
     T := FTiles[tIdx];
-    kfIdx := T^.MapIndex;
+    kfIdx := T^.MapKFIndex;
 
     if kfIdx >= 0 then
     begin
@@ -4253,10 +4264,12 @@ begin
         FinalT := FKeyFrames[kfIdx].LocalTiles[perKFPos[kfIdx]];
         FinalT^.CopyFrom(T^);
 
-        T^.MapIndex := perKFPos[kfIdx];
-        FinalT^.MapIndex := tIdx;
-        T^.LocalToKeyFrame := True;
-        FinalT^.LocalToKeyFrame := True;
+        T^.MapTileIndex := perKFPos[kfIdx];
+        T^.MapKFIndex := kfIdx;
+        T^.Finalized := True;
+        FinalT^.MapTileIndex := tIdx;
+        FinalT^.MapKFIndex := kfIdx;
+        FinalT^.Finalized := True;
 
         Inc(perKFPos[kfIdx]);
       end
@@ -4265,10 +4278,12 @@ begin
         FinalT := FGlobalTiles[globalPos];
         FinalT^.CopyFrom(T^);
 
-        T^.MapIndex := globalPos;
-        FinalT^.MapIndex := tIdx;
-        T^.LocalToKeyFrame := False;
-        FinalT^.LocalToKeyFrame := False;
+        T^.MapTileIndex := globalPos;
+        T^.MapKFIndex := -1;
+        T^.Finalized := True;
+        FinalT^.MapTileIndex := tIdx;
+        FinalT^.MapKFIndex := -1;
+        FinalT^.Finalized := True;
 
         Inc(globalPos);
       end;
@@ -4604,6 +4619,7 @@ var
 
   procedure DoTMI(const TMI: TTileMapItem);
   var
+    T: PTile;
     finalTileIdx: Integer;
     attrs: Word;
     isGlobalTile, isLongTile, isLongOffsets: Boolean;
@@ -4634,10 +4650,11 @@ var
     end
     else
     begin
-      finalTileIdx := FTiles[TMI.TileIdx]^.MapIndex;
-      isGlobalTile := finalTileIdx < Length(FGlobalTiles);
-      if not isGlobalTile then
-        finalTileIdx -= Length(FGlobalTiles);;
+      T := FTiles[TMI.TileIdx];
+
+      Assert(T^.Finalized);
+      finalTileIdx := T^.MapTileIndex;
+      isGlobalTile := T^.MapKFIndex < 0;
 
       isLongTile := finalTileIdx > High(Word);
 
