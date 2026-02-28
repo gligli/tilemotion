@@ -42,7 +42,6 @@ type
     FQuality: TMyJPEGCompressionQuality;
 
     FError: jpeg_error_mgr;
-    FProgressMgr: TFPJPEGProgressManager;
   protected
     procedure InternalWrite(Str: TStream; Img: TFPCustomImage); override;
   public
@@ -93,15 +92,6 @@ begin
   CurInfo^.err^.msg_code := 0;
 end;
 
-var
-  jpeg_std_error: jpeg_error_mgr;
-
-procedure ProgressCallback(CurInfo: j_common_ptr);
-begin
-  if CurInfo=nil then exit;
-  // ToDo
-end;
-
 { TMyWriterJPEG }
 
 procedure TMyWriterJPEG.InternalWrite(Str: TStream; Img: TFPCustomImage);
@@ -112,13 +102,18 @@ var
   procedure InitWriting;
   begin
     FillChar(FInfo, sizeof(FInfo), 0);
-    FError := jpeg_std_error;
+
+    with FError do begin
+      error_exit:=@JPEGError;
+      emit_message:=@EmitMessage;
+      output_message:=@OutputMessage;
+      format_message:=@FormatMessage;
+      reset_error_mgr:=@ResetErrorMgr;
+    end;
+
     FInfo.err := jerror.jpeg_std_error(FError);
 
     jpeg_create_compress(@FInfo);
-    FProgressMgr.pub.progress_monitor := @ProgressCallback;
-    FProgressMgr.instance := Self;
-    FInfo.progress := @FProgressMgr.pub;
   end;
 
   procedure SetDestination;
@@ -240,7 +235,7 @@ end;
 constructor TMyWriterJPEG.Create;
 begin
   inherited Create;
-  FQuality:=75;
+  FQuality := 75;
   FGamma := 1.0;
   FChromaSubsampling := True;
   FWriteMarkers := True;
@@ -251,13 +246,4 @@ begin
   inherited Destroy;
 end;
 
-initialization
-  with jpeg_std_error do begin
-    error_exit:=@JPEGError;
-    emit_message:=@EmitMessage;
-    output_message:=@OutputMessage;
-    format_message:=@FormatMessage;
-    reset_error_mgr:=@ResetErrorMgr;
-  end;
-  //ImageHandlers.RegisterImageWriter ('JPEG graphics', 'jpg;jpeg', TFPWriterJPEG);
 end.

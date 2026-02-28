@@ -1150,7 +1150,7 @@ begin
     JPGWriter.ChromaSubsampling := False;
     JPGWriter.WriteMarkers := False;
 
-    JPGReader.Performance := jpBestQuality;
+    JPGReader.Performance := jpBestSpeed;
 
     imgPos := 0;
     for iMap := 0 to High(TilesToJPEGRef) do
