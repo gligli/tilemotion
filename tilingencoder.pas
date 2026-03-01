@@ -1640,8 +1640,10 @@ procedure TFrame.Predict(ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBu
     end
     else
     begin
-      if ABackBufferOffset <= CGTMBlendBufferCount then
-        PredictTileBlending(ABackBufferOffset = 1, dy, dx, TMI, CurDCT, AFrameBuffer);
+      if ABackBufferOffset = CGTMBlendBufferCount then
+        PredictTileBlending(False, dy, dx, TMI, CurDCT, AFrameBuffer)
+      else if (ABackBufferOffset = 1) and (Index = PKeyFrame.StartFrame + 1) then
+        PredictTileBlending(True, dy, dx, TMI, CurDCT, AFrameBuffer);
       PredictTileMotion(ARadius, ABackBufferOffset, dy, dx, TMI, CurDCT, ADCTBuffer.GetBuffer(-ABackBufferOffset));
     end;
   end;
