@@ -56,7 +56,7 @@ type
   //
   // PredictedTileOffsets6x6:          data -> none; commandBits -> y offset (6 bits); x offset (6 bits)
   // PredictedTileOffsets8x8:          data -> y offset (8 bits); x offset (8 bits); commandBits -> none (10 bits); backbuffer offset (2 bits)
-  // PredictedFm1Fm2Blend6x6:          data -> none; commandBits -> frame -2 weight (6 bits); frame -1 weight (6 bits)
+  // PredictedFm1Fm2Blend8x4:          data -> none; commandBits -> alpha additive weight (256 + w) (4 bits); frame -2 to frame -1 alpha (8 bits)
   // GlobalTileIdx16PalIdx10:          data -> global tile index (16 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
   // KeyFrmTileIdx16PalIdx10:          data -> keyframe tile index (16 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
   // GlobalTileIdx32PalIdx10:          data -> global tile index (32 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
@@ -76,7 +76,7 @@ type
   TGTMCommand = (
     gtPredictedTileOffsets6x6 = 0,
     gtPredictedTileOffsets8x8 = 1,
-    gtPredictedFm1Fm2Blend6x6 = 2,
+    gtPredictedFm1Fm2Blend8x4 = 2,
     gtGlobalTileIdx16PalIdx10 = 3,
     gtKeyFrmTileIdx16PalIdx10 = 4,
     gtGlobalTileIdx32PalIdx10 = 5,
@@ -5911,7 +5911,7 @@ var
     begin
       if TMI.IsBlended then
       begin
-        DoCmd(gtPredictedFm1Fm2Blend6x6, ((PByte(@TMI.Attrs.BlendWeight)^ and CGTMBlendWeightMax) shl CGTMBlendAlphaShift) or TMI.Attrs.BlendAlpha);
+        DoCmd(gtPredictedFm1Fm2Blend8x4, ((PByte(@TMI.Attrs.BlendWeight)^ and 15) shl 8) or TMI.Attrs.BlendAlpha);
       end
       else
       begin
