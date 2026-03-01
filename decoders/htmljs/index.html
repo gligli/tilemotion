@@ -6,7 +6,8 @@
     <style>
     body {
       font-family: "Helvetica", sans-serif;
-      background-color: #888;
+      background-color: #2B2A33;
+      color: #FFFFFF;
       margin: 0px;
       padding: 0px;
       display: block;
@@ -18,18 +19,22 @@
       margin: auto;
       display: block;
     }
-	
-	.zoomed {
+    
+    a {
+      color: #84829A;
+    }
+    
+    .zoomed {
       height: 90vh; 
     }
-	
+    
     </style>
   </head>
   <body>
     <h4>GliGli's TileMotion Live Demo (drop a GTM file into the frame to play the contents)</h4>
     <canvas id="frame" width="640" height="360"></canvas><br/>
     <input type="checkbox" id="play_loop" checked><label for="play_loop">Play video as loop</label>
-    <input type="checkbox" id="zoom"><label for="zoom">Zoomed</label><br/>
+    <input type="checkbox" id="zoom"><label for="zoom">Zoomed</label><br/><br/>
     <a href="https://github.com/gligli/tilemotion">Source code on GitHub</a>
     <script src="./lzma.js"></script>
     <script src="./lzma.shim.js"></script>
@@ -53,11 +58,11 @@
       document.querySelector('#play_loop').addEventListener('click', () => {
         gtmSetPlaying(document.querySelector('#play_loop').checked);
       });
-	  
+      
       document.querySelector('#zoom').addEventListener('click', () => {
-		document.querySelector('#frame').className = document.querySelector('#zoom').checked ? 'zoomed' : '';
-      });	  
-
+        document.querySelector('#frame').className = document.querySelector('#zoom').checked ? 'zoomed' : '';
+      });
+      
       document.querySelector('#frame').addEventListener('dragover', (event) => {
         event.preventDefault();
       });
