@@ -545,17 +545,19 @@ var
   r2, g2, b2: Integer;
   shift: Byte;
   invAlpha, weightVal: Integer;
+
 begin
   FromRGB(x, r1, g1, b1);
   FromRGB(y, r2, g2, b2);
 
-  invAlpha := (1 shl alphaShift) - alpha;
   weightVal := (1 shl weightShift) + weight;
+  invAlpha := ((1 shl alphaShift) - alpha) * weightVal;
+  alpha *= weightVal;
   shift := alphaShift + weightShift;
 
-  r1 := ((r1 * invAlpha + r2 * alpha) * weightVal) shr shift;
-  g1 := ((g1 * invAlpha + g2 * alpha) * weightVal) shr shift;
-  b1 := ((b1 * invAlpha + b2 * alpha) * weightVal) shr shift;
+  r1 := (r1 * invAlpha + r2 * alpha) shr shift;
+  g1 := (g1 * invAlpha + g2 * alpha) shr shift;
+  b1 := (b1 * invAlpha + b2 * alpha) shr shift;
 
   r1 := EnsureRange(r1, 0, High(Byte));
   g1 := EnsureRange(g1, 0, High(Byte));
