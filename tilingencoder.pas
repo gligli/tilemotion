@@ -37,7 +37,7 @@ type
     FrameCount: Cardinal;
     AverageBytesPerSec: Cardinal;
     KFMaxBytesPerSec: Cardinal;
-    PSNRHVS: Single;
+    PSNRHVS: Cardinal; // in 1 / 1000000 of dB
   end;
 
   TGTMKeyFrameInfo = packed record
@@ -48,14 +48,14 @@ type
     RawSize: Cardinal;
     CompressedSize: Cardinal;
     TimeCodeMillisecond: Cardinal;
-    PSNRHVS: Single;
+    PSNRHVS: Cardinal; // in 1 / 1000000 of dB
   end;
 
   // Commands Description:
   // =====================
   //
   // PredictedTileOffsets6x6:          data -> none; commandBits -> y offset (6 bits); x offset (6 bits)
-  // PredictedTileOffsets8x8:          data -> x offset (8 bits); y offset (8 bits); commandBits -> none (12 bits)
+  // PredictedTileOffsets8x8:          data -> y offset (8 bits); x offset (8 bits); commandBits -> none (10 bits); backbuffer offset (2 bits)
   // PredictedFm1Fm2Blend6x6:          data -> none; commandBits -> frame -2 weight (6 bits); frame -1 weight (6 bits)
   // GlobalTileIdx16PalIdx10:          data -> global tile index (16 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
   // KeyFrmTileIdx16PalIdx10:          data -> keyframe tile index (16 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
@@ -3538,7 +3538,7 @@ end;
 procedure TTilingEncoder.SetMotionPredictMaxBufferedFrames(AValue: Integer);
 begin
   if FMotionPredictMaxBufferedFrames = AValue then Exit;
-  FMotionPredictMaxBufferedFrames := EnsureRange(AValue, 1, 7);
+  FMotionPredictMaxBufferedFrames := EnsureRange(AValue, 1, 3);
 end;
 
 procedure TTilingEncoder.ConvertToCpnPixels(const ATile: TTile; FromPal, UseLAB, VMirror, HMirror: Boolean; const APalette: TIntegerDynArray; out ACpnPixel: TCpnPixels);
@@ -5866,9 +5866,9 @@ var
   procedure DoAltCmd(Cmd: TGTMCommand; AltCmd: TGTMCommand; IsAlt: Boolean; Data: Cardinal);
   begin
     if IsAlt then
-      DoCmd(Cmd, Data)
+      DoCmd(AltCmd, Data)
     else
-      DoCmd(AltCmd, Data);
+      DoCmd(Cmd, Data);
   end;
 
   procedure DoTMI(const TMI: TTileMapItem);
@@ -5890,14 +5890,14 @@ var
         if isLongOffsets then
         begin
           DoCmd(gtPredictedTileOffsets8x8, TMI.Attrs.MotionBackBufferOffset - 1);
-          DoByte(PByte(@TMI.Attrs.MotionX)^);
           DoByte(PByte(@TMI.Attrs.MotionY)^);
+          DoByte(PByte(@TMI.Attrs.MotionX)^);
         end
         else
         begin
-          attrs := (PByte(@TMI.Attrs.MotionX)^ and 63) or ((PByte(@TMI.Attrs.MotionY)^ and 63) shl 6);
+          attrs := ((PByte(@TMI.Attrs.MotionY)^ and 63) shl 6) or (PByte(@TMI.Attrs.MotionX)^ and 63);
 
-          DoCmd(gtPredictedTileOffsets8x8, attrs);
+          DoCmd(gtPredictedTileOffsets6x6, attrs);
         end;
       end;
     end
@@ -6111,7 +6111,7 @@ begin
   Header.FrameCount := Length(FFrames);
   Header.AverageBytesPerSec := 0;
   Header.KFMaxBytesPerSec := 0;
-  Header.PSNRHVS := FReconstructPSNR;
+  Header.PSNRHVS := Round(FReconstructPSNR * 1000.0 * 1000.0);
   AStream.Write(Header, SizeOf(Header));
 
   SetLength(KFInfo, Length(FKeyFrames));
@@ -6123,7 +6123,7 @@ begin
     KFInfo[kfIdx].KFIndex := kfIdx;
     KFInfo[kfIdx].FrameIndex := FKeyFrames[kfIdx].StartFrame;
     KFInfo[kfIdx].TimeCodeMillisecond := Round(1000.0 * FKeyFrames[kfIdx].StartFrame / FFramesPerSecond);
-    KFInfo[kfIdx].PSNRHVS := FKeyFrames[kfIdx].ReconstructPSNR;
+    KFInfo[kfIdx].PSNRHVS := Round(FKeyFrames[kfIdx].ReconstructPSNR * 1000.0 * 1000.0);
     AStream.Write(KFInfo[kfIdx], SizeOf(KFInfo[0]));
   end;
 
