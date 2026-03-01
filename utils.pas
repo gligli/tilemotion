@@ -65,16 +65,17 @@ const
 
   // Normalized inverse quantization matrix for 8x8 DCT at the point of transparency.
   // from: https://gitlab.xiph.org/xiph/daala/-/blob/gitlab-ci/tools/dump_psnrhvs.c?ref_type=heads
+  lw = cColorCpns - cChromaWeight * 2.0;
   cw = cChromaWeight;
   cDCTWeights: array[0..cColorCpns-1{YUV}, 0..7, 0..7] of Double = (
-    ((1.6193873005, 2.2901594831, 2.08509755623, 1.48366094411, 1.00227514334, 0.678296995242, 0.466224900598, 0.3265091542),
-     (2.2901594831, 1.94321815382, 2.04793073064, 1.68731108984, 1.2305666963, 0.868920337363, 0.61280991668, 0.436405793551),
-     (2.08509755623, 2.04793073064, 1.34329019223, 1.09205635862, 0.875748795257, 0.670882927016, 0.501731932449, 0.372504254596),
-     (1.48366094411, 1.68731108984, 1.09205635862, 0.772819797575, 0.605636379554, 0.48309405692, 0.380429446972, 0.295774038565),
-     (1.00227514334, 1.2305666963, 0.875748795257, 0.605636379554, 0.448996256676, 0.352889268808, 0.283006984131, 0.226951348204),
-     (0.678296995242, 0.868920337363, 0.670882927016, 0.48309405692, 0.352889268808, 0.27032073436, 0.215017739696, 0.17408067321),
-     (0.466224900598, 0.61280991668, 0.501731932449, 0.380429446972, 0.283006984131, 0.215017739696, 0.168869545842, 0.136153931001),
-     (0.3265091542, 0.436405793551, 0.372504254596, 0.295774038565, 0.226951348204, 0.17408067321, 0.136153931001, 0.109083846276)),
+    ((1.6193873005 * lw, 2.2901594831 * lw, 2.08509755623 * lw, 1.48366094411 * lw, 1.00227514334 * lw, 0.678296995242 * lw, 0.466224900598 * lw, 0.3265091542 * lw),
+     (2.2901594831 * lw, 1.94321815382 * lw, 2.04793073064 * lw, 1.68731108984 * lw, 1.2305666963 * lw, 0.868920337363 * lw, 0.61280991668 * lw, 0.436405793551 * lw),
+     (2.08509755623 * lw, 2.04793073064 * lw, 1.34329019223 * lw, 1.09205635862 * lw, 0.875748795257 * lw, 0.670882927016 * lw, 0.501731932449 * lw, 0.372504254596 * lw),
+     (1.48366094411 * lw, 1.68731108984 * lw, 1.09205635862 * lw, 0.772819797575 * lw, 0.605636379554 * lw, 0.48309405692 * lw, 0.380429446972 * lw, 0.295774038565 * lw),
+     (1.00227514334 * lw, 1.2305666963 * lw, 0.875748795257 * lw, 0.605636379554 * lw, 0.448996256676 * lw, 0.352889268808 * lw, 0.283006984131 * lw, 0.226951348204 * lw),
+     (0.678296995242 * lw, 0.868920337363 * lw, 0.670882927016 * lw, 0.48309405692 * lw, 0.352889268808 * lw, 0.27032073436 * lw, 0.215017739696 * lw, 0.17408067321 * lw),
+     (0.466224900598 * lw, 0.61280991668 * lw, 0.501731932449 * lw, 0.380429446972 * lw, 0.283006984131 * lw, 0.215017739696 * lw, 0.168869545842 * lw, 0.136153931001 * lw),
+     (0.3265091542 * lw, 0.436405793551 * lw, 0.372504254596 * lw, 0.295774038565 * lw, 0.226951348204 * lw, 0.17408067321 * lw, 0.136153931001 * lw, 0.109083846276 * lw)),
     ((1.91113096927 * cw, 2.46074210438 * cw, 1.18284184739 * cw, 1.14982565193 * cw, 1.05017074788 * cw, 0.898018824055 * cw, 0.74725392039 * cw, 0.615105596242 * cw),
      (2.46074210438 * cw, 1.58529308355 * cw, 1.21363250036 * cw, 1.38190029285 * cw, 1.33100189972 * cw, 1.17428548929 * cw, 0.996404342439 * cw, 0.830890433625 * cw),
      (1.18284184739 * cw, 1.21363250036 * cw, 0.978712413627 * cw, 1.02624506078 * cw, 1.03145147362 * cw, 0.960060382087 * cw, 0.849823426169 * cw, 0.731221236837 * cw),
@@ -185,7 +186,7 @@ function YUVToRGB(y, u, v, scl: TFloat): Integer;
 function lerp(x, y, alpha: Double): Double; inline;
 function ilerp(x, y, alpha, maxAlpha: Integer): Integer; inline;
 function revlerp(x, r, alpha: Double): Double; inline;
-function BlendRGB(x, y, alphax, alphay: Integer; shift: Byte): Integer;
+function BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte): Integer;
 function Posterize(v: Byte; cvt: Integer): Byte; inline;
 function PosterizeBpc(v, bpc: Byte): Byte; inline;
 function CompareEuclideanDCTPtr(pa, pb: PDCTScalar): Cardinal; overload;
@@ -538,17 +539,23 @@ begin
   Result := x + (r - x) / alpha;
 end;
 
-function BlendRGB(x, y, alphax, alphay: Integer; shift: Byte): Integer;
+function BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte): Integer;
 var
   r1, g1, b1: Integer;
   r2, g2, b2: Integer;
+  shift: Byte;
+  invAlpha, weightVal: Integer;
 begin
   FromRGB(x, r1, g1, b1);
   FromRGB(y, r2, g2, b2);
 
-  r1 := (r1 * alphax + r2 * alphay) shr shift;
-  g1 := (g1 * alphax + g2 * alphay) shr shift;
-  b1 := (b1 * alphax + b2 * alphay) shr shift;
+  invAlpha := (1 shl alphaShift) - alpha;
+  weightVal := (1 shl weightShift) + weight;
+  shift := alphaShift + weightShift;
+
+  r1 := ((r1 * invAlpha + r2 * alpha) * weightVal) shr shift;
+  g1 := ((g1 * invAlpha + g2 * alpha) * weightVal) shr shift;
+  b1 := ((b1 * invAlpha + b2 * alpha) * weightVal) shr shift;
 
   r1 := EnsureRange(r1, 0, High(Byte));
   g1 := EnsureRange(g1, 0, High(Byte));

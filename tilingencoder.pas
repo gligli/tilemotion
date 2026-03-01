@@ -161,7 +161,7 @@ type
     procedure CopyPalPixels(const APalPixels: TByteDynArray); overload;
     procedure CopyRGBPixels(const ARGBPixels: TRGBPixels); overload;
     procedure CopyRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer); overload;
-    procedure BlendRGBPixels(const AM1Buffer, AM2Buffer: TIntegerDynArray2; AY, AX: Integer; AM1Weight, AM2Weight: Byte);
+    procedure BlendRGBPixels(const AM1Buffer, AM2Buffer: TIntegerDynArray2; AY, AX: Integer; AAlpha: Byte; AWeight: ShortInt);
     procedure BlitPalPixels(const AFrameBuffer: TIntegerDynArray2; const APalette: TIntegerDynArray; AVMirror, AHMirror: Boolean; AY, AX: Integer);
     procedure BlitRGBPixels(const AFrameBuffer: TIntegerDynArray2; AVMirror, AHMirror: Boolean; AY, AX: Integer);
     procedure ClearPalPixels;
@@ -191,7 +191,7 @@ type
     Error: Cardinal; // 4
     Attrs: record case Boolean of // 3 * 1
       False: (MotionX, MotionY: ShortInt; MotionBackBufferOffset: Byte);
-      True: (BlendWeightM1, BlendWeightM2, Dummy: Byte);
+      True: (BlendAlpha: Byte; BlendWeight: ShortInt; Dummy: Byte);
     end;
     Flags: set of (tmfHMirror, tmfVMirror, tmfPredicted, tmfBlended); // 1
   end;
@@ -332,18 +332,19 @@ type
     function GetUnpredictedTileCount: Integer;
     procedure ResetTileMap(AKeepMirrors: Boolean);
 
+    function PowellBlend(const x: TVector; data: Pointer): TScalar;
     procedure GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
 
     procedure PrepareDCTs(const ADCTs: TDCTDynArray; const ABuffer: TIntegerDynArray2);
-    function PredictTileBlending(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; ADCTBuffer: TDCTBuffer): Cardinal;
+    function PredictTileBlending(AUnipolar: Boolean; ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; AFrameBuffer: TFrameBuffer): Cardinal;
     function PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Cardinal;
-    function PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Cardinal;
+    function PredictTileIntra(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Cardinal;
 
     // processes
 
     procedure LoadFromImage(AImageWidth, AImageHeight: Integer; AImage: PInteger);
     procedure IntraReduce(ATargetTileCount: Integer);
-    procedure Predict(ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBuffer);
+    procedure Predict(ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBuffer; AFrameBuffer: TFrameBuffer);
     procedure Reconstruct(ARadius: Integer; AFrameBuffer: TFrameBuffer);
     procedure DirectBlit(const ABuffer: TIntegerDynArray2);
   end;
@@ -655,8 +656,11 @@ const
   CGTMCommandCodeBits = round(ln(CGTMCommandsCount) / ln(2));
   CGTMCommandBits = 16 - CGTMCommandCodeBits;
   CGTMBlendBufferCount = 2;
-  CGTMBlendWeightShift = CGTMCommandBits div CGTMBlendBufferCount;
-  CGTMBlendWeightMax = (1 shl CGTMBlendWeightShift) - 1;
+  CGTMBlendAlphaShift = 8;
+  CGTMBlendAlphaMax = (1 shl CGTMBlendAlphaShift) - 1;
+  CGTMBlendWeightMin = -8;
+  CGTMBlendWeightMax = 7;
+  CGTMBlendWeightBaseShift = 8;
 
   function CompareTileUseCountRev(Item1, Item2, UserParameter:Pointer):Integer;
   var
@@ -716,7 +720,9 @@ end;
 
 function TTileMapItemHelper.GetIsSmoothed: Boolean;
 begin
-  Result := IsPredicted and not IsBlended and (Attrs.MotionX = 0) and (Attrs.MotionY = 0);
+  Result := IsPredicted and
+    ((not IsBlended and (Attrs.MotionX = 0) and (Attrs.MotionY = 0) and (Attrs.MotionBackBufferOffset = 1)) or
+     (IsBlended and (Attrs.BlendAlpha = 0) and (Attrs.BlendWeight = 0)));
 end;
 
 function TTileMapItemHelper.GetVMirror: Boolean;
@@ -992,8 +998,7 @@ begin
   end;
 end;
 
-procedure TTileHelper.BlendRGBPixels(const AM1Buffer, AM2Buffer: TIntegerDynArray2; AY, AX: Integer; AM1Weight,
-  AM2Weight: Byte);
+procedure TTileHelper.BlendRGBPixels(const AM1Buffer, AM2Buffer: TIntegerDynArray2; AY, AX: Integer; AAlpha: Byte; AWeight: ShortInt);
 var
   ty, tx: Integer;
 begin
@@ -1001,7 +1006,7 @@ begin
   begin
     for tx := 0 to cTileWidth - 1 do
     begin
-      RGBPixels[ty, tx] := BlendRGB(AM1Buffer[AY, AX], AM2Buffer[AY, AX], AM1Weight, AM2Weight, CGTMBlendWeightShift);
+      RGBPixels[ty, tx] := BlendRGB(AM1Buffer[AY, AX], AM2Buffer[AY, AX], AAlpha, AWeight, CGTMBlendAlphaShift, CGTMBlendWeightBaseShift);
       Inc(AX);
     end;
     Dec(AX, cTileWidth);
@@ -1407,6 +1412,34 @@ begin
       TileMap[sy,sx].Reset(AKeepMirrors);
 end;
 
+type
+  TPowellBlendData = record
+    DX, DY, AlphaMax: Integer;
+    DCT: TDCT;
+    FrameM1, FrameM2: TIntegerDynArray2;
+    BlendTile: PTile;
+  end;
+
+  PPowellBlendData = ^TPowellBlendData;
+
+function TFrame.PowellBlend(const x: TVector; data: Pointer): TScalar;
+var
+  pbData: PPowellBlendData absolute data;
+  alpha, weight: Integer;
+  BlendCpnPixels: TCpnPixels;
+  BlendDCT: TDCT;
+begin
+  alpha := EnsureRange(Round(x[0]), 0, pbData^.AlphaMax);
+  weight := EnsureRange(Round(x[1]), CGTMBlendWeightMin, CGTMBlendWeightMax);
+
+  pbData^.BlendTile^.BlendRGBPixels(pbData^.FrameM1, pbData^.FrameM2, pbData^.DY, pbData^.DX, alpha, weight);
+
+  Encoder.ConvertToCpnPixels(pbData^.BlendTile^, False, False, False, False, nil, BlendCpnPixels);
+  Encoder.ComputeCpnPixelsPsyVisFeatures(BlendCpnPixels, pvsWeightedDCT, cColorCpns, BlendDCT);
+
+  Result := CompareEuclideanDCTPtr_asm(pbData^.DCT, BlendDCT);
+end;
+
 procedure TFrame.GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
 begin
   oymn := Max(0, ADY - ARadius - 1);
@@ -1448,42 +1481,39 @@ begin
   ProcThreadPool.DoParallelLocalProc(@DoDCTs, 0, Encoder.FScreenHeight - cTileWidth);
 end;
 
-function TFrame.PredictTileBlending(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; ADCTBuffer: TDCTBuffer): Cardinal;
+function TFrame.PredictTileBlending(AUnipolar: Boolean; ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; AFrameBuffer: TFrameBuffer): Cardinal;
 var
-  i, bm1, bm2, yx, err, bestM1, bestM2: Integer;
-  prevDCTM1, prevDCTM2: TDCT;
+  bestAlpha, bestWeight: Integer;
+  BlendTile: PTile;
+  pbData: TPowellBlendData;
+  X: TVector;
 begin
-  Result := High(Cardinal);
-  bestM1 := MaxInt;
-  bestM2 := MaxInt;
+  BlendTile := TTile.New(True, False);
+  try
+    pbData.AlphaMax := IfThen(AUnipolar, 0, CGTMBlendAlphaMax);
+    pbData.BlendTile := BlendTile;
+    pbData.DCT := ADCT;
+    pbData.DX := ADX;
+    pbData.DY := ADY;
+    pbData.FrameM1 := AFrameBuffer.GetBuffer(-1);
+    pbData.FrameM2 := AFrameBuffer.GetBuffer(-2);
 
-  yx := ADY * (Encoder.FScreenWidth - cTileWidth + 1) + ADX;
+    X := [pbData.AlphaMax * 0.5, 0.0];
 
-  prevDCTM1 := ADCTBuffer.GetBuffer(-1)[yx];
-  prevDCTM2 := ADCTBuffer.GetBuffer(-2)[yx];
-
-  for bm2 := 0 to CGTMBlendWeightMax do
-    for bm1 := 0 to CGTMBlendWeightMax do
-    begin
-      err := 0;
-      for i := 0 to cTileDCTSize - 1 do
-         err += Sqr(ADCT[i] - SarLongint(prevDCTM1[i] * bm1 + prevDCTM2[i] * bm2, CGTMBlendWeightShift));
-
-      if err < Result then
-      begin
-        Result := err;
-        bestM1 := bm1;
-        bestM2 := bm2;
-      end;
-    end;
+    Result := Round(PowellMinimize(@PowellBlend, X, 16.0, 0.5, 0.5, MaxInt, @pbData)[0]);
+    bestAlpha := EnsureRange(Round(x[0]), 0, pbData.AlphaMax);
+    bestWeight := EnsureRange(Round(x[1]), CGTMBlendWeightMin, CGTMBlendWeightMax);
+  finally
+    TTile.Dispose(BlendTile);
+  end;
 
   if not ATMI^.IsPredicted or (Result < ATMI^.Error) then
   begin
     ATMI^.IsPredicted := True;
     ATMI^.IsBlended := True;
     ATMI^.Error := Result;
-    ATMI^.Attrs.BlendWeightM1 := bestM1;
-    ATMI^.Attrs.BlendWeightM2 := bestM2;
+    ATMI^.Attrs.BlendAlpha := bestAlpha;
+    ATMI^.Attrs.BlendWeight := bestWeight;
   end
   else
   begin
@@ -1527,14 +1557,14 @@ begin
   end;
 end;
 
-function TFrame.PredictTileIntra(ARadius, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Cardinal;
+function TFrame.PredictTileIntra(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Cardinal;
 var
   oy, ox, oymn, oymx, oxmn, oxmx, yx, bestX, bestY: Integer;
   PSNRAcc: TFloat;
   PSNRIdx, PSNRCnt, err: Cardinal;
   PrevDCTPtr: PDCTScalar;
 begin
-  GetPredictExtents(ARadius, ADY, ADX, oxmn, oxmx, oymn, oymx);
+  GetPredictExtents(High(ShortInt), ADY, ADX, oxmn, oxmx, oymn, oymx);
 
   Result := High(Cardinal);
   bestY := MaxInt;
@@ -1580,7 +1610,7 @@ begin
   ATMI^.Attrs.MotionX := bestX - ADX;
 end;
 
-procedure TFrame.Predict(ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBuffer);
+procedure TFrame.Predict(ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBuffer; AFrameBuffer: TFrameBuffer);
 
   procedure DoXY(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
@@ -1606,12 +1636,12 @@ procedure TFrame.Predict(ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBu
 
     if ABackBufferOffset = 0 then
     begin
-      PredictTileIntra(ARadius, dy, dx, TMI, CurDCT, ADCTBuffer.GetBuffer)
+      PredictTileIntra(dy, dx, TMI, CurDCT, ADCTBuffer.GetBuffer)
     end
     else
     begin
-      if ABackBufferOffset = CGTMBlendBufferCount then
-        PredictTileBlending(dy, dx, TMI, CurDCT, ADCTBuffer);
+      if ABackBufferOffset <= CGTMBlendBufferCount then
+        PredictTileBlending(ABackBufferOffset = 1, dy, dx, TMI, CurDCT, AFrameBuffer);
       PredictTileMotion(ARadius, ABackBufferOffset, dy, dx, TMI, CurDCT, ADCTBuffer.GetBuffer(-ABackBufferOffset));
     end;
   end;
@@ -1903,7 +1933,7 @@ end;
 procedure TFrame.Reconstruct(ARadius: Integer; AFrameBuffer: TFrameBuffer);
 const
   cEpuKnnK = 64;
-  cPSNREpsilon = 1.0;
+  cPSNREpsilon = 0.1;
 var
   DS: PTilingDataset;
 
@@ -2060,7 +2090,7 @@ var
         begin
           for tx := 0 to cTileWidth - 1 do
           begin
-            FrontBuf[dy, dx] := BlendRGB(M1Buf[dy, dx], M2Buf[dy, dx], TMI^.Attrs.BlendWeightM1, TMI^.Attrs.BlendWeightM2, CGTMBlendWeightShift);
+            FrontBuf[dy, dx] := BlendRGB(M1Buf[dy, dx], M2Buf[dy, dx], TMI^.Attrs.BlendAlpha, TMI^.Attrs.BlendWeight, CGTMBlendAlphaShift, CGTMBlendWeightBaseShift);
             Inc(dx);
           end;
           Dec(dx, cTileWidth);
@@ -2398,12 +2428,12 @@ begin
         if isKFFF then
         begin
           Frame.PrepareDCTs(DCTBuffer.GetBuffer, FrameBuffer.GetBuffer);
-          Frame.Predict(FMotionPredictRadius, 0, DCTBuffer)
+          Frame.Predict(FMotionPredictRadius, 0, DCTBuffer, FrameBuffer)
         end
         else
         begin
           for iBuf := 1 to Min(FMotionPredictMaxBufferedFrames, frmRelIdx) do
-            Frame.Predict(FMotionPredictRadius, iBuf, DCTBuffer);
+            Frame.Predict(FMotionPredictRadius, iBuf, DCTBuffer, FrameBuffer);
           Frame.PrepareDCTs(DCTBuffer.GetBuffer, FrameBuffer.GetBuffer);
         end;
       finally
@@ -2457,7 +2487,7 @@ begin
 
         if not isKFFF then
           for iBuf := 1 to Min(FMotionPredictMaxBufferedFrames, frmRelIdx) do
-            Frame.Predict(FMotionPredictRadius, iBuf, DCTBuffer);
+            Frame.Predict(FMotionPredictRadius, iBuf, DCTBuffer, FrameBuffer);
 
         Frame.Reconstruct(FMotionPredictRadius, FrameBuffer);
         Frame.PrepareDCTs(DCTBuffer.GetBuffer, FrameBuffer.GetBuffer);
@@ -3532,7 +3562,7 @@ end;
 procedure TTilingEncoder.SetMotionPredictRadius(AValue: Integer);
 begin
   if FMotionPredictRadius = AValue then Exit;
-  FMotionPredictRadius := EnsureRange(AValue, 1, -Low(ShortInt));
+  FMotionPredictRadius := EnsureRange(AValue, 0, -Low(ShortInt));
 end;
 
 procedure TTilingEncoder.SetMotionPredictMaxBufferedFrames(AValue: Integer);
@@ -4136,7 +4166,7 @@ begin
             TempTile^.BlendRGBPixels(
               FRenderFrameBuffer.GetBuffer(-1), FRenderFrameBuffer.GetBuffer(-2),
               sy shl cTileWidthBits, sx shl cTileWidthBits,
-              TMI^.Attrs.BlendWeightM1, TMI^.Attrs.BlendWeightM2)
+              TMI^.Attrs.BlendAlpha, TMI^.Attrs.BlendWeight)
           else
             TempTile^.CopyRGBPixels(
               FRenderFrameBuffer.GetBuffer(-TMI^.Attrs.MotionBackBufferOffset),
@@ -4216,7 +4246,7 @@ begin
               if TMI^.IsBlended then
               begin
                 siz := 0;
-                col := $ff - (TMI^.Attrs.BlendWeightM1 + TMI^.Attrs.BlendWeightM2);
+                col := $ff - (TMI^.Attrs.BlendAlpha + TMI^.Attrs.BlendWeight);
                 col := ToRGB(col, $ff, col);
 
                 canvas.Brush.Color := col;
@@ -5881,7 +5911,7 @@ var
     begin
       if TMI.IsBlended then
       begin
-        DoCmd(gtPredictedFm1Fm2Blend6x6, (TMI.Attrs.BlendWeightM2 shl CGTMBlendWeightShift) or TMI.Attrs.BlendWeightM1);
+        DoCmd(gtPredictedFm1Fm2Blend6x6, ((PByte(@TMI.Attrs.BlendWeight)^ and CGTMBlendWeightMax) shl CGTMBlendAlphaShift) or TMI.Attrs.BlendAlpha);
       end
       else
       begin
