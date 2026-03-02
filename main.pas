@@ -136,13 +136,13 @@ type
     procedure IdleTimerTimer(Sender: TObject);
     procedure imgContextPopup(Sender: TObject; MousePos: TPoint; var Handled: Boolean);
     procedure imgPaletteClick(Sender: TObject);
-    procedure btnGeneratePNGsInputClick(Sender: TObject);
     procedure imgPaintBackground(ASender: TObject; ACanvas: TCanvas; ARect: TRect);
     procedure imgPaletteContextPopup(Sender: TObject; MousePos: TPoint; var Handled: Boolean);
     procedure imgPaletteMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
     procedure imgTilesMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
     procedure imgTilesMouseWheelDown(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
     procedure imgTilesMouseWheelUp(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
+    procedure miGeneratePNGsInputClick(Sender: TObject);
     procedure miGeneratePNGsOutputClick(Sender: TObject);
     procedure miGenerateY4MInputClick(Sender: TObject);
     procedure miGenerateY4MOutputClick(Sender: TObject);
@@ -259,12 +259,6 @@ begin
   UpdateVideo(nil);
 end;
 
-procedure TMainForm.btnGeneratePNGsInputClick(Sender: TObject);
-begin
-  FTilingEncoder.GeneratePNGs(True);
-  UpdateVideo(nil);
-end;
-
 procedure TMainForm.btnPMClick(Sender: TObject);
 var
   pt: TPoint;
@@ -344,21 +338,63 @@ begin
   Handled := True;
 end;
 
-procedure TMainForm.miGeneratePNGsOutputClick(Sender: TObject);
+procedure TMainForm.miGeneratePNGsInputClick(Sender: TObject);
+var
+  prevCursor: TCursor;
 begin
-  FTilingEncoder.GeneratePNGs(False);
+  prevCursor := Screen.Cursor;
+  Screen.Cursor := crHourGlass;
+  try
+    FTilingEncoder.GeneratePNGs(True);
+  finally
+    Screen.Cursor := prevCursor;
+  end;
+
+  UpdateVideo(nil);
+end;
+
+procedure TMainForm.miGeneratePNGsOutputClick(Sender: TObject);
+var
+  prevCursor: TCursor;
+begin
+  prevCursor := Screen.Cursor;
+  Screen.Cursor := crHourGlass;
+  try
+    FTilingEncoder.GeneratePNGs(False);
+  finally
+    Screen.Cursor := prevCursor;
+  end;
+
   UpdateVideo(nil);
 end;
 
 procedure TMainForm.miGenerateY4MInputClick(Sender: TObject);
+var
+  prevCursor: TCursor;
 begin
-  FTilingEncoder.GenerateY4M(FTilingEncoder.OutputFileName + '.input.y4m', True);
+  prevCursor := Screen.Cursor;
+  Screen.Cursor := crHourGlass;
+  try
+    FTilingEncoder.GenerateY4M(FTilingEncoder.OutputFileName + '.input.y4m', True);
+  finally
+    Screen.Cursor := prevCursor;
+  end;
+
   UpdateVideo(nil);
 end;
 
 procedure TMainForm.miGenerateY4MOutputClick(Sender: TObject);
+var
+  prevCursor: TCursor;
 begin
-  FTilingEncoder.GenerateY4M(FTilingEncoder.OutputFileName + '.y4m', False);
+  prevCursor := Screen.Cursor;
+  Screen.Cursor := crHourGlass;
+  try
+    FTilingEncoder.GenerateY4M(FTilingEncoder.OutputFileName + '.y4m', False);
+  finally
+    Screen.Cursor := prevCursor;
+  end;
+
   UpdateVideo(nil);
 end;
 

@@ -856,7 +856,7 @@ object MainForm: TMainForm
       Caption = 'Generate PNGs'
       object miGeneratePNGsInput: TMenuItem
         Caption = 'Input'
-        OnClick = btnGeneratePNGsInputClick
+        OnClick = miGeneratePNGsInputClick
       end
       object miGeneratePNGsOutput: TMenuItem
         Caption = 'Output'
