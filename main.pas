@@ -672,13 +672,25 @@ begin
     FTilingEncoder.ShotTransCorrelLoThres := seShotTransCorrelLoThres.Value;
 
     if pcPages.ActivePage = tsInput then
+    begin
+      if FTilingEncoder.RenderPage <> rpInput then
+        tbFrame.SetFocus;
       FTilingEncoder.RenderPage := rpInput
+    end
     else if pcPages.ActivePage = tsOutput then
+    begin
+      if FTilingEncoder.RenderPage <> rpOutput then
+        tbFrame.SetFocus;
       FTilingEncoder.RenderPage := rpOutput
+    end
     else if pcPages.ActivePage = tsTilesPal then
+    begin
       FTilingEncoder.RenderPage := rpTilesPalette
+    end
     else
+    begin
       FTilingEncoder.RenderPage := rpNone;
+    end;
 
     FTilingEncoder.MaxThreadCount := seMaxCores.Value;
 
@@ -691,8 +703,6 @@ begin
     sePSNR.Enabled := rbPSNR.Checked;
     seQbTiles.Enabled := rbTileLimit.Checked;
     seMaxTiles.Enabled := rbTileLimit.Checked;
-    if (FTilingEncoder.RenderPage in [rpInput, rpOutput]) and not sedPalIdx.Focused then
-      tbFrame.SetFocus;
     tbFrame.PageSize := Round(FTilingEncoder.FramesPerSecond);
   finally
     Screen.Cursor := prevCursor;
