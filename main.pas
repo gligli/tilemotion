@@ -472,6 +472,7 @@ begin
   cbxScaling.ItemIndex := 4;
   cbxPalCount.Text := '256';
   cbxMPRadius.Text := '128';
+  rbTileLimit.Checked := True;
 
   FTilingEncoder.Test;
 
@@ -486,6 +487,7 @@ begin
   cbxScaling.ItemIndex := 2;
   cbxPalCount.Text := '256';
   cbxMPRadius.Text := '128';
+  rbTileLimit.Checked := True;
 
   FTilingEncoder.Test;
 
@@ -691,6 +693,7 @@ begin
     seMaxTiles.Enabled := rbTileLimit.Checked;
     if (FTilingEncoder.RenderPage in [rpInput, rpOutput]) and not sedPalIdx.Focused then
       tbFrame.SetFocus;
+    tbFrame.PageSize := Round(FTilingEncoder.FramesPerSecond);
   finally
     Screen.Cursor := prevCursor;
   end;

@@ -542,6 +542,8 @@ type
     procedure FinishMergeTiles;
     procedure MergeTiles(const TileIndexes: array of Int64; TileCount: Integer; BestIdx: Int64; NewTile: PPalPixels; NewTileRGB: PRGBPixels);
 
+    procedure RenderFrame(AFrameIndex: Integer; APage: TRenderPage);
+
     procedure LoadStream(AStream: TStream);
     procedure SaveStream(AStream: TStream);
 
@@ -2523,8 +2525,8 @@ end;
 procedure TTilingEncoder.GeneratePNGs(AInput: Boolean);
 var
   palPict: TPortableNetworkGraphic;
-  i, palIdx, colIdx, oldRenderFrameIndex : Integer;
-  oldRenderPage: TRenderPage;
+  frmIdx, palIdx, colIdx : Integer;
+  page: TRenderPage;
   palData: TStringList;
   BMP: TBitmap;
 begin
@@ -2535,14 +2537,12 @@ begin
   palPict.PixelFormat := pf24bit;
 
   palData := TStringList.Create;
-  oldRenderFrameIndex := RenderFrameIndex;
-  oldRenderPage := RenderPage;
   try
-    RenderPage := rpOutput;
+    page := rpOutput;
     BMP := FOutputBitmap;
     if AInput then
     begin
-      RenderPage := rpInput;
+      page := rpInput;
       BMP := FInputBitmap;
     end;
 
@@ -2552,29 +2552,25 @@ begin
         palData.Add(IntToHex($ff000000 or FPalettes[palIdx].PaletteRGB[colIdx], 8));
     palData.SaveToFile(ChangeFileExt(FOutputFileName, '.txt'));
 
-    for i := 0 to High(FFrames) do
+    for frmIdx := 0 to High(FFrames) do
     begin
-      RenderFrameIndex := i;
-      Render;
+      RenderFrame(frmIdx, page);
 
       palPict.Canvas.Draw(0, 0, BMP);
-      palPict.SaveToFile(Format('%s_%.4d.png', [ChangeFileExt(FOutputFileName, ''), i]));
+      palPict.SaveToFile(Format('%s_%.4d.png', [ChangeFileExt(FOutputFileName, ''), frmIdx]));
     end;
   finally
     palPict.Free;
-
-    RenderFrameIndex := oldRenderFrameIndex;
-    RenderPage := oldRenderPage;
-    Render;
-
     palData.Free;
+
+    Render;
   end;
 end;
 
 procedure TTilingEncoder.GenerateY4M(AFileName: String; AInput: Boolean);
 var
-  fx, fy, i, oldRenderFrameIndex : Integer;
-  oldRenderPage: TRenderPage;
+  fx, fy, frmIdx: Integer;
+  page: TRenderPage;
   fs: TBufferedFileStream;
   Header, FrameHeader: String;
   ptr: PByte;
@@ -2584,8 +2580,6 @@ var
   FrameData: TByteDynArray;
   BMP: TBitmap;
 begin
-  oldRenderFrameIndex := RenderFrameIndex;
-  oldRenderPage := RenderPage;
   fs := TBufferedFileStream.Create(AFileName, fmCreate or fmShareDenyWrite);
   try
     Header := Format('YUV4MPEG2 W%d H%d F%d:1000000 Ip C444 XCOLORRANGE=LIMITED'#10, [FTileMapWidth * cTileWidth, FTileMapHeight * cTileWidth, round(FFramesPerSecond * 1000000)]);
@@ -2593,21 +2587,20 @@ begin
 
     SetLength(FrameData, FTileMapWidth * cTileWidth * FTileMapHeight * cTileWidth * cColorCpns);
 
-    RenderPage := rpOutput;
+    page := rpOutput;
     BMP := FOutputBitmap;
     if AInput then
     begin
-      RenderPage := rpInput;
+      page := rpInput;
       BMP := FInputBitmap;
     end;
 
-    for i := 0 to High(FFrames) do
+    for frmIdx := 0 to High(FFrames) do
     begin
       FrameHeader := 'FRAME '#10;
       fs.Write(FrameHeader[1], Length(FrameHeader));
 
-      RenderFrameIndex := i;
-      Render;
+      RenderFrame(frmIdx, page);
 
       py := @FrameData[0 * Length(FrameData) div cColorCpns];
       pu := @FrameData[1 * Length(FrameData) div cColorCpns];
@@ -2639,10 +2632,9 @@ begin
       fs.Write(FrameData[0], Length(FrameData));
     end;
   finally
-    RenderFrameIndex := oldRenderFrameIndex;
-    RenderPage := oldRenderPage;
-    Render;
     fs.Free;
+
+    Render;
   end;
 end;
 
@@ -3906,7 +3898,7 @@ begin
   TTile.Array1DDispose(FTiles);
 end;
 
-procedure TTilingEncoder.Render;
+procedure TTilingEncoder.RenderFrame(AFrameIndex: Integer; APage: TRenderPage);
 
   procedure DrawTile(const ABuffer: TIntegerDynArray2; const APal: TIntegerDynArray; ATilePtr: PTile; ASY, ASX: Integer; AHmirror, AVmirror, AForceActive: Boolean); inline;
   var
@@ -4024,7 +4016,7 @@ begin
   if Length(FFrames) <= 0 then
     Exit;
 
-  Frame := FFrames[FRenderFrameIndex];
+  Frame := FFrames[AFrameIndex];
 
   if not Assigned(Frame) or not Assigned(Frame.PKeyFrame) then
     Exit;
@@ -4037,11 +4029,11 @@ begin
 
     globalTileCount := GetTileCount(False);
 
-    FRenderTitleText := 'Global: ' + IntToStr(globalTileCount) + ' / Frame #' + IntToStr(FRenderFrameIndex) + IfThen(Frame.PKeyFrame.StartFrame = FRenderFrameIndex, ' [KF]', '     ') + ' : ' + IntToStr(Frame.GetUsedTileCount);
+    FRenderTitleText := 'Global: ' + IntToStr(globalTileCount) + ' / Frame #' + IntToStr(Frame.Index) + IfThen(Frame.PKeyFrame.StartFrame = Frame.Index, ' [KF]', '     ') + ' : ' + IntToStr(Frame.GetUsedTileCount);
 
     // "Input" tab
 
-    if FRenderPage = rpInput then
+    if APage = rpInput then
     begin
       FInputBitmap.Canvas.Brush.Color := clBlack;
       FInputBitmap.Canvas.Brush.Style := bsSolid;
@@ -4081,72 +4073,72 @@ begin
 
     // "Output" tab
 
-    if Frame.Index <> FRenderPrevFrameIndex then
-      FRenderFrameBuffer.AdvanceFrame;
+    if APage = rpOutput then
+    begin
+      if Frame.Index <> FRenderPrevFrameIndex then
+        FRenderFrameBuffer.AdvanceFrame;
 
-    for sy := 0 to FTileMapHeight - 1 do
-      for sx := 0 to FTileMapWidth - 1 do
-      begin
-        TMI := @Frame.TileMap[sy, sx];
-
-        if TMI^.IsPredicted and FRenderPredicted then
+      for sy := 0 to FTileMapHeight - 1 do
+        for sx := 0 to FTileMapWidth - 1 do
         begin
-          if TMI^.IsBlended then
-            TempTile^.BlendRGBPixels(
-              FRenderFrameBuffer.GetBuffer(-1), FRenderFrameBuffer.GetBuffer(-2),
-              sy shl cTileWidthBits, sx shl cTileWidthBits,
-              TMI^.Attrs.BlendAlpha, TMI^.Attrs.BlendWeight)
-          else
-            TempTile^.CopyRGBPixels(
-              FRenderFrameBuffer.GetBuffer(-TMI^.Attrs.MotionBackBufferOffset),
-              (sy shl cTileWidthBits) + TMI^.Attrs.MotionY,
-              (sx shl cTileWidthBits) + TMI^.Attrs.MotionX);
-          DrawTile(FRenderFrameBuffer.GetBuffer, nil, TempTile, sy, sx, False, False, True)
-        end
-        else if InRange(TMI^.TileIdx, 0, High(Tiles)) then
-        begin
-          tilePtr := FTiles[TMI^.TileIdx];
+          TMI := @Frame.TileMap[sy, sx];
 
-          pal := nil;
-          if FRenderOutputDithered then
-            if FRenderPaletteIndex < 0 then
-            begin
-              if not InRange(tilePtr^.PalIdx, 0, High(FPalettes)) then
-              begin
-                DrawDummyTile(FRenderFrameBuffer.GetBuffer, sy, sx);
-                Continue;
-              end;
-              pal := FPalettes[tilePtr^.PalIdx].PaletteRGB;
-            end
+          if TMI^.IsPredicted and FRenderPredicted then
+          begin
+            if TMI^.IsBlended then
+              TempTile^.BlendRGBPixels(
+                FRenderFrameBuffer.GetBuffer(-1), FRenderFrameBuffer.GetBuffer(-2),
+                sy shl cTileWidthBits, sx shl cTileWidthBits,
+                TMI^.Attrs.BlendAlpha, TMI^.Attrs.BlendWeight)
             else
-            begin
-              if FRenderPaletteIndex <> tilePtr^.PalIdx then
+              TempTile^.CopyRGBPixels(
+                FRenderFrameBuffer.GetBuffer(-TMI^.Attrs.MotionBackBufferOffset),
+                (sy shl cTileWidthBits) + TMI^.Attrs.MotionY,
+                (sx shl cTileWidthBits) + TMI^.Attrs.MotionX);
+            DrawTile(FRenderFrameBuffer.GetBuffer, nil, TempTile, sy, sx, False, False, True)
+          end
+          else if InRange(TMI^.TileIdx, 0, High(Tiles)) then
+          begin
+            tilePtr := FTiles[TMI^.TileIdx];
+
+            pal := nil;
+            if FRenderOutputDithered then
+              if FRenderPaletteIndex < 0 then
               begin
-                DrawDummyTile(FRenderFrameBuffer.GetBuffer, sy, sx);
-                Continue;
+                if not InRange(tilePtr^.PalIdx, 0, High(FPalettes)) then
+                begin
+                  DrawDummyTile(FRenderFrameBuffer.GetBuffer, sy, sx);
+                  Continue;
+                end;
+                pal := FPalettes[tilePtr^.PalIdx].PaletteRGB;
+              end
+              else
+              begin
+                if FRenderPaletteIndex <> tilePtr^.PalIdx then
+                begin
+                  DrawDummyTile(FRenderFrameBuffer.GetBuffer, sy, sx);
+                  Continue;
+                end;
+                pal := FPalettes[FRenderPaletteIndex].PaletteRGB;
               end;
-              pal := FPalettes[FRenderPaletteIndex].PaletteRGB;
+
+            hmir := TMI^.HMirror;
+            vmir := TMI^.VMirror;
+
+            if not FRenderMirrored then
+            begin
+              hmir := False;
+              vmir := False;
             end;
 
-          hmir := TMI^.HMirror;
-          vmir := TMI^.VMirror;
-
-          if not FRenderMirrored then
+            DrawTile(FRenderFrameBuffer.GetBuffer, pal, tilePtr, sy, sx, hmir, vmir, False);
+          end
+          else
           begin
-            hmir := False;
-            vmir := False;
+            DrawDummyTile(FRenderFrameBuffer.GetBuffer, sy, sx);
           end;
-
-          DrawTile(FRenderFrameBuffer.GetBuffer, pal, tilePtr, sy, sx, hmir, vmir, False);
-        end
-        else
-        begin
-          DrawDummyTile(FRenderFrameBuffer.GetBuffer, sy, sx);
         end;
-      end;
 
-    if FRenderPage = rpOutput then
-    begin
       FOutputBitmap.BeginUpdate;
       try
         pFB := PInteger(FOutputBitmap.RawImage.Data);
@@ -4221,7 +4213,7 @@ begin
 
     // "FPalettes / Tiles" tab
 
-    if FRenderPage = rpTilesPalette then
+    if APage = rpTilesPalette then
     begin
       FPaletteBitmap.BeginUpdate;
       try
@@ -4295,10 +4287,27 @@ begin
     FRenderPsychoVisualQuality := EuclideanToPSNR(errCml);
 
   finally
-    FRenderPrevFrameIndex := FRenderFrameIndex;
+    FRenderPrevFrameIndex := Frame.Index;
     TTile.Dispose(TempTile);
   end;
 end;
+
+procedure TTilingEncoder.Render;
+var
+  frmIdx: Integer;
+begin
+  if (FRenderFrameIndex = FRenderPrevFrameIndex + 1) or (FRenderPage <> rpOutput) then
+  begin
+    RenderFrame(FRenderFrameIndex, FRenderPage)
+  end
+  else
+  begin
+    frmIdx := EnsureRange(FRenderFrameIndex, 0, High(FFrames));
+    for frmIdx := FFrames[frmIdx].PKeyFrame.StartFrame to frmIdx do
+      RenderFrame(frmIdx, rpOutput);
+  end;
+end;
+
 
 procedure TTilingEncoder.SaveSettings(ASettingsFileName: String);
 var

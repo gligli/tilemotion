@@ -28,13 +28,14 @@ object MainForm: TMainForm
   OnKeyUp = FormKeyUp
   object tbFrame: TTrackBar
     Left = 0
-    Height = 27
-    Top = 546
-    Width = 962
+    Height = 42
+    Top = 528
+    Width = 960
     Max = 0
     PageSize = 1
     Position = 0
     ShowSelRange = False
+    TickMarks = tmBoth
     TickStyle = tsManual
     OnChange = UpdateVideo
     Anchors = [akLeft, akRight, akBottom]
@@ -119,9 +120,9 @@ object MainForm: TMainForm
   end
   object pcPages: TPageControl
     Left = 0
-    Height = 508
+    Height = 488
     Top = 40
-    Width = 964
+    Width = 960
     ActivePage = tsSettings
     Anchors = [akTop, akLeft, akRight, akBottom]
     TabIndex = 0
@@ -129,8 +130,8 @@ object MainForm: TMainForm
     OnChange = UpdateVideo
     object tsSettings: TTabSheet
       Caption = 'Settings'
-      ClientHeight = 480
-      ClientWidth = 956
+      ClientHeight = 460
+      ClientWidth = 952
       ParentBiDiMode = False
       PopupMenu = pmProcesses
       object edOutput: TEdit
@@ -562,13 +563,13 @@ object MainForm: TMainForm
     end
     object tsInput: TTabSheet
       Caption = 'Input'
-      ClientHeight = 480
-      ClientWidth = 956
+      ClientHeight = 460
+      ClientWidth = 952
       object imgSource: TImage
         Left = 0
-        Height = 480
+        Height = 460
         Top = 0
-        Width = 956
+        Width = 952
         AntialiasingMode = amOff
         Align = alClient
         Center = True
@@ -580,13 +581,13 @@ object MainForm: TMainForm
     end
     object tsOutput: TTabSheet
       Caption = 'Output (F12)'
-      ClientHeight = 480
-      ClientWidth = 956
+      ClientHeight = 460
+      ClientWidth = 952
       object imgDest: TImage
         Left = 0
-        Height = 480
+        Height = 460
         Top = 0
-        Width = 956
+        Width = 952
         AntialiasingMode = amOff
         Align = alClient
         AutoSize = True
@@ -599,8 +600,8 @@ object MainForm: TMainForm
     end
     object tsTilesPal: TTabSheet
       Caption = 'Palettes / Tiles'
-      ClientHeight = 480
-      ClientWidth = 956
+      ClientHeight = 460
+      ClientWidth = 952
       object sePage: TSpinEdit
         Left = 136
         Height = 23
@@ -629,9 +630,9 @@ object MainForm: TMainForm
       end
       object imgTiles: TImage
         Left = 272
-        Height = 465
+        Height = 445
         Top = 8
-        Width = 675
+        Width = 671
         AntialiasingMode = amOff
         Anchors = [akTop, akLeft, akRight, akBottom]
         PopupMenu = pmProcesses
@@ -643,16 +644,16 @@ object MainForm: TMainForm
       end
       object sbPalette: TScrollBox
         Left = 4
-        Height = 409
+        Height = 389
         Top = 64
         Width = 260
         HorzScrollBar.Page = 1
         HorzScrollBar.Visible = False
         VertScrollBar.Increment = 256
-        VertScrollBar.Page = 405
+        VertScrollBar.Page = 385
         VertScrollBar.Tracking = True
         Anchors = [akTop, akLeft, akBottom]
-        ClientHeight = 405
+        ClientHeight = 385
         ClientWidth = 239
         TabOrder = 1
         object imgPalette: TImage
