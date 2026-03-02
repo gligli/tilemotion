@@ -500,7 +500,12 @@ begin
       for i := 0 to FTilingEncoder.KeyFrameCount - 1 do
         if InRange(tbFrame.Position, FTilingEncoder.KeyFrames[i].StartFrame, FTilingEncoder.KeyFrames[i].EndFrame) then
         begin
-          tbFrame.Position := FTilingEncoder.KeyFrames[(i + IfThen(k = VK_NEXT, 1, FTilingEncoder.KeyFrameCount - 1)) mod FTilingEncoder.KeyFrameCount].StartFrame;
+          if (k = VK_PRIOR) and (tbFrame.Position > FTilingEncoder.KeyFrames[i].StartFrame) then
+            tbFrame.Position := FTilingEncoder.KeyFrames[i].StartFrame
+          else if (k = VK_NEXT) and (tbFrame.Position >= FTilingEncoder.KeyFrames[FTilingEncoder.KeyFrameCount - 1].StartFrame) then
+            tbFrame.Position := FTilingEncoder.KeyFrames[FTilingEncoder.KeyFrameCount - 1].EndFrame
+          else
+            tbFrame.Position := FTilingEncoder.KeyFrames[EnsureRange(i + IfThen(k = VK_NEXT, 1, -1), 0, FTilingEncoder.KeyFrameCount - 1)].StartFrame;
           Break;
         end;
     VK_CONTROL:
@@ -648,6 +653,8 @@ begin
     sePSNR.Enabled := rbPSNR.Checked;
     seQbTiles.Enabled := rbTileLimit.Checked;
     seMaxTiles.Enabled := rbTileLimit.Checked;
+    if (FTilingEncoder.RenderPage in [rpInput, rpOutput]) and not sedPalIdx.Focused then
+      tbFrame.SetFocus;
   finally
     Screen.Cursor := prevCursor;
   end;
