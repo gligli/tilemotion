@@ -4617,7 +4617,7 @@ begin
       end;
   end;
 
-  meanErr := iDivDef(meanErr, Length(FFrames) * FTileMapSize - GRData^.UnpredictedTileCount, 0);
+  meanErr := meanErr div (Length(FFrames) * FTileMapSize);
   GRData^.MeanPSNR := EuclideanToPSNR(meanErr);
 
   WriteLn('Threshold: ', x:9:3, ', Mean PSNR: ', GRData^.MeanPSNR:9:3, ', TileCount: ', GRData^.UnpredictedTileCount:8);
