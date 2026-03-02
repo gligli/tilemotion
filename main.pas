@@ -22,7 +22,7 @@ type
     btnPM: TButton;
     cbxMPRadius: TComboBox;
     cbxDitheringMode: TComboBox;
-    chkFTEPU: TCheckBox;
+    cbxMPMBF: TComboBox;
     chkStretch: TCheckBox;
     chkPredicted: TCheckBox;
     cbxScaling: TComboBox;
@@ -249,7 +249,7 @@ end;
 
 procedure TMainForm.btnReindexClick(Sender: TObject);
 begin
-  FTilingEncoder.Run(esReindex);
+  FTilingEncoder.Run(esReindex2);
   UpdateVideo(nil);
 end;
 
@@ -400,38 +400,12 @@ var
   firstStep: TEncoderStep;
   lastStep: TEncoderStep;
 
-  function OkStep(Step: TEncoderStep): Boolean;
-  begin
-    Result := (Step >= firstStep) and (Step <= lastStep);
-  end;
-
 begin
   firstStep := TEncoderStep(cbxStartStep.ItemIndex);
   lastStep := TEncoderStep(cbxEndStep.ItemIndex);
 
-  if OkStep(esLoad) then
-    btnGlobalLoadClick(nil);
-
-  if OkStep(esPredict) then
-    btnPredictMotionClick(nil);
-
-  if OkStep(esReduce) then
-    btnClusterClick(nil);
-
-  if OkStep(esPreparePalettes) then
-    btnPreparePalettesClick(nil);
-
-  if OkStep(esDither) then
-    btnDitherClick(nil);
-
-  if OkStep(esReconstruct) then
-    btnReconstructClick(nil);
-
-  if OkStep(esReindex) then
-    btnReindexClick(nil);
-
-  if OkStep(esSave) then
-    btnSaveClick(nil);
+  FTilingEncoder.RunRange(firstStep, lastStep);
+  UpdateVideo(nil);
 end;
 
 procedure TMainForm.btnInputClick(Sender: TObject);
@@ -640,6 +614,7 @@ begin
     FTilingEncoder.RenderGammaValue := seVisGamma.Value;
 
     FTilingEncoder.MotionPredictRadius := StrToIntDef(cbxMPRadius.Text, 0);
+    FTilingEncoder.MotionPredictMaxBufferedFrames := StrToIntDef(cbxMPMBF.Text, 0);
 
     FTilingEncoder.GlobalTilingUseTargetPSNR := rbPSNR.Checked;
     FTilingEncoder.GlobalTilingTargetPSNR := sePSNR.Value;
@@ -648,8 +623,6 @@ begin
     FTilingEncoder.DitheringMode := TPsyVisMode(cbxDitheringMode.ItemIndex);
     FTilingEncoder.DitheringYliluoma2MixedColors := StrToIntDef(cbxYilMix.Text, 1);
     FTilingEncoder.DitheringUseThomasKnoll := chkUseTK.Checked;
-
-    FTilingEncoder.FrameTilingExtendedPaletteUsage := chkFTEPU.Checked;
 
     FTilingEncoder.ShotTransMinSecondsPerKF := seShotTransMinSecondsPerKF.Value;
     FTilingEncoder.ShotTransMaxSecondsPerKF := seShotTransMaxSecondsPerKF.Value;
@@ -709,6 +682,7 @@ begin
    cbxPalCount.Text := IntToStr(FTilingEncoder.PaletteCount);
 
    cbxMPRadius.Text := IntToStr(FTilingEncoder.MotionPredictRadius);
+   cbxMPMBF.Text := IntToStr(FTilingEncoder.MotionPredictMaxBufferedFrames);
 
    rbPSNR.Checked := FTilingEncoder.GlobalTilingUseTargetPSNR;
    rbTileLimit.Checked := not FTilingEncoder.GlobalTilingUseTargetPSNR;
@@ -719,8 +693,6 @@ begin
    cbxDitheringMode.ItemIndex := Ord(FTilingEncoder.DitheringMode);
    chkUseTK.Checked := FTilingEncoder.DitheringUseThomasKnoll;
    cbxYilMix.Text := IntToStr(FTilingEncoder.DitheringYliluoma2MixedColors);
-
-   chkFTEPU.Checked := FTilingEncoder.FrameTilingExtendedPaletteUsage;
 
    seVisGamma.Value := FTilingEncoder.RenderGammaValue;
    seMaxCores.Value := FTilingEncoder.MaxThreadCount;

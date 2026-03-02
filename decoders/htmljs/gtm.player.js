@@ -20,19 +20,19 @@ const GTMHeader = {
 // PredictedTileOffsets6x6:          data -> none; commandBits -> y offset (6 bits); x offset (6 bits)
 // PredictedTileOffsets8x8:          data -> y offset (8 bits); x offset (8 bits); commandBits -> none (10 bits); backbuffer offset - 1 (2 bits)
 // PredictedFm1Fm2Blend6x6:          data -> none; commandBits -> alpha additive weight (256 + w) (6 bits); frame -2 to frame -1 alpha (6 bits)
-// GlobalTileIdx16PalIdx10:          data -> global tile index (16 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
-// KeyFrmTileIdx16PalIdx10:          data -> keyframe tile index (16 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
-// GlobalTileIdx32PalIdx10:          data -> global tile index (32 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
-// KeyFrmTileIdx32PalIdx10:          data -> keyframe tile index (32 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
-// GlobalTileIdx32PalIdx16:          data -> palette index (16 bits); global tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
-// KeyFrmTileIdx32PalIdx16:          data -> palette index (16 bits); keyframe tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
 // PredictedOffsetBlock0x0:          data -> none; commandBits -> block size in tiles - 1 (12 bits)
+// GlobalTile10:                     data -> none; commandBits -> global tile index (10 bits); V mirror (1 bit); H mirror (1 bit)
+// KeyFrmTile10:                     data -> none; commandBits -> keyframe tile index (10 bits); V mirror (1 bit); H mirror (1 bit)
+// GlobalTile16:                     data -> global tile index (16 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
+// KeyFrmTile16:                     data -> keyframe tile index (16 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
+// GlobalTile32:                     data -> global tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
+// KeyFrmTile32:                     data -> keyframe tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
 //
 // (insert new commands here...)
 //
 // FrameEnd:                         data -> none; commandBits -> none (11 bits); keyframe end (1 bit)
 // LoadPalette:                      data -> palette index (16 bits); { RGBA bytes (32bits) } * indexes count; commandBits -> palette format (0: RGBA32) (6 bits); indexes count per palette - 1 (6 bits)
-// TileSet:                          data -> start tile (32 bits); end tile (32 bits); { indexes per pixel (64 bytes) } * count; commandBits -> none (11 bits); is keyframe tileset (1 bit)
+// TileSet:                          data -> start tile (32 bits); end tile (32 bits); { palette index (16 bits) } * count; { indexes per pixel (64 bytes) } * count; commandBits -> none (11 bits); is keyframe tileset (1 bit)
 // SetDimensions:                    data -> width in tiles (32 bits); height in tiles (32 bits); frame length in nanoseconds (32 bits) (2^32-1: still frame); global tile count (32 bits); maximum local tile count (32 bits); commandBits -> none (12 bits)
 // ExtendedCommand:                  data -> following bytes count (32 bits); custom commands, proprietary extensions, ...; commandBits -> extended command index (12 bits)
 
@@ -40,13 +40,13 @@ const GTMCommand = {
     'PredictedTileOffsets6x6' : 0,
     'PredictedTileOffsets8x8' : 1,
     'PredictedFm1Fm2Blend8x4' : 2,
-    'GlobalTileIdx16PalIdx10' : 3,
-    'KeyFrmTileIdx16PalIdx10' : 4,
-    'GlobalTileIdx32PalIdx10' : 5,
-    'KeyFrmTileIdx32PalIdx10' : 6,
-    'GlobalTileIdx32PalIdx16' : 7,
-    'KeyFrmTileIdx32PalIdx16' : 8,
-    'PredictedOffsetBlock0x0' : 9,
+    'PredictedOffsetBlock0x0' : 3,
+    'GlobalTile10' : 4,
+    'KeyFrmTile10' : 5,
+    'GlobalTile16' : 6,
+    'KeyFrmTile16' : 7,
+    'GlobalTile32' : 8,
+    'KeyFrmTile32' : 9,
 
     'FrameEnd' : 11,
     'LoadPalette' : 12,
@@ -69,6 +69,7 @@ let gtmInBuffer = null;
 let gtmOutStream = null;
 let gtmHeader = null;
 let gtmTiles = new Array(2);
+let gtmTilePalIdxs = new Array(2);
 let gtmTileCount = new Uint32Array(2);
 let gtmPaletteR = new Array(CMaxPaletteCount);
 let gtmPaletteG = new Array(CMaxPaletteCount);
@@ -154,6 +155,8 @@ function resetDecoding() {
 	gtmHeader = null;
 	gtmTiles[0] = null;
 	gtmTiles[1] = null;
+	gtmTilePalIdxs[0] = null;
+	gtmTilePalIdxs[1] = null;
 	gtmTileCount[0] = 0;
 	gtmTileCount[1] = 0;
 	
@@ -283,8 +286,8 @@ function renderEnd() {
 }
 
 function drawTilemapItem(idx, attrs, iskf) {
-	let palIdx = attrs >>> 2;
-	let tOff = ((attrs & 3) * gtmTileCount[iskf] + idx) * CTileSize;
+	let palIdx = gtmTilePalIdxs[iskf][idx];
+	let tOff = (attrs * gtmTileCount[iskf] + idx) * CTileSize;
 	let palR = gtmPaletteR[palIdx];
 	let palG = gtmPaletteG[palIdx];
 	let palB = gtmPaletteB[palIdx];
@@ -420,6 +423,8 @@ function decodeFrame() {
 					gtmFrameInterval = setInterval(decodeFrame, gtmFrameLength);
 					gtmTiles[0] = new Uint8Array(gtmTileCount[0] * CTileSize * 4);
 					gtmTiles[1] = new Uint8Array(gtmTileCount[1] * CTileSize * 4);
+					gtmTilePalIdxs[0] = new Uint16Array(gtmTileCount[0]);
+					gtmTilePalIdxs[1] = new Uint16Array(gtmTileCount[1]);
 					redimFrame();
 				}
 				break;
@@ -447,7 +452,12 @@ function decodeFrame() {
 				let tend = readDWord();
 				let tcnt = gtmTileCount[isKFTileSet];
 				let tiles = gtmTiles[isKFTileSet];
-				
+				let tlpal = gtmTilePalIdxs[isKFTileSet];
+
+				for (let p = tstart; p <= tend; p++) {
+					tlpal[p] = readWord();
+				}
+
 				let off = tstart * CTileSize + tcnt * CTileSize * 0;
 				let offh = tstart * CTileSize + tcnt * CTileSize * 1;
 				let offv = tstart * CTileSize + tcnt * CTileSize * 2;
@@ -486,31 +496,29 @@ function decodeFrame() {
 			case GTMCommand.PredictedOffsetBlock0x0:
 				skipBlock(cmd[1] + 1);
 				break;
+
+			case GTMCommand.GlobalTile10:
+				drawTilemapItem(cmd[1] >>> 2, cmd[1] & 3, 0);
+				break;
 				
-			case GTMCommand.GlobalTileIdx16PalIdx10:
+			case GTMCommand.KeyFrmTile10:
+				drawTilemapItem(cmd[1] >>> 2, cmd[1] & 3, 1);
+				break;
+				
+			case GTMCommand.GlobalTile16:
 				drawTilemapItem(readWord(), cmd[1], 0);
 				break;
 				
-			case GTMCommand.KeyFrmTileIdx16PalIdx10:
+			case GTMCommand.KeyFrmTile16:
 				drawTilemapItem(readWord(), cmd[1], 1);
 				break;
 				
-			case GTMCommand.GlobalTileIdx32PalIdx10:
+			case GTMCommand.GlobalTile32:
 				drawTilemapItem(readDWord(), cmd[1], 0);
 				break;
 				
-			case GTMCommand.KeyFrmTileIdx32PalIdx10:
+			case GTMCommand.KeyFrmTile32:
 				drawTilemapItem(readDWord(), cmd[1], 1);
-				break;
-				
-			case GTMCommand.GlobalTileIdx32PalIdx16:
-				let palIdxGW = readWord();
-				drawTilemapItem(readDWord(), cmd[1] | (palIdxGW << 2), 0);
-				break;
-				
-			case GTMCommand.KeyFrmTileIdx32PalIdx16:
-				let palIdxKFW = readWord();
-				drawTilemapItem(readDWord(), cmd[1] | (palIdxKFW << 2), 1);
 				break;
 				
 			case GTMCommand.PredictedTileOffsets6x6:
