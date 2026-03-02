@@ -4407,9 +4407,9 @@ begin
   MotionPredictRadius := 32;
   MotionPredictMaxBufferedFrames := 3;
 
-  GlobalTilingUseTargetPSNR := True;
-  GlobalTilingTargetPSNR := 24.0;
-  GlobalTilingQualityBasedTileCount := 3.0;
+  GlobalTilingUseTargetPSNR := False;
+  GlobalTilingTargetPSNR := 30.0;
+  GlobalTilingQualityBasedTileCount := 7.0;
   GlobalTilingTileCount := 0; // after GlobalTilingQualityBasedTileCount because has priority
 
   DitheringMode := pvsWeightedSpeDCT;
