@@ -4435,6 +4435,10 @@ var
   l, a, b, y, u, v: TFloat;
   DCT: array [0..cTileDCTSize-1] of Double;
   T, T2: PTile;
+  km: TOrthogonalKmeans;
+  ds, ctr: TDoubleDynArray2;
+  p2c: TIntegerDynArray;
+  wgt: TCardinalDynArray;
 begin
   InitLuts;
 
@@ -4498,6 +4502,22 @@ begin
 
   TTile.Dispose(T);
   TTile.Dispose(T2);
+
+  SetLength(ds, 10, 1);
+  SetLength(wgt, 10);
+  for i := 0 to High(ds) do
+  begin
+    wgt[i] := max(1, i);
+    ds[i, 0] := i;
+  end;
+  km := TOrthogonalKmeans.Create(3, -1, kiKMeansPP, False);
+  try
+    km.Process(ds, p2c, ctr, wgt);
+    Assert(SumInt(p2c) = 9, 'TOrthogonalKmeans p2c mismatch');
+    Assert(SameValue(km.Objective, 47.0833, 1e-4), 'TOrthogonalKmeans Objective mismatch');
+  finally
+    km.Free;
+  end;
 end;
 
 procedure TTilingEncoder.ProgressRedraw(ASubStepIdx: Integer; AReason: String; AProgressStep: TEncoderStep;

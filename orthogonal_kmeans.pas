@@ -18,17 +18,17 @@ type
   PKFloat = ^TKFloat;
   PPKFloat = ^PKFloat;
   TKFloatArray = array of TKFloat;
+  TKFloatArray2 = array of TKFloatArray;
 
   TKInit = (kiRandom, kiKMeansPP);
 
-  TKOption  = record // option handler
+  TKOptions  = record // option handler
     init: TKInit;
     k: Cardinal;
     m: Cardinal;
     iter: Integer;
     normalize: Boolean;
     verbosity: Cardinal;
-    weighting: Boolean;
     quiet: Boolean;
   end;
 
@@ -58,10 +58,10 @@ type
 
   TKPoint = class
   private
-    _size: Cardinal;
-    _body: PKNode;
-    _norm: TKFloat;
-    _weight: Cardinal;
+    FSize: Cardinal;
+    FBody: PKNode;
+    FNorm: TKFloat;
+    FWeight: Cardinal;
   public
     up_d: TKFloat;  // distance to the closest centroid
     lo_d: TKFloat;  // distance to the second closest centroid
@@ -82,23 +82,23 @@ type
     function empty(): Boolean;
     procedure clear();
 
-    property norm: TKFloat read _norm;
-    property weight: Cardinal read _weight;
-    property size: Cardinal read _size;
-    property body: PKNode read _body;
+    property Norm: TKFloat read FNorm;
+    property Weight: Cardinal read FWeight;
+    property Size: Cardinal read FSize;
+    property Body: PKNode read FBody;
   end;
 
   { TKCentroid }
 
   TKCentroid = class
   private
-    _norm: TKFloat;  // norm
-    _dv: PKFloat;
-    _sum: PKFloat;
-    _body: PKNode;
-    _nelm: Cardinal;  // # elements belonging to the cluster
-    _nf: Cardinal;    // # features
-    _size: Cardinal;  // # nozero features
+    FNorm: TKFloat;  // norm
+    FDV: PKFloat;
+    FSum: PKFloat;
+    FBody: PKNode;
+    FNElm: Cardinal;  // # elements belonging to the cluster
+    FNF: Cardinal;    // # features
+    FSize: Cardinal;  // # nozero features
   public
     delta: TKFloat;  // moved distance
     next_d: TKFloat; // distance to neighbouring centroind
@@ -115,26 +115,27 @@ type
     procedure get_values (AValues: PKFloat);
     procedure clear();
 
-    property norm: TKFloat read _norm;
+    property Norm: TKFloat read FNorm;
   end;
 
   { TKKmeans }
 
   TKKmeans = class
   private
-    _opt: TKOption;
-    _point: TKPointArray;
-    _centroid: TKCentroidArray;
-    _body: TKNodeArray;
-    _nf: Cardinal;
+    FOpt: TKOptions;
+    FPoints: TKPointArray;
+    FCentroids: TKCentroidArray;
+    FBody: TKNodeArray;
+    FNF: Cardinal;
+    FObj: TKFloat;
   public
-    constructor Create(const AOpt: TKOption);
+    constructor Create(const AOpt: TKOptions; ARowCount, AColCount: Cardinal);
     destructor Destroy; override;
 
     procedure clear_point();
     procedure clear_centroid();
     class function read_point_fl(AEx, AExEnd: PKFloat; const ATmp: TKNodeArray; AWeight: Cardinal; ANormalize: Boolean = false): TKPoint;
-    procedure set_point_fl(AEx, AExEnd: PKFloat; AWeight: Cardinal; ANormalize: Boolean);
+    procedure set_point_fl(AEx, AExEnd: PKFloat; ARow, AWeight: Cardinal; ANormalize: Boolean);
     procedure delegate(AKM: TKKmeans);
     procedure compress();
     procedure decompress();
@@ -146,9 +147,9 @@ type
     function getObj(): TKFloat;
     procedure run();
 
-    property point: TKPointArray read _point;
-    property centroid: TKCentroidArray read _centroid;
-    property nf: Cardinal read _nf;
+    property point: TKPointArray read FPoints;
+    property centroid: TKCentroidArray read FCentroids;
+    property NF: Cardinal read FNF;
   end;
 
   // implementation of orthogonal k-means:
@@ -158,15 +159,21 @@ type
 
   TOrthogonalKmeans = class
   private
-    _opt: TKOption;
-    _kms: TKKMeansArray;
+    FOpt: TKOptions;
+    FKMs: TKKMeansArray;
+    FObjective: TKFloat;
   public
-    constructor Create(const option: TKOption);
+    constructor Create(const option: TKOptions); overload;
+    constructor Create(k: Cardinal; maxIter: Integer; initType: TKInit; isVerbose: Boolean = False); overload;
     destructor Destroy; override;
 
-    procedure load_train_data(rowCount, colCount: Cardinal; trainDS: PPKFloat; trainWeights: PCardinal);
+    procedure load_train_data(rowCount, colCount: Cardinal; trainDS: PPKFloat; trainWeights: PCardinal = nil);
     procedure train_on_data(pointToCluster: PInteger);
     procedure get_centroids(centroids: PPKFloat);
+
+    function Process(const trainDS: TKFloatArray2; var pointToCluster: TIntegerDynArray; var centroids: TKFloatArray2; const trainWeights: TCardinalDynArray = nil): Double;
+
+    property Objective: Double read FObjective;
   end;
 
 implementation
@@ -191,11 +198,11 @@ end;
 
 constructor TKPoint.Create(AN: PKNode; ASize: Cardinal; ANorm: TKFloat; AWeight: Cardinal);
 begin
-  _size := ASize;
-  _norm := ANorm;
-  _weight := AWeight;
-  _body := AllocMem(_size * SizeOf(TKNode));
-  Move(AN^, _body^, _size * SizeOf(TKNode));
+  FSize := ASize;
+  FNorm := ANorm;
+  FWeight := AWeight;
+  FBody := AllocMem(FSize * SizeOf(TKNode));
+  Move(AN^, FBody^, FSize * SizeOf(TKNode));
 end;
 
 procedure TKPoint.CopyFrom(const AP: TKPoint);
@@ -203,10 +210,10 @@ begin
   up_d := AP.up_d;
   lo_d := AP.lo_d;
   id := AP.id;
-  _size := AP._size;
-  _body := AP._body;
-  _norm := AP._norm;
-  _weight := AP._weight;
+  FSize := AP.FSize;
+  FBody := AP.FBody;
+  FNorm := AP.FNorm;
+  FWeight := AP.FWeight;
 end;
 
 function TKPoint.calc_ip(const AC: TKCentroid): TKFloat;
@@ -218,10 +225,11 @@ begin
   Result := 0.0;
 
   n := nbegin();
-  repeat
-    Result += n^.val * AC._dv[n^.idx];
+  while n <> nend() do
+  begin
+    Result += n^.val * AC.FDV[n^.idx];
     Inc(n);
-  until n = nend();
+  end;
 end;
 
 function TKPoint.calc_dist(const AC: TKCentroid): TKFloat;
@@ -231,15 +239,16 @@ begin
   // return distance from this point to the given centroid
 
   Result := 0.0;
-  Result += _norm + AC.norm;
+  Result += FNorm + AC.Norm;
 
   n := nbegin();
-  repeat
-    Result -= 2 * n^.val * AC._dv[n^.idx];
+  while n <> nend() do
+  begin
+    Result -= 2 * n^.val * AC.FDV[n^.idx];
     Inc(n);
-  until n = nend();
+  end;
 
-  Result *= _weight;
+  Result *= FWeight;
 end;
 
 procedure TKPoint.set_closest(const ACS: TKCentroidArray);
@@ -291,7 +300,7 @@ end;
 procedure TKPoint.shrink(ANF: Cardinal);
 begin
    while not empty() and (back()^.idx > ANF) do
-    Dec(_size);
+    Dec(FSize);
 end;
 
 procedure TKPoint.project(const AC: TKCentroid);
@@ -299,41 +308,41 @@ var
   i: Cardinal;
   norm_ip, v: TKFloat;
 begin
-  norm_ip := calc_ip(AC) / AC.norm;
+  norm_ip := calc_ip(AC) / AC.Norm;
 
-  up_d := 0.0; lo_d := 0.0; id := 0; _norm := 0.0; // reset
+  up_d := 0.0; lo_d := 0.0; id := 0; FNorm := 0.0; // reset
 
-  for i := 0 to _size - 1 do
+  for i := 0 to FSize - 1 do
   begin
-    v := AC._dv[_body[i].idx] * norm_ip;
-    _norm += Sqr(v);
-    _body[i].val := v;
+    v := AC.FDV[FBody[i].idx] * norm_ip;
+    FNorm += Sqr(v);
+    FBody[i].val := v;
   end;
 end;
 
 function TKPoint.nbegin(): PKNode;
 begin
-  Result := _body;
+  Result := FBody;
 end;
 
 function TKPoint.nend(): PKNode;
 begin
-  Result := _body + _size;
+  Result := FBody + FSize;
 end;
 
 function TKPoint.back(): PKNode;
 begin
-  Result := @_body[_size - 1];
+  Result := @FBody[FSize - 1];
 end;
 
 function TKPoint.empty(): Boolean;
 begin
-  Result := _size = 0;
+  Result := FSize = 0;
 end;
 
 procedure TKPoint.clear();
 begin
-  if Assigned(_body) then FreeMemAndNil(_body);
+  if Assigned(FBody) then FreeMemAndNil(FBody);
 end;
 
 { TKCentroid }
@@ -343,29 +352,31 @@ var
   sz: Cardinal;
   n: PKNode;
 begin
-  _norm := AP.norm;
-  _nf := ANF;
+  FNorm := AP.Norm;
+  FNF := ANF;
 
   if ADelegate then
   begin
-    _size := AP.size;
-    _body := AP.body; // ADelegate
+    FSize := AP.Size;
+    FBody := AP.Body; // ADelegate
   end
   else
   begin
     // workaround for a bug in value initialization in gcc 4.0
-    sz := (_nf + 1) * SizeOf(TKFloat);
+    sz := (FNF + 1) * SizeOf(TKFloat);
 
-    _dv := AllocMem(sz);
-    _sum := AllocMem(sz);
+    FDV := AllocMem(sz);
+    FSum := AllocMem(sz);
 
-    FillChar(_dv^, sz, 0);
-    FillChar(_sum^, sz, 0);
+    FillChar(FDV^, sz, 0);
+    FillChar(FSum^, sz, 0);
 
     n := AP.nbegin();
-    repeat
-      _dv[n^.idx] := n^.val;
-    until n = AP.nend();
+    while n <> AP.nend() do
+    begin
+      FDV[n^.idx] := n^.val;
+      Inc(n);
+    end;
   end;
 end;
 
@@ -374,11 +385,13 @@ var
   n: PKNode;
 begin
   n := AP.nbegin();
-  repeat
-    _sum[n^.idx] -= n^.val * AP.weight;
-  until n = AP.nend();
+  while n <> AP.nend() do
+  begin
+    FSum[n^.idx] -= n^.val * AP.Weight;
+    Inc(n);
+  end;
 
-  _nelm -= AP.weight;
+  FNElm -= AP.Weight;
 end;
 
 procedure TKCentroid.push(AP: TKPoint);
@@ -386,11 +399,13 @@ var
   n: PKNode;
 begin
   n := AP.nbegin();
-  repeat
-    _sum[n^.idx] += n^.val * AP.weight;
-  until n = AP.nend();
+  while n <> AP.nend() do
+  begin
+    FSum[n^.idx] += n^.val * AP.Weight;
+    Inc(n);
+  end;
 
-  _nelm += AP.weight;
+  FNElm += AP.Weight;
 end;
 
 function TKCentroid.calc_dist(const AC: TKCentroid; ASkip: Boolean): TKFloat;
@@ -404,17 +419,17 @@ begin
   if ASkip then
   begin
     cand := Sqr(next_d);
-    for d := 0 to _nf do
+    for d := 0 to FNF do
     begin
-      Result += Sqr(_dv[d] - AC._dv[d]);
+      Result += Sqr(FDV[d] - AC.FDV[d]);
       if Result > cand then
         Break;
     end;
   end
   else
   begin
-    for d := 0 to _nf do
-      Result += Sqr(_dv[d] - AC._dv[d]);
+    for d := 0 to FNF do
+      Result += Sqr(FDV[d] - AC.FDV[d]);
   end;
 end;
 
@@ -450,14 +465,14 @@ var
   v: TKFloat;
 begin
   // move center
-  delta := 0.0; _norm := 0.0;
+  delta := 0.0; FNorm := 0.0;
 
-  for i := 0 to _nf do
+  for i := 0 to FNF do
   begin
-    v := _sum[i] / _nelm;
-    delta += Sqr(v - _dv[i]);
-    _norm += Sqr(v);
-    _dv[i] := v;
+    v := FSum[i] / FNElm;
+    delta += Sqr(v - FDV[i]);
+    FNorm += Sqr(v);
+    FDV[i] := v;
   end;
 
   delta := Sqrt(delta);
@@ -467,23 +482,23 @@ procedure TKCentroid.compress();
 var
   i, j: Cardinal;
 begin
-  _size := 0;
-  for i := 0 to _nf do
-    if _dv[i] <> 0.0 then
-      Inc(_size);
-  _body := AllocMem(_size * SizeOf(TKNode));
+  FSize := 0;
+  for i := 0 to FNF do
+    if FDV[i] <> 0.0 then
+      Inc(FSize);
+  FBody := AllocMem(FSize * SizeOf(TKNode));
 
   j := 0;
-  for i := 0 to _nf do
-    if _dv[i] <> 0.0 then
+  for i := 0 to FNF do
+    if FDV[i] <> 0.0 then
     begin
-      _body[j].idx := i;
-      _body[j].val := _dv[i];
+      FBody[j].idx := i;
+      FBody[j].val := FDV[i];
       Inc(j);
     end;
 
-  FreeMemAndNil(_dv);
-  FreeMemAndNil(_sum);
+  FreeMemAndNil(FDV);
+  FreeMemAndNil(FSum);
 end;
 
 procedure TKCentroid.decompress();
@@ -491,38 +506,41 @@ var
   i: Cardinal;
   sz: Integer;
 begin
-  sz := (_nf + 1) * SizeOf(TKFloat);
-  _dv := AllocMem(sz);
-  FillChar(_dv^, sz, 0);
+  sz := (FNF + 1) * SizeOf(TKFloat);
+  FDV := AllocMem(sz);
+  FillChar(FDV^, sz, 0);
 
-  for i := 0 to _size do
-    _dv[_body[i].idx] := _body[i].val;
+  for i := 0 to FSize - 1 do
+    FDV[FBody[i].idx] := FBody[i].val;
 
-  FreeMemAndNil(_body);
+  FreeMemAndNil(FBody);
 end;
 
 procedure TKCentroid.get_values(AValues: PKFloat);
 var
   i: Cardinal;
 begin
-  FillChar(AValues^, _nf * sizeof(TKFloat), 0);
-  for i := 0 to _size do
-    AValues[_body[i].idx] := _body[i].val;
+  FillChar(AValues^, FNF * sizeof(TKFloat), 0);
+  for i := 0 to FSize - 1 do
+    AValues[FBody[i].idx] := FBody[i].val;
 end;
 
 procedure TKCentroid.clear();
 begin
-  if Assigned(_dv) then FreeMemAndNil(_dv);
-  if Assigned(_sum) then FreeMemAndNil(_sum);
-  if Assigned(_body) then FreeMemAndNil(_body);
+  if Assigned(FDV) then FreeMemAndNil(FDV);
+  if Assigned(FSum) then FreeMemAndNil(FSum);
+  if Assigned(FBody) then FreeMemAndNil(FBody);
 end;
 
 { TKKmeans }
 
-constructor TKKmeans.Create(const AOpt: TKOption);
+constructor TKKmeans.Create(const AOpt: TKOptions; ARowCount, AColCount: Cardinal);
 begin
-  _opt := AOpt;
-  SetLength(_centroid, _opt.k);
+  FObj := NaN;
+  FOpt := AOpt;
+  SetLength(FPoints, ARowCount);
+  SetLength(FCentroids, FOpt.k);
+  SetLength(FBody, AColCount);
 end;
 
 destructor TKKmeans.Destroy;
@@ -535,18 +553,18 @@ procedure TKKmeans.clear_point();
 var
   i: Cardinal;
 begin
-  for i := 0 to High(_point) do
-    _point[i].clear();
-  SetLength(_point, 0);
+  for i := 0 to High(FPoints) do
+    FPoints[i].clear();
+  SetLength(FPoints, 0);
 end;
 
 procedure TKKmeans.clear_centroid();
 var
   i: Cardinal;
 begin
-  for i := 0 to High(_centroid) do
-    _centroid[i].clear();
-  SetLength(_centroid, 0);
+  for i := 0 to High(FCentroids) do
+    FCentroids[i].clear();
+  SetLength(FCentroids, 0);
 end;
 
 class function TKKmeans.read_point_fl(AEx, AExEnd: PKFloat; const ATmp: TKNodeArray; AWeight: Cardinal; ANormalize: Boolean): TKPoint;
@@ -582,48 +600,47 @@ begin
   Result := TKPoint.Create(@ATmp[0], fi, norm, AWeight);
 end;
 
-procedure TKKmeans.set_point_fl(AEx, AExEnd: PKFloat; AWeight: Cardinal; ANormalize: Boolean);
+procedure TKKmeans.set_point_fl(AEx, AExEnd: PKFloat; ARow, AWeight: Cardinal; ANormalize: Boolean);
 var
   p: TKPoint;
 begin
-  SetLength(_point, Length(_point) + 1);
-  p := _point[High(_point)];
-  p := read_point_fl(AEx, AExEnd, _body, AWeight, ANormalize);
+  p := read_point_fl(AEx, AExEnd, FBody, AWeight, ANormalize);
+  FPoints[ARow] := p;
 
   if not p.empty() then
-    _nf := Max(p.back()^.idx, _nf);
+    FNF := Max(p.back()^.idx, FNF);
 end;
 
 procedure TKKmeans.delegate(AKM: TKKmeans);
 var
   tmp: TKPointArray;
 begin
-  tmp := _point;
-  _point := AKM._point;
-  AKM._point := tmp;
+  tmp := FPoints;
+  FPoints := AKM.FPoints;
+  AKM.FPoints := tmp;
 
-  AKM._nf := _nf;
+  AKM.FNF := FNF;
 end;
 
 procedure TKKmeans.compress();
 var
   i: Cardinal;
 begin
-  for i := 0 to High(_centroid) do
-      _centroid[i].compress();
+  for i := 0 to High(FCentroids) do
+      FCentroids[i].compress();
 end;
 
 procedure TKKmeans.decompress();
 var
   i: Cardinal;
 begin
-  for i := 0 to High(_centroid) do
-      _centroid[i].decompress();
+  for i := 0 to High(FCentroids) do
+      FCentroids[i].decompress();
 end;
 
 procedure TKKmeans.push_centroid(AP: TKPoint; AIdx: Cardinal; ADelegate: Boolean);
 begin
-  _centroid[AIdx] := TKCentroid.Create(AP, _nf, ADelegate);
+  FCentroids[AIdx] := TKCentroid.Create(AP, FNF, ADelegate);
 end;
 
 procedure TKKmeans.init();
@@ -637,25 +654,25 @@ var
 begin
   seed := CRandomSeed;
   obj := 0;
-  if _opt.init = kiKMeansPP then
+  if FOpt.init = kiKMeansPP then
   begin
-    SetLength(r, Length(_point));
-    SetLength(chosen, Length(_point));
+    SetLength(r, Length(FPoints));
+    SetLength(chosen, Length(FPoints));
   end;
 
-  SetLength(dissim_buf, Length(_point));
+  SetLength(dissim_buf, Length(FPoints));
 
-  for i := 0 to _opt.k - 1 do
+  for i := 0 to FOpt.k - 1 do
   begin
     c := 0;
     repeat
-      case _opt.init of
+      case FOpt.init of
         kiRandom:
-          c := RandInt(Length(_point), seed);
+          c := RandInt(Length(FPoints), seed);
         kiKMeansPP:
           if i = 0 then
           begin
-            c := RandInt(Length(_point), seed)
+            c := RandInt(Length(FPoints), seed)
           end
           else
           begin
@@ -665,18 +682,19 @@ begin
       end;
       // skip chosen centroids; fix a bug reported by Gleb
       while chosen[c] do
-        c := Min(High(_point), c + 1);
-    until chosen[c];
+        c := Min(High(FPoints), c + 1);
+    until not chosen[c];
+    push_centroid(FPoints[c], i);
     obj := 0;
     chosen[c] := True;
 
     //#pragma omp parallel for
-    for k := 0 to High(_point) do
-      dissim_buf[k] := _point[k].calc_dist(_centroid[i]);
+    for k := 0 to High(FPoints) do
+      dissim_buf[k] := FPoints[k].calc_dist(FCentroids[i]);
 
-    for j := 0 to High(_point) do
+    for j := 0 to High(FPoints) do
     begin
-      p := _point[j];
+      p := FPoints[j];
       di := dissim_buf[j];
 
       if (i = 0) or (di < p.up_d) then      // closest
@@ -690,9 +708,9 @@ begin
         p.lo_d := di;
       end;
 
-      if i < _opt.k - 1 then
+      if i < FOpt.k - 1 then
       begin
-        if _opt.init = kiKMeansPP then
+        if FOpt.init = kiKMeansPP then
         begin
           obj += p.up_d;
           r[j] := obj;
@@ -702,12 +720,12 @@ begin
       begin
         p.up_d := Sqrt(p.up_d);
         p.lo_d := Sqrt(p.lo_d);
-        _centroid[p.id].push(p);
+        FCentroids[p.id].push(p);
       end;
     end;
   end;
 
-  if (_opt.verbosity > 1) and not _opt.quiet then
+  if (FOpt.verbosity > 1) and not FOpt.quiet then
     WriteLn;
 end;
 
@@ -718,22 +736,22 @@ var
 begin
   id0 := 0;
   id1 := 1;
-  if _centroid[id1].delta > _centroid[id0].delta then
+  if FCentroids[id1].delta > FCentroids[id0].delta then
     Exchange(id0, id1);
 
-  for j := 2 to _opt.k - 1 do
-    if _centroid[j].delta > _centroid[id1].delta then
+  for j := 2 to FOpt.k - 1 do
+    if FCentroids[j].delta > FCentroids[id1].delta then
     begin
       id1 := j;
-      if _centroid[j].delta > _centroid[id0].delta then
+      if FCentroids[j].delta > FCentroids[id0].delta then
         Exchange(id0, id1);
     end;
 
-  for i := 0 to High(_point) do
+  for i := 0 to High(FPoints) do
   begin
-    p := _point[i];
-    p.up_d += _centroid[p.id].delta * p.weight;
-    p.lo_d -= _centroid[IfThen(p.id = id0, id1, id0)].delta * p.weight;
+    p := FPoints[i];
+    p.up_d += FCentroids[p.id].delta * p.Weight;
+    p.lo_d -= FCentroids[IfThen(p.id = id0, id1, id0)].delta * p.Weight;
   end;
 end;
 
@@ -742,11 +760,11 @@ var
   i: Cardinal;
   dissim_buf: TKFloatArray;
 begin
-  SetLength(dissim_buf, Length(_point));
+  SetLength(dissim_buf, Length(FPoints));
 
   //#pragma omp parallel for
-  for i := 0 to High(_point) do
-    dissim_buf[i] := _point[i].calc_dist(_centroid[_point[i].id]);
+  for i := 0 to High(FPoints) do
+    dissim_buf[i] := FPoints[i].calc_dist(FCentroids[FPoints[i].id]);
 
   Result := Sum(dissim_buf);
 end;
@@ -758,22 +776,22 @@ var
   p: TKPoint;
 begin
   init();
-  moved := Length(_point);
+  moved := Length(FPoints);
 
-  iter_lim := IfThen( _opt.iter < 0, High(Cardinal), _opt.iter);
+  iter_lim := IfThen( FOpt.iter < 0, High(Cardinal), FOpt.iter);
 
   for i := 0 to iter_lim do // find neighbour center
   begin
     if moved <> 0 then
     begin
-      for j := 0 to _opt.k - 1 do // move center
-       _centroid[j].reset();
+      for j := 0 to FOpt.k - 1 do // move center
+       FCentroids[j].reset();
       update_bounds();
     end;
 
-    if (i > 0) and not _opt.quiet then
+    if (i > 0) and not FOpt.quiet then
     begin
-      if _opt.verbosity > 1 then
+      if FOpt.verbosity > 1 then
         WriteLn(Format('  %3d: obj = %e; #moved = %6d\n', [i, getObj (), moved]))
       else
         Write('.');
@@ -782,37 +800,39 @@ begin
     if moved = 0 then
       Break;
 
-    for j := 0 to _opt.k - 1 do
-      _centroid[j].set_closest(_centroid);
+    for j := 0 to FOpt.k - 1 do
+      FCentroids[j].set_closest(FCentroids);
 
     moved := 0;
-    for j := 0 to High(_point) do
+    for j := 0 to High(FPoints) do
     begin
-      p := _point[j];
+      p := FPoints[j];
       id0 := p.id;
-      m := Max(_centroid[id0].next_d / 2, p.lo_d);
+      m := Max(FCentroids[id0].next_d / 2, p.lo_d);
       if p.up_d > m then
       begin
-        p.up_d := Sqrt(p.calc_dist(_centroid[id0]));
+        p.up_d := Sqrt(p.calc_dist(FCentroids[id0]));
         if p.up_d > m then
         begin
-          p.set_closest(_centroid);
+          p.set_closest(FCentroids);
           if p.id <> id0 then
           begin
             Inc(moved);
-            _centroid[id0].pop(p);
-            _centroid[p.id].push(p);
+            FCentroids[id0].pop(p);
+            FCentroids[p.id].push(p);
           end;
         end;
       end;
     end;
   end;
 
-  if not _opt.quiet then
+  FObj := getObj();
+
+  if not FOpt.quiet then
   begin
-    WriteLn(IfThen(moved <> 0, 'break', 'done'));
-    if _opt.verbosity = 1 then
-      WriteLn(Format('; obj = %g.\n', [getObj()]))
+    Write(IfThen(moved <> 0, 'break', 'done'));
+    if FOpt.verbosity = 1 then
+      WriteLn(Format('; obj = %g.', [FObj]))
     else
       WriteLn('.');
   end;
@@ -820,18 +840,35 @@ end;
 
 { TOrthogonalKmeans }
 
-constructor TOrthogonalKmeans.Create(const option: TKOption);
+constructor TOrthogonalKmeans.Create(const option: TKOptions);
 begin
-  _opt := option;
+  FObjective := NaN;
+  FOpt := option;
+end;
+
+constructor TOrthogonalKmeans.Create(k: Cardinal; maxIter: Integer; initType: TKInit; isVerbose: Boolean);
+var
+  opt: TKOptions;
+begin
+  opt.init := initType;
+  opt.iter := maxIter;
+  opt.k := k;
+  opt.m := 1;
+  opt.normalize := False;
+  opt.quiet := False;
+  opt.verbosity := 1;
+  opt.quiet := not isVerbose;
+
+  Create(opt);
 end;
 
 destructor TOrthogonalKmeans.Destroy;
 var
   i: Integer;
 begin
-  for i := 0 to High(_kms) do
-    _kms[i].Free;
-  SetLength(_kms, 0);
+  for i := 0 to High(FKMs) do
+    FKMs[i].Free;
+  SetLength(FKMs, 0);
 
   inherited Destroy;
 end;
@@ -841,18 +878,18 @@ var
   rc, w: Cardinal;
   km: TKKmeans;
 begin
-  km := TKKmeans.Create(_opt);
+  km := TKKmeans.Create(FOpt, rowCount, colCount);
 
   for rc := 0 to rowCount - 1 do
   begin
     w := 1;
     if Assigned(trainWeights) then
       w := trainWeights[rc];
-    km.set_point_fl(@trainDS[rc, 0], @trainDS[rc, colCount], w, _opt.normalize);
+    km.set_point_fl(@trainDS[rc, 0], @trainDS[rc, colCount], rc, w, FOpt.normalize);
   end;
 
-  SetLength(_kms, Length(_kms) + 1);
-  _kms[High(_kms)] := km;
+  SetLength(FKMs, Length(FKMs) + 1);
+  FKMs[High(FKMs)] := km;
 end;
 
 procedure TOrthogonalKmeans.train_on_data(pointToCluster: PInteger);
@@ -862,13 +899,13 @@ var
   km, km_: TKKmeans;
   point, point_: TKPointArray;
 begin
-  km := _kms[High(_kms)];
+  km := FKMs[High(FKMs)];
 
-  for i := 1 to _opt.m do
+  for i := 1 to FOpt.m do
   begin
     if i >= 2 then
     begin
-      km_ := _kms[High(_kms)]; // last of mohikans
+      km_ := FKMs[High(FKMs)]; // last of mohikans
 
       // project
       point_ := km_.point;
@@ -879,7 +916,7 @@ begin
 
     km.run();
 
-    point := km_.point;
+    point := km.point;
     op2c := pointToCluster;
     for j := 0 to High(point) do
     begin
@@ -887,6 +924,8 @@ begin
       Inc(op2c);
     end;
   end;
+
+  FObjective := km.FObj;
 end;
 
 procedure TOrthogonalKmeans.get_centroids(centroids: PPKFloat);
@@ -895,11 +934,35 @@ var
   km: TKKmeans;
   centroid: TKCentroidArray;
 begin
-  km := _kms[High(_kms)];
+  km := FKMs[High(FKMs)];
   km.compress();
   centroid := km.centroid;
   for i := 0 to High(centroid) do
     centroid[i].get_values(centroids[i]);
+end;
+
+function TOrthogonalKmeans.Process(const trainDS: TKFloatArray2; var pointToCluster: TIntegerDynArray;
+  var centroids: TKFloatArray2; const trainWeights: TCardinalDynArray): Double;
+var
+  rc, cc: Cardinal;
+  tw: PCardinal;
+begin
+  rc := Length(trainDS);
+  cc := Length(trainDS[0]);
+  Assert(not Assigned(trainWeights) or (Length(trainWeights) = rc));
+  Assert(not Assigned(pointToCluster) or (Length(pointToCluster) = rc));
+  Assert(not Assigned(centroids) or (Length(centroids) = FOpt.k) and (Length(centroids[0]) = cc));
+
+  SetLength(pointToCluster, rc);
+  SetLength(centroids, rc, cc);
+
+  tw := nil;
+  if Assigned(trainWeights) then
+    tw := @trainWeights[0];
+
+  load_train_data(rc, cc, PPKFloat(@trainDS[0]), tw);
+  train_on_data(@pointToCluster[0]);
+  get_centroids(PPKFloat(@centroids[0]));
 end;
 
 end.
