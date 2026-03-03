@@ -14,6 +14,7 @@ type
   TFloat = Single;
 
   TIntegerDynArray2 = array of TIntegerDynArray;
+  TIntegerDynArray3 = array of TIntegerDynArray2;
   TByteDynArray2 = array of TByteDynArray;
   TFloatDynArray = array of TFloat;
   TFloatDynArray2 = array of TFloatDynArray;
@@ -66,10 +67,6 @@ type
 
   EFFMPEGError = class(Exception);
 
-  TCompareFunction = function(Item1,Item2,UserParameter:Pointer):Integer;
-
-procedure QuickSort(var AData;AFirstItem,ALastItem:Int64;AItemSize:Integer;ACompareFunction:TCompareFunction;AUserParameter:Pointer=nil);
-
 procedure LZCompress(ASourceStream: TStream; ADestStream: TStream);
 procedure LZDecompress(ASourceStream: TStream; ADestStream: TStream);
 
@@ -107,7 +104,6 @@ procedure yakmo_get_centroids(ay: PYakmo; centroids: PPDouble); stdcall; externa
 function GetActiveProcessorCount(GroupNumber: Word): DWORD; stdcall; external 'kernel32.dll';
 
 const
-  CRandomSeed = $42381337;
   ALL_PROCESSOR_GROUPS = High(Word);
 
 implementation
@@ -229,56 +225,6 @@ begin
   finally
     p.free;
   end;
-end;
-
-procedure QuickSort(var AData;AFirstItem,ALastItem:Int64;AItemSize:Integer;ACompareFunction:TCompareFunction;AUserParameter:Pointer=nil);
-var I, J, P: Int64;
-    PData,P1,P2: PByte;
-    Tmp: array[0..4095] of Byte;
-begin
-  if ALastItem <= AFirstItem then
-    Exit;
-
-  Assert(AItemSize < SizeOf(Tmp),'AItemSize too big!');
-  PData:=PByte(@AData);
-  repeat
-    I := AFirstItem;
-    J := ALastItem;
-    P := (AFirstItem + ALastItem) shr 1;
-    repeat
-      P1:=PData;Inc(P1,I*AItemSize);
-      P2:=PData;Inc(P2,P*AItemSize);
-      while ACompareFunction(P1, P2, AUserParameter) < 0 do
-      begin
-        Inc(I);
-        Inc(P1,AItemSize);
-      end;
-      P1:=PData;Inc(P1,J*AItemSize);
-      //P2:=PData;Inc(P2,P*AItemSize); already done
-      while ACompareFunction(P1, P2, AUserParameter) > 0 do
-      begin
-        Dec(J);
-        Dec(P1,AItemSize);
-      end;
-      if I <= J then
-      begin
-        P1:=PData;Inc(P1,I*AItemSize);
-        P2:=PData;Inc(P2,J*AItemSize);
-        Move(P2^, Tmp[0], AItemSize);
-        Move(P1^, P2^, AItemSize);
-        Move(Tmp[0], P1^, AItemSize);
-
-        if P = I then
-          P := J
-        else if P = J then
-          P := I;
-        Inc(I);
-        Dec(J);
-      end;
-    until I > J;
-    if AFirstItem < J then QuickSort(AData,AFirstItem,J,AItemSize,ACompareFunction,AUserParameter);
-    AFirstItem := I;
-  until I >= ALastItem;
 end;
 
 procedure LZCompress(ASourceStream: TStream; ADestStream: TStream);

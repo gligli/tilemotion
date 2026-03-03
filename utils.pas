@@ -23,6 +23,8 @@ const
   cRGBw = 16; // in 1 / 32th
   cChromaWeight = 1.0;
 
+  CRandomSeed = $42381337;
+
   // don't change these
 
   cLumaDiv = cRedMul + cGreenMul + cBlueMul;
@@ -146,6 +148,7 @@ type
 
   TEvalFunc = function(const arg: TDoubleDynArray; data: Pointer): Double of object;
   TGRSEvalFunc = function(x: Double; Data: Pointer): Double of object;
+  TCompareFunction = function(Item1,Item2,UserParameter:Pointer):Integer;
 
   TGRSResult = record
     X, Y: Double;
@@ -163,7 +166,10 @@ const
 
 procedure SpinEnter(Lock: PSpinLock); assembler;
 procedure SpinLeave(Lock: PSpinLock); assembler;
-procedure Exchange(var a, b: Integer);
+procedure Exchange(var a, b: Integer); overload;
+procedure Exchange(var a, b: Cardinal); overload;
+procedure Exchange(var a, b: Double); overload;
+function RandInt(Range: Cardinal; var Seed: Cardinal): Cardinal;
 function iDivDef(x, y, def: Integer): Integer;overload;inline;
 function iDivDef(x, y, def: Int64): Int64;overload;inline;
 function DivDef(x, y, def: TFloat): TFloat;inline;
@@ -194,6 +200,7 @@ function CompareEuclideanDCTPtr_asm(pa_rcx, pb_rdx: PDCTScalar): Cardinal; regis
 function CompareEuclidean(a, b: PDouble; size: Integer): Double; inline;
 function CompareCountIndexVSH(const Item1,Item2:PCountIndex):Integer;
 function CompareIntegers(Item1,Item2,UserParameter:Pointer):Integer;
+function CompareDoubles(Item1,Item2,UserParameter:Pointer):Integer;
 function ComparePaletteUseCount(Item1,Item2,UserParameter:Pointer):Integer;
 function QuickTestEuclideanDCTPtr(pa, pb: PDCTScalar; min_dist: Cardinal): Boolean;
 function QuickTestEuclideanDCTPtr_asm(pa_rcx, pb_rdx: PDCTScalar; min_dist_r8: Cardinal): Boolean; register; assembler;
@@ -206,6 +213,8 @@ function EqualQualityTileCount(tileCount: Double): Integer;
 function GoldenRatioSearch(Func: TGRSEvalFunc; MinX, MaxX: Double; ObjectiveY: Double; EpsilonX, EpsilonY: Double; Data: Pointer): TGRSResult;
 function EuclideanToPSNR(AEuclidean: Double): Double;
 function PSNRToEuclidean(APSNR: Double): Cardinal;
+procedure QuickSort(var AData;AFirstItem,ALastItem:Int64;AItemSize:Integer;ACompareFunction:TCompareFunction;AUserParameter:Pointer=nil);
+function DichotomyFind(var AData,AKey;AFirstItem,ALastItem:Int64;AItemSize:Integer;ACompareFunction:TCompareFunction;AUserParameter:Pointer=nil): Integer;
 
 implementation
 
@@ -241,6 +250,33 @@ begin
   b := a;
   a := tmp;
 end;
+
+procedure Exchange(var a, b: Cardinal);
+var
+  tmp: Cardinal;
+begin
+  tmp := b;
+  b := a;
+  a := tmp;
+end;
+
+procedure Exchange(var a, b: Double);
+var
+  tmp: Double;
+begin
+  tmp := b;
+  b := a;
+  a := tmp;
+end;
+
+{$PUSH}
+{$RANGECHECKS OFF}
+function RandInt(Range: Cardinal; var Seed: Cardinal): Cardinal;
+begin
+  Seed := Integer(Seed * $08088405) + 1;
+  Result := (Seed * Range) shr 32;
+end;
+{$POP}
 
 function iDivDef(x, y, def: Integer): Integer;
 begin
@@ -787,6 +823,11 @@ begin
     Result := CompareValue(Item1^.Hue, Item2^.Hue);
 end;
 
+function CompareDoubles(Item1, Item2, UserParameter: Pointer): Integer;
+begin
+  Result := CompareValue(PDouble(Item2)^, PDouble(Item1)^);
+end;
+
 function ComparePaletteUseCount(Item1,Item2,UserParameter:Pointer):Integer;
 begin
   Result := CompareValue(PInteger(Item2)^, PInteger(Item1)^);
@@ -1243,6 +1284,85 @@ end;
 function PSNRToEuclidean(APSNR: Double): Cardinal;
 begin
   Result := Round(Power(10.0, (cBestPSNR - APSNR) * 0.1) * cTileDCTSize);
+end;
+
+procedure QuickSort(var AData;AFirstItem,ALastItem:Int64;AItemSize:Integer;ACompareFunction:TCompareFunction;AUserParameter:Pointer=nil);
+var I, J, P: Int64;
+    PData,P1,P2: PByte;
+    Tmp: array[0..4095] of Byte;
+begin
+  if ALastItem <= AFirstItem then
+    Exit;
+
+  Assert(AItemSize < SizeOf(Tmp),'AItemSize too big!');
+  PData:=PByte(@AData);
+  repeat
+    I := AFirstItem;
+    J := ALastItem;
+    P := (AFirstItem + ALastItem) shr 1;
+    repeat
+      P1:=PData;Inc(P1,I*AItemSize);
+      P2:=PData;Inc(P2,P*AItemSize);
+      while ACompareFunction(P1, P2, AUserParameter) < 0 do
+      begin
+        Inc(I);
+        Inc(P1,AItemSize);
+      end;
+      P1:=PData;Inc(P1,J*AItemSize);
+      //P2:=PData;Inc(P2,P*AItemSize); already done
+      while ACompareFunction(P1, P2, AUserParameter) > 0 do
+      begin
+        Dec(J);
+        Dec(P1,AItemSize);
+      end;
+      if I <= J then
+      begin
+        P1:=PData;Inc(P1,I*AItemSize);
+        P2:=PData;Inc(P2,J*AItemSize);
+        Move(P2^, Tmp[0], AItemSize);
+        Move(P1^, P2^, AItemSize);
+        Move(Tmp[0], P1^, AItemSize);
+
+        if P = I then
+          P := J
+        else if P = J then
+          P := I;
+        Inc(I);
+        Dec(J);
+      end;
+    until I > J;
+    if AFirstItem < J then QuickSort(AData,AFirstItem,J,AItemSize,ACompareFunction,AUserParameter);
+    AFirstItem := I;
+  until I >= ALastItem;
+end;
+
+function DichotomyFind(var AData,AKey;AFirstItem,ALastItem:Int64;AItemSize:Integer;ACompareFunction:TCompareFunction;AUserParameter:Pointer=nil): Integer;
+{ Searches for the first item <= Key, returns True if exact match,
+  sets index to the index of the found string. }
+var
+  I,L,R,Dir: Integer;
+  PData,PKey,P: PByte;
+begin
+  Result := -1;
+  // Use binary search.
+  L := AFirstItem;
+  R := ALastItem;
+  PData:=PByte(@AData);
+  PKey:=PByte(@AKey);
+  while L<=R do
+  begin
+    I := L + (R - L) div 2;
+    P := PData; Inc(P, I * AItemSize);
+    Dir := ACompareFunction(P, PKey, AUserParameter);
+    if Dir < 0 then
+      L := I+1
+    else begin
+      R := I-1;
+      if Dir = 0 then
+        L := I;
+    end;
+  end;
+  Result := L;
 end;
 
 end.

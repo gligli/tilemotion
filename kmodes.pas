@@ -9,7 +9,7 @@ unit kmodes;
 interface
 
 uses
-  Classes, SysUtils, Types, Math, LazLogger, MTProcs, windows, extern;
+  Classes, SysUtils, Types, Math, LazLogger, MTProcs, windows, extern, utils;
 
 const
   cKModesFeatureCount = 80;
@@ -75,72 +75,11 @@ type
   end;
 
 
-function RandInt(Range: Cardinal; var Seed: Cardinal): Cardinal;
-procedure QuickSort(var AData;AFirstItem,ALastItem,AItemSize:Integer;ACompareFunction:TCompareFunction;AUserParameter:Pointer=nil);
 function MatchingDissim(const a: TByteDynArray; const b: TByteDynArray): UInt64; inline; overload;
 function MatchingDissim(a: PBYTE; b: PByte; count: Integer): UInt64; inline; overload;
 function GetMinMatchingDissim(const a: TByteDynArray2; const b: TByteDynArray; count: Integer; out bestDissim: UInt64): Integer; overload;
 
 implementation
-
-{$PUSH}
-{$RANGECHECKS OFF}
-function RandInt(Range: Cardinal; var Seed: Cardinal): Cardinal;
-begin
-  Seed := Integer(Seed * $08088405) + 1;
-  Result := (Seed * Range) shr 32;
-end;
-{$POP}
-
-procedure QuickSort(var AData;AFirstItem,ALastItem,AItemSize:Integer;ACompareFunction:TCompareFunction;AUserParameter:Pointer=nil);
-var I, J, P: Integer;
-    PData,P1,P2: PByte;
-    Tmp: array[0..4095] of Byte;
-begin
-  if ALastItem <= AFirstItem then
-    Exit;
-
-  Assert(AItemSize < SizeOf(Tmp),'AItemSize too big!');
-  PData:=PByte(@AData);
-  repeat
-    I := AFirstItem;
-    J := ALastItem;
-    P := (AFirstItem + ALastItem) shr 1;
-    repeat
-      P1:=PData;Inc(P1,I*AItemSize);
-      P2:=PData;Inc(P2,P*AItemSize);
-      while ACompareFunction(P1, P2, AUserParameter) < 0 do
-      begin
-        Inc(I);
-        Inc(P1,AItemSize);
-      end;
-      P1:=PData;Inc(P1,J*AItemSize);
-      //P2:=PData;Inc(P2,P*AItemSize); already done
-      while ACompareFunction(P1, P2, AUserParameter) > 0 do
-      begin
-        Dec(J);
-        Dec(P1,AItemSize);
-      end;
-      if I <= J then
-      begin
-        P1:=PData;Inc(P1,I*AItemSize);
-        P2:=PData;Inc(P2,J*AItemSize);
-        Move(P2^, Tmp[0], AItemSize);
-        Move(P1^, P2^, AItemSize);
-        Move(Tmp[0], P1^, AItemSize);
-
-        if P = I then
-          P := J
-        else if P = J then
-          P := I;
-        Inc(I);
-        Dec(J);
-      end;
-    until I > J;
-    if AFirstItem < J then QuickSort(AData,AFirstItem,J,AItemSize,ACompareFunction,AUserParameter);
-    AFirstItem := I;
-  until I >= ALastItem;
-end;
 
 function CompareLines(Item1,Item2,UserParameter:Pointer): Integer;
 begin

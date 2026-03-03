@@ -13,7 +13,7 @@ interface
 uses
   windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, zstream, IniFiles, Graphics,
   IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, MTProcs, bufstream,
-  tbbmalloc, extern, utils, kmodes, powell, sle;
+  tbbmalloc, extern, utils, powell, orthogonal_kmeans;
 type
   TEncoderStep = (esAll = -1, esLoad = 0, esPredict, esReduce, esPreparePalettes, esDither, esReindex1, esReconstruct, esReindex2, esSave);
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
@@ -1710,7 +1710,10 @@ var
 
   procedure DoDCT(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
+    iDCT: Integer;
     Tile: PTile;
+    CpnPixels: TCpnPixels;
+    DCT: TDCT;
   begin
     if not InRange(AIndex, 0, Encoder.FTileMapSize - 1) then
       Exit;
@@ -1718,7 +1721,10 @@ var
     Tile := FrameTiles[AIndex];
     Assert(Tile^.Active);
 
-    Encoder.ComputeTilePsyVisFeatures(Tile^, pvsWeightedDCT, False, False, False, False, cColorCpns, nil, @YakmoDataset[AIndex, 0]);
+    Encoder.ConvertToCpnPixels(Tile^, False, False, False, False, nil, CpnPixels);
+    Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsWeightedDCT, cColorCpns, DCT);
+    for iDCT := 0 to cTileDCTSize - 1 do
+      YakmoDataset[AIndex, iDCT] := DCT[iDCT];
   end;
 
 var
@@ -1728,6 +1734,7 @@ var
   TMI: PTileMapItem;
   Yakmo: PYakmo;
 
+  DCTDouble: array[0 .. cTileDCTSize - 1] of Double;
   YakmoCentroids: TDoubleDynArray2;
   YakmoClusters: TIntegerDynArray;
 begin
@@ -1775,9 +1782,9 @@ begin
           Inc(Tile^.UseCount);
 
       for iDCT := 0 to cTileDCTSize - 1 do
-        YakmoCentroids[iCluster, iDCT] := NanDef(YakmoCentroids[iCluster, iDCT], 0.0);
+        DCTDouble[iDCT] := NanDef(YakmoCentroids[iCluster, iDCT], 0.0);
 
-      Encoder.ComputeInvTilePsyVisFeatures(@YakmoCentroids[iCluster, 0], pvsWeightedDCT, False, cColorCpns, Tile^);
+      Encoder.ComputeInvTilePsyVisFeatures(DCTDouble, pvsWeightedDCT, False, cColorCpns, Tile^);
     end;
 
     // update tilemap / tile indexes
@@ -4750,7 +4757,10 @@ var
 
   procedure DoDCT(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
+    iDCT: Integer;
     Tile: PTile;
+    CpnPixels: TCpnPixels;
+    DCT: TDCT;
   begin
     if not InRange(AIndex, 0, High(FTiles)) then
       Exit;
@@ -4758,7 +4768,10 @@ var
     Tile := FTiles[AIndex];
     Assert(Tile^.Active);
 
-    ComputeTilePsyVisFeatures(Tile^, DitheringMode, False, True, False, False, cColorCpns, nil, @YakmoDataset[AIndex, 0]);
+    ConvertToCpnPixels(Tile^, False, True, False, False, nil, CpnPixels);
+    ComputeCpnPixelsPsyVisFeatures(CpnPixels, DitheringMode, cColorCpns, DCT);
+    for iDCT := 0 to cTileDCTSize - 1 do
+      YakmoDataset[AIndex, iDCT] := DCT[iDCT];
     YakmoWeights[AIndex] := Tile^.UseCount;
   end;
 
