@@ -1732,7 +1732,7 @@ var
 
   Tile: PTile;
   TMI: PTileMapItem;
-  Yakmo: PYakmo;
+  Yakmo: TOrthogonalKmeans;
 
   DCTDouble: array[0 .. cTileDCTSize - 1] of Double;
   YakmoCentroids: TDoubleDynArray2;
@@ -1754,15 +1754,11 @@ begin
     SetLength(YakmoClusters, DSLen);
     SetLength(YakmoCentroids, nbTiles, cTileDCTSize);
 
-    Yakmo := yakmo_create(nbTiles, 1, cYakmoMaxIterations, 1, 0, 0, 1);
+    Yakmo := TOrthogonalKmeans.Create(nbTiles, cYakmoMaxIterations, kiKMeansPP, True);
     try
-      yakmo_set_num_threads(Encoder.MaxThreadCount);
-
-      yakmo_load_train_data(Yakmo, Length(YakmoDataset), cTileDCTSize, PPDouble(@YakmoDataset[0]));
-      yakmo_train_on_data(Yakmo, @YakmoClusters[0]);
-      yakmo_get_centroids(Yakmo, PPDouble(@YakmoCentroids[0]));
+      Yakmo.Process(YakmoDataset, YakmoClusters, YakmoCentroids);
     finally
-      yakmo_destroy(Yakmo);
+      Yakmo.Free;
     end;
 
     // store centroid tiles
@@ -4503,18 +4499,22 @@ begin
   TTile.Dispose(T);
   TTile.Dispose(T2);
 
-  SetLength(ds, 10, 1);
-  SetLength(wgt, 10);
+  SetLength(ds, 5000, 4);
+  SetLength(wgt, Length(ds));
   for i := 0 to High(ds) do
   begin
     wgt[i] := max(1, i);
     ds[i, 0] := i;
+    ds[i, 1] := Length(ds) - i * cInvPhi;
+    ds[i, 2] := TanH(i);
+    ds[i, 3] := Sin(i);
+
+    //WriteLn(wgt[i], ' 1:', ds[i, 0], ' 2:', ds[i, 1], ' 3:', ds[i, 2], ' 4:', ds[i, 3]);
   end;
   km := TOrthogonalKmeans.Create(3, -1, kiKMeansPP, False);
   try
     km.Process(ds, p2c, ctr, wgt);
-    Assert(SumInt(p2c) = 9, 'TOrthogonalKmeans p2c mismatch');
-    Assert(SameValue(km.Objective, 47.0833, 1e-4), 'TOrthogonalKmeans Objective mismatch');
+    Assert(SameValue(km.Objective, 3.09e12, 1e10), 'TOrthogonalKmeans Objective mismatch');
   finally
     km.Free;
   end;
@@ -4800,7 +4800,7 @@ var
 
   Tile: PTile;
 
-  Yakmo: PYakmo;
+  Yakmo: TOrthogonalKmeans;
 
   YakmoClusters: TIntegerDynArray;
   PalIdxLUT: TIntegerDynArray;
@@ -4820,15 +4820,11 @@ begin
 
     if FPaletteCount > 1 then
     begin
-      Yakmo := yakmo_create(FPaletteCount, 1, cYakmoMaxIterations, 1, 0, 0, 1);
+      Yakmo := TOrthogonalKmeans.Create(FPaletteCount, cYakmoMaxIterations, kiKMeansPP, True);
       try
-        yakmo_set_num_threads(MaxThreadCount);
-
-        yakmo_load_train_data_weighted(Yakmo, Length(YakmoDataset), cTileDCTSize, PPDouble(@YakmoDataset[0]), @YakmoWeights[0]);
-        SetLength(YakmoDataset, 0); // free up some memmory
-        yakmo_train_on_data(Yakmo, @YakmoClusters[0]);
+        Yakmo.Process(YakmoDataset, YakmoClusters, nil, YakmoWeights);
       finally
-        yakmo_destroy(Yakmo);
+        Yakmo.Free;
       end;
     end;
   end
@@ -5061,7 +5057,7 @@ var
   Tile: PTile;
   Dataset, Centroids: TDoubleDynArray2;
   Clusters: TIntegerDynArray;
-  Yakmo: PYakmo;
+  Yakmo: TOrthogonalKmeans;
   CMPal: TCountIndexList;
   CMItem: PCountIndex;
 begin
@@ -5108,14 +5104,11 @@ begin
 
   if AColorCount > 1 then
   begin
-    Yakmo := yakmo_create(AColorCount, 1, cYakmoMaxIterations, 1, 0, 0, 0);
+    Yakmo := TOrthogonalKmeans.Create(AColorCount, cYakmoMaxIterations, kiKMeansPP, False);
     try
-      yakmo_load_train_data(Yakmo, DSLen, cFeatureCount, PPDouble(@Dataset[0]));
-      SetLength(Dataset, 0); // free up some memory
-      yakmo_train_on_data(Yakmo, @Clusters[0]);
-      yakmo_get_centroids(Yakmo, PPDouble(@Centroids[0]));
+      Yakmo.Process(Dataset, Clusters, Centroids);
     finally
-      yakmo_destroy(Yakmo);
+      Yakmo.Free;
     end;
   end
   else

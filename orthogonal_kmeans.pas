@@ -171,7 +171,7 @@ type
     procedure train_on_data(pointToCluster: PInteger);
     procedure get_centroids(centroids: PPKFloat);
 
-    function Process(const trainDS: TKFloatArray2; var pointToCluster: TIntegerDynArray; var centroids: TKFloatArray2; const trainWeights: TCardinalDynArray = nil): Double;
+    function Process(const trainDS: TKFloatArray2; var pointToCluster: TIntegerDynArray; const centroids: TKFloatArray2; const trainWeights: TCardinalDynArray = nil): Double;
 
     property Objective: Double read FObjective;
   end;
@@ -248,7 +248,7 @@ begin
     Inc(n);
   end;
 
-  Result *= FWeight;
+  Result := Max(0.0, Result * FWeight);
 end;
 
 procedure TKPoint.set_closest(const ACS: TKCentroidArray);
@@ -305,10 +305,10 @@ end;
 
 procedure TKPoint.project(const AC: TKCentroid);
 var
-  i: Cardinal;
+  i: Integer;
   norm_ip, v: TKFloat;
 begin
-  norm_ip := calc_ip(AC) / AC.Norm;
+  norm_ip := DivDef(calc_ip(AC), AC.Norm, 0.0);
 
   up_d := 0.0; lo_d := 0.0; id := 0; FNorm := 0.0; // reset
 
@@ -469,7 +469,7 @@ begin
 
   for i := 0 to FNF do
   begin
-    v := FSum[i] / FNElm;
+    v := DivDef(FSum[i], FNElm, 0.0);
     delta += Sqr(v - FDV[i]);
     FNorm += Sqr(v);
     FDV[i] := v;
@@ -503,7 +503,7 @@ end;
 
 procedure TKCentroid.decompress();
 var
-  i: Cardinal;
+  i: Integer;
   sz: Integer;
 begin
   sz := (FNF + 1) * SizeOf(TKFloat);
@@ -518,9 +518,10 @@ end;
 
 procedure TKCentroid.get_values(AValues: PKFloat);
 var
-  i: Cardinal;
+  i: Integer;
 begin
-  FillChar(AValues^, FNF * sizeof(TKFloat), 0);
+  if FNF > 0 then FillChar(AValues^, FNF * sizeof(TKFloat), 0);
+
   for i := 0 to FSize - 1 do
     AValues[FBody[i].idx] := FBody[i].val;
 end;
@@ -573,7 +574,7 @@ var
   norm, v: TKFloat;
   p: PKFloat;
 begin
-  FillChar(ATmp[0], Length(ATmp) * SizeOf(TKNode), 0);
+  if Assigned(ATmp) then FillChar(ATmp[0], Length(ATmp) * SizeOf(TKNode), 0);
   norm := 0;
   p := AEx;
   fi := 0;
@@ -643,6 +644,14 @@ begin
   FCentroids[AIdx] := TKCentroid.Create(AP, FNF, ADelegate);
 end;
 
+function CompareKFloats(Item1,Item2,UserParameter:Pointer):Integer;
+var
+  d1: PKFloat absolute Item1;
+  d2: PKFloat absolute Item2;
+begin
+  Result := CompareValue(d1^, d2^);
+end;
+
 procedure TKKmeans.init();
 var
   i, j, k, c, seed: Cardinal;
@@ -677,7 +686,7 @@ begin
           else
           begin
             key := obj * RandInt(High(Cardinal), seed) / High(Cardinal);
-            c := DichotomyFind(r[0], key, 0, High(r), SizeOf(r[0]), @CompareDoubles);
+            c := DichotomyFind(r[0], key, 0, High(r), SizeOf(r[0]), @CompareKFloats);
           end;
       end;
       // skip chosen centroids; fix a bug reported by Gleb
@@ -725,8 +734,8 @@ begin
     end;
   end;
 
-  if (FOpt.verbosity > 1) and not FOpt.quiet then
-    WriteLn;
+  if (FOpt.verbosity >= 1) and not FOpt.quiet then
+    Write('*');
 end;
 
 procedure TKKmeans.update_bounds();
@@ -792,7 +801,7 @@ begin
     if (i > 0) and not FOpt.quiet then
     begin
       if FOpt.verbosity > 1 then
-        WriteLn(Format('  %3d: obj = %e; #moved = %6d\n', [i, getObj (), moved]))
+        WriteLn(Format('  %3d: obj = %.6g; #moved = %6d\n', [i, getObj(), moved]))
       else
         Write('.');
     end;
@@ -808,7 +817,7 @@ begin
     begin
       p := FPoints[j];
       id0 := p.id;
-      m := Max(FCentroids[id0].next_d / 2, p.lo_d);
+      m := Max(FCentroids[id0].next_d * 0.5, p.lo_d);
       if p.up_d > m then
       begin
         p.up_d := Sqrt(p.calc_dist(FCentroids[id0]));
@@ -832,7 +841,7 @@ begin
   begin
     Write(IfThen(moved <> 0, 'break', 'done'));
     if FOpt.verbosity = 1 then
-      WriteLn(Format('; obj = %g.', [FObj]))
+      WriteLn(Format('; obj = %.6g.', [FObj]))
     else
       WriteLn('.');
   end;
@@ -942,7 +951,7 @@ begin
 end;
 
 function TOrthogonalKmeans.Process(const trainDS: TKFloatArray2; var pointToCluster: TIntegerDynArray;
-  var centroids: TKFloatArray2; const trainWeights: TCardinalDynArray): Double;
+  const centroids: TKFloatArray2; const trainWeights: TCardinalDynArray): Double;
 var
   rc, cc: Cardinal;
   tw: PCardinal;
@@ -954,7 +963,6 @@ begin
   Assert(not Assigned(centroids) or (Length(centroids) = FOpt.k) and (Length(centroids[0]) = cc));
 
   SetLength(pointToCluster, rc);
-  SetLength(centroids, rc, cc);
 
   tw := nil;
   if Assigned(trainWeights) then
@@ -962,7 +970,9 @@ begin
 
   load_train_data(rc, cc, PPKFloat(@trainDS[0]), tw);
   train_on_data(@pointToCluster[0]);
-  get_centroids(PPKFloat(@centroids[0]));
+
+  if Assigned(centroids) then
+    get_centroids(PPKFloat(@centroids[0]));
 end;
 
 end.

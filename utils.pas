@@ -1343,7 +1343,6 @@ var
   I,L,R,Dir: Integer;
   PData,PKey,P: PByte;
 begin
-  Result := -1;
   // Use binary search.
   L := AFirstItem;
   R := ALastItem;
@@ -1363,6 +1362,8 @@ begin
     end;
   end;
   Result := L;
+  if not InRange(Result, AFirstItem, ALastItem) then
+    Result := -1;
 end;
 
 end.
