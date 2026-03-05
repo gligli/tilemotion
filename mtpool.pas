@@ -5,7 +5,7 @@ unit mtpool;
 interface
 
 uses
-  Classes, SysUtils, Math, utils, MTProcs;
+  Classes, SysUtils, Math, utils;
 
 type
   { TMTPool }

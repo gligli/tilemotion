@@ -78,6 +78,15 @@ type
     constructor Create(ASize, ANumThreads: Cardinal);
   end;
 
+  { TKRng }
+
+  TKRng = record
+    x, y, z, w: UInt64;
+    procedure init();
+    function randInt(): UInt64; // Xorshift RNG; http://www.jstatsoft.org/v08/i14/paper
+    function random(): TKFloat;
+  end;
+
   { TKPoint }
 
   TKPoint = class
@@ -713,13 +722,14 @@ var
   end;
 
 var
-  j, c, seed: Cardinal;
+  rng: TKRng;
+  j, c: Cardinal;
   obj, key, di: TKFloat;
   p: TKPoint;
   chosen: TBooleanDynArray;
   r: TKFloatArray;
 begin
-  seed := CRandomSeed;
+  rng.init();
   obj := 0;
   if FOpt.init = kiKMeansPP then
   begin
@@ -735,15 +745,15 @@ begin
     repeat
       case FOpt.init of
         kiRandom:
-          c := RandInt(Length(FPoints), seed);
+          c := trunc(rng.random() * Length(FPoints));
         kiKMeansPP:
           if centroidIdx = 0 then
           begin
-            c := RandInt(Length(FPoints), seed)
+            c := trunc(rng.random() * Length(FPoints))
           end
           else
           begin
-            key := obj * RandInt(High(Cardinal), seed) / High(Cardinal);
+            key := obj * rng.random();
             c := DichotomyFind(r[0], key, 0, High(r), SizeOf(r[0]), @CompareKFloats);
           end;
       end;
@@ -790,7 +800,7 @@ begin
     end;
   end;
 
-  if (FOpt.verbosity >= 1) and not FOpt.quiet then
+  if (FOpt.verbosity = 1) and not FOpt.quiet then
     Write('*');
 end;
 
@@ -863,7 +873,7 @@ begin
     if (i > 0) and not FOpt.quiet then
     begin
       if FOpt.verbosity > 1 then
-        WriteLn(Format('  %3d: obj = %.6g; #moved = %6d\n', [i, getObj(), moved]))
+        WriteLn(Format('  %3d: obj = %.6g; #moved = %6d', [i, getObj(), moved]))
       else
         Write('.');
     end;
@@ -920,6 +930,30 @@ begin
     BinSize := Max(cKMTMinBinSize, (BinSize - 1) div NumThreads + 1);
   NumThreads := (ASize - 1) div BinSize + 1;
   LastThreadIndex := NumThreads - 1;
+end;
+
+{ TKRng }
+
+procedure TKRng.init();
+begin
+  x := 123456789;
+  y := 362436069;
+  z := 521288629;
+  w := 88675123;
+end;
+
+function TKRng.randInt(): UInt64;
+var
+  t: UInt64;
+begin
+  t := (x xor (x shl 11)); x := y; y := z; z := w;
+  w := (w xor (w shr 19)) xor (t xor (t shr 8));
+  Result := w;
+end;
+
+function TKRng.random(): TKFloat;
+begin
+  Result := randInt() / High(UInt64);
 end;
 
 { TOrthogonalKmeans }
