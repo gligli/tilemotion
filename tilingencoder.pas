@@ -2249,7 +2249,6 @@ begin
 
   ProgressRedraw(1, 'Palettization');
 
-  yakmo_set_num_threads(1);
   ProcThreadPool.DoParallelLocalProc(@DoQuant, 0, High(FPalettes));
 
   ProgressRedraw(2, 'Quantization');
@@ -4538,7 +4537,7 @@ begin
   prevObj := NaN;
   for i := 1 to 4 do
   begin
-    km := TOrthogonalKmeans.Create(3, -1, kiKMeansPP, i, True);
+    km := TOrthogonalKmeans.Create(3, -1, kiKMeansPP, i, False);
     try
       km.Process(ds, p2c, ctr, wgt);
       Assert(SameValue(km.Objective, 3.09e12, 1e10), 'TOrthogonalKmeans Objective mismatch');

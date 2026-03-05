@@ -44,8 +44,7 @@ type
 
     class procedure CallLocalProc(AProc, Frame: Pointer; Index: PtrInt; Data: Pointer); inline;
 
-    function GetNextJobIdx: PtrInt;
-    function IsJobIdx(AIdx: PtrInt): Boolean;
+    function GetNextJobIdx: PtrInt; inline;
 
     procedure StartJob(AProc: TJobProcedure; StartIndex, EndIndex: PtrInt; Data, StackFrame: Pointer);
     procedure WorkJob;
@@ -78,11 +77,6 @@ end;
 function TMTPool.GetNextJobIdx: PtrInt;
 begin
   Result := InterlockedIncrement64(FJob.Index);
-end;
-
-function TMTPool.IsJobIdx(AIdx: PtrInt): Boolean;
-begin
-  Result := InRange(AIdx, FJob.StartIndex, FJob.EndIndex);
 end;
 
 procedure TMTPool.StartJob(AProc: TJobProcedure; StartIndex, EndIndex: PtrInt; Data, StackFrame: Pointer);
@@ -121,7 +115,7 @@ var
   jobIdx: PtrInt;
 begin
   jobIdx := GetNextJobIdx;
-  while IsJobIdx(jobIdx) do
+  while jobIdx <= FJob.EndIndex do
   begin
     TMTPool.CallLocalProc(FJob.Proc, FJob.StackFrame, jobIdx, FJob.Data);
 
