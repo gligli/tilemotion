@@ -48,6 +48,11 @@ type
 
   PANNkdtree = ^TANNkdtree;
 
+  TYakmo = record
+  end;
+
+  PYakmo = ^TYakmo;
+
   TFFMPEG = record
     FmtCtx: PAVFormatContext;
     CodecCtx: PAVCodecContext;
@@ -87,6 +92,14 @@ function ann_kdtree_short_create(pa: PPSmallint; n, dd, bs: Integer; split: TANN
 procedure ann_kdtree_short_destroy(akd: PANNkdtree); external 'ANN_short.dll' name 'ann_kdtree_destroy';
 function ann_kdtree_short_search(akd: PANNkdtree; q: PSmallInt; eps: Cardinal; err: PCardinal): Integer; external 'ANN_short.dll' name 'ann_kdtree_search';
 procedure ann_kdtree_short_search_multi(akd: PANNkdtree; idxs: PInteger; errs: PCardinal; cnt: Integer; q: PSmallInt; eps: Cardinal); external 'ANN_short.dll' name 'ann_kdtree_search_multi';
+
+function yakmo_create(k: Cardinal; restartCount: Cardinal; maxIter: Integer; initType: Integer; initSeed: Integer; doNormalize: Integer; isVerbose: Integer): PYakmo; stdcall; external 'yakmo.dll';
+procedure yakmo_destroy(ay: PYakmo); stdcall; external 'yakmo.dll';
+procedure yakmo_set_num_threads(num_threads: Integer); stdcall; external 'yakmo.dll';
+procedure yakmo_load_train_data(ay: PYakmo; rowCount: Cardinal; colCount: Cardinal; dataset: PPDouble); stdcall; external 'yakmo.dll';
+procedure yakmo_load_train_data_weighted(ay: PYakmo; rowCount: Cardinal; colCount: Cardinal; dataset: PPDouble; weights: PCardinal); stdcall; external 'yakmo.dll';
+procedure yakmo_train_on_data(ay: PYakmo; pointToCluster: PInteger); stdcall; external 'yakmo.dll';
+procedure yakmo_get_centroids(ay: PYakmo; centroids: PPDouble); stdcall; external 'yakmo.dll';
 
 function GetActiveProcessorCount(GroupNumber: Word): DWORD; stdcall; external 'kernel32.dll';
 

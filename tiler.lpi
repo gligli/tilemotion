@@ -209,7 +209,7 @@
         <PackageName Value="LCL"/>
       </Item2>
     </RequiredPackages>
-    <Units Count="9">
+    <Units Count="7">
       <Unit0>
         <Filename Value="tiler.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -230,25 +230,17 @@
         <IsPartOfProject Value="True"/>
       </Unit3>
       <Unit4>
-        <Filename Value="kmodes.pas"/>
+        <Filename Value="utils.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit4>
       <Unit5>
-        <Filename Value="utils.pas"/>
+        <Filename Value="powell.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit5>
       <Unit6>
-        <Filename Value="powell.pas"/>
-        <IsPartOfProject Value="True"/>
-      </Unit6>
-      <Unit7>
-        <Filename Value="orthogonal_kmeans.pas"/>
-        <IsPartOfProject Value="True"/>
-      </Unit7>
-      <Unit8>
         <Filename Value="mtpool.pas"/>
         <IsPartOfProject Value="True"/>
-      </Unit8>
+      </Unit6>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
