@@ -201,7 +201,7 @@ type
 
     function Process(const trainDS: TKFloatArray2; var pointToCluster: TIntegerDynArray; const centroids: TKFloatArray2; const trainWeights: TCardinalDynArray = nil): Double;
 
-    property Objective: Double read FObjective;
+    property Objective: TKFloat read FObjective;
   end;
 
 implementation

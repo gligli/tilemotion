@@ -1706,7 +1706,7 @@ end;
 
 procedure TFrame.IntraReduce(ATargetTileCount: Integer);
 var
-  YakmoDataset: TDoubleDynArray2;
+  YakmoDataset: TKFloatArray2;
 
   procedure DoDCT(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
   var
@@ -1735,7 +1735,7 @@ var
   Yakmo: TOrthogonalKmeans;
 
   DCTDouble: array[0 .. cTileDCTSize - 1] of Double;
-  YakmoCentroids: TDoubleDynArray2;
+  YakmoCentroids: TKFloatArray2;
   YakmoClusters: TIntegerDynArray;
 begin
   AcquireFrameTiles;
@@ -4442,7 +4442,7 @@ var
   T, T2: PTile;
   pool: TMTPool;
   km: TOrthogonalKmeans;
-  ds, ctr: TDoubleDynArray2;
+  ds, ctr: TKFloatArray2;
   p2c: TIntegerDynArray;
   wgt: TCardinalDynArray;
   prevObj: Double;
@@ -4801,7 +4801,7 @@ end;
 
 procedure TTilingEncoder.DoPalettization;
 var
-  YakmoDataset: TDoubleDynArray2;
+  YakmoDataset: TKFloatArray2;
   YakmoWeights: TCardinalDynArray;
 
   procedure DoDCT(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
@@ -5084,7 +5084,7 @@ var
   i, j, di, ty, tx, tIdx, DSLen: Integer;
   rr, gg, bb: Byte;
   Tile: PTile;
-  Dataset, Centroids: TDoubleDynArray2;
+  Dataset, Centroids: TKFloatArray2;
   Clusters: TIntegerDynArray;
   Yakmo: TOrthogonalKmeans;
   CMPal: TCountIndexList;

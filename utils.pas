@@ -169,6 +169,7 @@ procedure SpinLeave(Lock: PSpinLock); register; assembler;
 procedure Exchange(var a, b: Integer); overload;
 procedure Exchange(var a, b: Cardinal); overload;
 procedure Exchange(var a, b: Double); overload;
+procedure Exchange(var a, b: Single); overload;
 function RandInt(Range: Cardinal; var Seed: Cardinal): Cardinal;
 function iDivDef(x, y, def: Integer): Integer;overload;inline;
 function iDivDef(x, y, def: Int64): Int64;overload;inline;
@@ -266,6 +267,15 @@ begin
 end;
 
 procedure Exchange(var a, b: Double);
+var
+  tmp: Double;
+begin
+  tmp := b;
+  b := a;
+  a := tmp;
+end;
+
+procedure Exchange(var a, b: Single);
 var
   tmp: Double;
 begin
