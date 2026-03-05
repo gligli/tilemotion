@@ -8,7 +8,7 @@ unit utils;
 interface
 
 uses
-  Classes, SysUtils, math, fgl, extern, Types;
+  Classes, SysUtils, Types, math, fgl, extern;
 
 const
   // tweakable constants
@@ -165,6 +165,7 @@ const
   cBestPSNR = 20.0 * Ln((1 shl cBitsPerComp) * cYUVScale - 1) / Ln(10.0);
 
 procedure SpinEnter(Lock: PSpinLock); register; assembler;
+procedure SpinEnterSleep(Lock: PSpinLock); register; assembler;
 procedure SpinLeave(Lock: PSpinLock); register; assembler;
 procedure Exchange(var a, b: Integer); overload;
 procedure Exchange(var a, b: Cardinal); overload;
@@ -220,6 +221,7 @@ function DichotomyFind(var AData,AKey;AFirstItem,ALastItem:Int64;AItemSize:Integ
 implementation
 
 // SpinLock code from https://wiki.osdev.org/Spinlock
+
 procedure SpinEnter(Lock: PSpinLock); register; assembler;
 label acquireLock, spin_with_pause, acquired;
 asm
@@ -234,6 +236,42 @@ asm
       jmp acquireLock          // retry
 
   acquired:
+end;
+
+procedure SpinSleep;
+begin
+  Sleep(1);
+end;
+
+procedure SpinEnterSleep(Lock: PSpinLock); register; assembler;
+label acquireLock, spin_with_pause, sleep, acquired;
+asm
+  push  rax
+
+  acquireLock:
+      lock  bts [lock],0       // Attempt to acquire the lock (in case lock is uncontended)
+      jnc   acquired
+
+      xor   eax,eax
+
+  spin_with_pause:
+      inc   eax
+      test  eax,$fffe0000
+      jnz   sleep
+      pause                    // Tell CPU we're spinning
+      test  dword [lock],1     // Is the lock free?
+      jnz   spin_with_pause    // no, wait
+      jmp   acquireLock        // retry
+
+  sleep:
+      push  rcx
+      call  SpinSleep
+      pop   rcx
+      jmp   acquireLock
+
+  acquired:
+
+  pop  rax
 end;
 
 procedure SpinLeave(Lock: PSpinLock); register; assembler;

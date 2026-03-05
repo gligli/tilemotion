@@ -246,7 +246,7 @@ begin
   InterlockedIncrement(PoolRef.FAliveWorkerCount);
 
   repeat
-    SpinEnter(@StateLock);
+    SpinEnterSleep(@StateLock);
 
     if not PendingTermination then
     begin
