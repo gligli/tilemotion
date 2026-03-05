@@ -8,7 +8,7 @@ unit utils;
 interface
 
 uses
-  Classes, SysUtils, Windows, math, fgl, extern, Types;
+  Classes, SysUtils, math, fgl, extern, Types;
 
 const
   // tweakable constants
@@ -219,33 +219,26 @@ function DichotomyFind(var AData,AKey;AFirstItem,ALastItem:Int64;AItemSize:Integ
 
 implementation
 
+// SpinLock code from https://wiki.osdev.org/Spinlock
 procedure SpinEnter(Lock: PSpinLock); register; assembler;
-label spin_lock;
+label acquireLock, spin_with_pause, acquired;
 asm
-spin_lock:
-  xor     eax, eax     // Set the EAX register to 0.
+  acquireLock:
+      lock bts [lock],0        // Attempt to acquire the lock (in case lock is uncontended)
+      jnc acquired
 
-  inc     eax          // Set the EAX register to 1.
+  spin_with_pause:
+      pause                    // Tell CPU we're spinning
+      test dword [lock],1      // Is the lock free?
+      jnz spin_with_pause      // no, wait
+      jmp acquireLock          // retry
 
-  pause                // On new processors which support hyperthreading, it is used as a hint to the processor that
-                       // you are executing a spinloop to increase performance.
-
-  xchg    eax, [Lock]  // Atomically swap the EAX register with the lock variable.
-                       // This will always store 1 to the lock, leaving the previous value in the EAX register.
-
-  test    eax, eax     // Test EAX with itself. Among other things, this will set the processor's Zero Flag if EAX is 0.
-                       // If EAX is 0, then the lock was unlocked and we just locked it.
-                       // Otherwise, EAX is 1 and we didn't acquire the lock.
-
-  jnz     spin_lock    // Jump back to the MOV instruction if the Zero Flag is not set;
-                       // the lock was previously locked, and so we need to spin until it becomes unlocked.
+  acquired:
 end;
 
 procedure SpinLeave(Lock: PSpinLock); register; assembler;
 asm
-  xor     eax, eax     // Set the EAX register to 0.
-
-  xchg    eax, [Lock]  // Atomically swap the EAX register with the lock variable.
+  mov dword [Lock],0
 end;
 
 procedure Exchange(var a, b: Integer);
@@ -362,6 +355,14 @@ end;
 
 // from https://www.delphipraxis.net/157099-fast-integer-rgb-hsl.html
 procedure RGBToHSV(r, g, b: Byte; out h, s, v: Byte);
+
+  function MulDiv(nNumber, nNumerator, nDenominator: Integer): Integer;
+  begin
+    if nDenominator = 0 then
+      Result := -1
+    else
+      Result := Round((nNumber * nNumerator) / nDenominator);
+  end;
 
   function RGBMaxValue: Integer;
   begin
