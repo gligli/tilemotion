@@ -12,7 +12,7 @@ interface
 
 uses
   windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, zstream, IniFiles, Graphics,
-  IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, MTProcs, bufstream,
+  IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, bufstream,
   tbbmalloc, extern, utils, powell, mtpool;
 type
   TEncoderStep = (esAll = -1, esLoad = 0, esPredict, esReduce, esPreparePalettes, esDither, esReindex1, esReconstruct, esReindex2, esSave);
@@ -334,7 +334,6 @@ type
     function PowellBlend(const x: TVector; data: Pointer): TScalar;
     procedure GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
 
-    procedure PrepareDCTs(const ADCTs: TDCTDynArray; const ABuffer: TIntegerDynArray2);
     function PredictTileBlending(AUnipolar: Boolean; ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; AFrameBuffer: TFrameBuffer): Cardinal;
     function PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Cardinal;
     function PredictTileIntra(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Cardinal;
@@ -342,10 +341,11 @@ type
     // processes
 
     procedure LoadFromImage(AImageWidth, AImageHeight: Integer; AImage: PInteger);
+    procedure PrepareDCTs(AMTPool: TMTPool;const ADCTs: TDCTDynArray; const ABuffer: TIntegerDynArray2);
     procedure IntraReduce(ATargetTileCount: Integer);
-    procedure Predict(ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBuffer; AFrameBuffer: TFrameBuffer);
-    procedure Reconstruct(ARadius: Integer; AFrameBuffer: TFrameBuffer);
-    procedure DirectBlit(const ABuffer: TIntegerDynArray2);
+    procedure Predict(AMTPool: TMTPool;ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBuffer; AFrameBuffer: TFrameBuffer);
+    procedure Reconstruct(AMTPool: TMTPool;ARadius: Integer; AFrameBuffer: TFrameBuffer);
+    procedure DirectBlit(AMTPool: TMTPool;const ABuffer: TIntegerDynArray2);
   end;
 
   TFrameArray =  array of TFrame;
@@ -424,6 +424,7 @@ type
     FGlobalTilingTargetPSNR: Double;
     FGlobalTilingTileCount: Integer;
     FGlobalTilingQualityBasedTileCount: Double;
+    FMaxThreadCount: Integer;
     FShotTransMaxSecondsPerKF: Double;
     FShotTransMinSecondsPerKF: Double;
     FShotTransCorrelLoThres: Double;
@@ -456,7 +457,6 @@ type
 
     function GetFrameCount: Integer;
     function GetKeyFrameCount: Integer;
-    function GetMaxThreadCount: Integer;
     function GetTiles: PTileDynArray;
     function GetRenderGammaValue: Double;
     procedure SetDitheringYliluoma2MixedColors(AValue: Integer);
@@ -615,7 +615,7 @@ type
     property GlobalTilingTargetPSNR: Double read FGlobalTilingTargetPSNR write SetGlobalTilingTargetPSNR;
     property GlobalTilingTileCount: Integer read FGlobalTilingTileCount write SetGlobalTilingTileCount;
     property GlobalTilingQualityBasedTileCount: Double read FGlobalTilingQualityBasedTileCount write SetGlobalTilingQualityBasedTileCount;
-    property MaxThreadCount: Integer read GetMaxThreadCount write SetMaxThreadCount;
+    property MaxThreadCount: Integer read FMaxThreadCount write SetMaxThreadCount;
     property ShotTransMaxSecondsPerKF: Double read FShotTransMaxSecondsPerKF write SetShotTransMaxSecondsPerKF;
     property ShotTransMinSecondsPerKF: Double read FShotTransMinSecondsPerKF write SetShotTransMinSecondsPerKF;
     property ShotTransCorrelLoThres: Double read FShotTransCorrelLoThres write SetShotTransCorrelLoThres;
@@ -1447,17 +1447,14 @@ begin
   oxmx := Min(Encoder.FScreenWidth - cTileWidth, ADX + ARadius);
 end;
 
-procedure TFrame.PrepareDCTs(const ADCTs: TDCTDynArray; const ABuffer: TIntegerDynArray2);
+procedure TFrame.PrepareDCTs(AMTPool: TMTPool; const ADCTs: TDCTDynArray; const ABuffer: TIntegerDynArray2);
 
-  procedure DoDCTs(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  procedure DoDCTs(AIndex: PtrInt; AData: Pointer);
   var
     x, yx: Integer;
     DCTTile: PTile;
     CpnPixels: TCpnPixels;
   begin
-    if not InRange(AIndex, 0, Encoder.FScreenHeight - cTileWidth) then
-      Exit;
-
     yx := AIndex * (Encoder.FScreenWidth - cTileWidth + 1);
 
     DCTTile := TTile.New(True, False);
@@ -1477,7 +1474,7 @@ procedure TFrame.PrepareDCTs(const ADCTs: TDCTDynArray; const ABuffer: TIntegerD
   end;
 
 begin
-  ProcThreadPool.DoParallelLocalProc(@DoDCTs, 0, Encoder.FScreenHeight - cTileWidth);
+  AMTPool.DoLocalProc(@DoDCTs, 0, Encoder.FScreenHeight - cTileWidth);
 end;
 
 function TFrame.PredictTileBlending(AUnipolar: Boolean; ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; AFrameBuffer: TFrameBuffer): Cardinal;
@@ -1609,9 +1606,10 @@ begin
   ATMI^.Attrs.MotionX := bestX - ADX;
 end;
 
-procedure TFrame.Predict(ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBuffer; AFrameBuffer: TFrameBuffer);
+procedure TFrame.Predict(AMTPool: TMTPool; ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBuffer;
+  AFrameBuffer: TFrameBuffer);
 
-  procedure DoXY(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  procedure DoXY(AIndex: PtrInt; AData: Pointer);
   var
     dx, dy, sy, sx: Integer;
     TMI: PTileMapItem;
@@ -1619,9 +1617,6 @@ procedure TFrame.Predict(ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBu
     CurCpnPixels: TCpnPixels;
     CurDCT: TDCT;
   begin
-    if not InRange(AIndex, 0, Encoder.FTileMapSize - 1) then
-      Exit;
-
     DivMod(AIndex, Encoder.FTileMapWidth, sy, sx);
 
     TMI := @TileMap[sy, sx];
@@ -1656,7 +1651,7 @@ begin
 
   Dec(ARadius);
 
-  ProcThreadPool.DoParallelLocalProc(@DoXY, 0, Encoder.FTileMapSize - 1);
+  AMTPool.DoLocalProc(@DoXY, 0, Encoder.FTileMapSize - 1);
 end;
 
 procedure DoAsyncLoadFromImage(AData : Pointer);
@@ -1708,16 +1703,13 @@ procedure TFrame.IntraReduce(ATargetTileCount: Integer);
 var
   YakmoDataset: TDoubleDynArray2;
 
-  procedure DoDCT(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  procedure DoDCT(AIndex: PtrInt; AData: Pointer);
   var
     iDCT: Integer;
     Tile: PTile;
     CpnPixels: TCpnPixels;
     DCT: TDCT;
   begin
-    if not InRange(AIndex, 0, Encoder.FTileMapSize - 1) then
-      Exit;
-
     Tile := FrameTiles[AIndex];
     Assert(Tile^.Active);
 
@@ -1745,7 +1737,7 @@ begin
     // compute frame tiles DCT
 
     SetLength(YakmoDataset, DSLen, cTileDCTSize);
-    ProcThreadPool.DoParallelLocalProc(@DoDCT, 0, DSLen - 1);
+    TMTPool.DoStandaloneLocalProc(@DoDCT, 0, DSLen - 1, Encoder.MaxThreadCount);
 
     // reduce to TileCount tiles (use Yakmo KMeans)
 
@@ -1809,16 +1801,13 @@ begin
   end;
 end;
 
-procedure TFrame.DirectBlit(const ABuffer: TIntegerDynArray2);
+procedure TFrame.DirectBlit(AMTPool: TMTPool; const ABuffer: TIntegerDynArray2);
 
-  procedure DoBlit(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  procedure DoBlit(AIndex: PtrInt; AData: Pointer);
   var
     dx, dy, sx, yx: Integer;
     FrameTile: PTile;
   begin
-    if not InRange(AIndex, 0, Encoder.FTileMapHeight - 1) then
-      Exit;
-
     dy := AIndex shl cTileWidthBits;
     yx := AIndex * Encoder.FTileMapWidth;
 
@@ -1834,7 +1823,7 @@ procedure TFrame.DirectBlit(const ABuffer: TIntegerDynArray2);
   end;
 
 begin
-  ProcThreadPool.DoParallelLocalProc(@DoBlit, 0, Encoder.FTileMapHeight - 1);
+  AMTPool.DoLocalProc(@DoBlit, 0, Encoder.FTileMapHeight - 1);
 end;
 
 function TFrame.PrepareInterFrameData: TFloatDynArray;
@@ -1938,14 +1927,14 @@ begin
   SetLength(InterframeCorrelationData, 0);
 end;
 
-procedure TFrame.Reconstruct(ARadius: Integer; AFrameBuffer: TFrameBuffer);
+procedure TFrame.Reconstruct(AMTPool: TMTPool; ARadius: Integer; AFrameBuffer: TFrameBuffer);
 const
   cEpuKnnK = 64;
   cPSNREpsilon = 0.1;
 var
   DS: PTilingDataset;
 
-  procedure DoXY(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  procedure DoXY(AIndex: PtrInt; AData: Pointer);
   var
     sx, sy, dx, dy, ty, tx, tileEpuIdx, palEpuIdx, prevTileIdx, prevPalIdx: Integer;
     knnErr, err: Cardinal;
@@ -1961,9 +1950,6 @@ var
     EpuTileIdxs: array[0 .. cEpuKnnK - 1] of Integer;
     EpuPalIdxs: array[0 .. cEpuKnnK - 1] of Integer;
   begin
-    if not InRange(AIndex, 0, Encoder.FTileMapSize - 1) then
-      Exit;
-
     DivMod(AIndex, Encoder.FTileMapWidth, sy, sx);
 
     TMI := @TileMap[sy, sx];
@@ -2066,7 +2052,7 @@ begin
 
   Dec(ARadius);
 
-  ProcThreadPool.DoParallelLocalProc(@DoXY, 0, Encoder.FTileMapSize - 1);
+  AMTPool.DoLocalProc(@DoXY, 0, Encoder.FTileMapSize - 1);
 
   PKeyFrame.LogPSNR;
 end;
@@ -2235,11 +2221,8 @@ end;
 
 procedure TTilingEncoder.PreparePalettes;
 
-  procedure DoQuant(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  procedure DoQuant(AIndex: PtrInt; AData: Pointer);
   begin
-    if not InRange(AIndex, 0, High(FPalettes)) then
-      Exit;
-
     DoQuantization(AIndex);
   end;
 
@@ -2254,7 +2237,7 @@ begin
   ProgressRedraw(1, 'Palettization');
 
   yakmo_set_num_threads(1);
-  ProcThreadPool.DoParallelLocalProc(@DoQuant, 0, High(FPalettes));
+  TMTPool.DoStandaloneLocalProc(@DoQuant, 0, High(FPalettes), MaxThreadCount);
 
   ProgressRedraw(2, 'Quantization');
 
@@ -2265,7 +2248,7 @@ end;
 
 procedure TTilingEncoder.Dither;
 
-  procedure DoDither(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  procedure DoDither(AIndex: PtrInt; AData: Pointer);
   var
     Tile: PTile;
   begin
@@ -2294,7 +2277,7 @@ begin
 
   ProgressRedraw(1, 'BuildDitherers');
 
-  ProcThreadPool.DoParallelLocalProc(@DoDither, 0, High(FTiles));
+  TMTPool.DoStandaloneLocalProc(@DoDither, 0, High(FTiles), MaxThreadCount);
 
   ProgressRedraw(2, 'Dither');
 end;
@@ -2343,12 +2326,14 @@ var
   Frame: TFrame;
   FrameBuffer: TFrameBuffer;
   DCTBuffer: TDCTBuffer;
+  MTPool: TMTPool;
 begin
   if (Length(FFrames) = 0) or (FMotionPredictRadius <= 0) then
     Exit;
 
   ProgressRedraw(0, '', esPredict);
 
+  MTPool := TMTPool.Create(MaxThreadCount);
   FrameBuffer := TFrameBuffer.Create(FMotionPredictMaxBufferedFrames + 1, FScreenHeight, FScreenWidth);
   DCTBuffer := TDCTBuffer.Create(FMotionPredictMaxBufferedFrames, (FScreenHeight - cTileWidth + 1) * (FScreenWidth - cTileWidth + 1));
   try
@@ -2361,18 +2346,18 @@ begin
 
       Frame.AcquireFrameTiles;
       try
-        Frame.DirectBlit(FrameBuffer.GetBuffer);
+        Frame.DirectBlit(MTPool, FrameBuffer.GetBuffer);
 
         if isKFFF then
         begin
-          Frame.PrepareDCTs(DCTBuffer.GetBuffer, FrameBuffer.GetBuffer);
-          Frame.Predict(FMotionPredictRadius, 0, DCTBuffer, FrameBuffer)
+          Frame.PrepareDCTs(MTPool, DCTBuffer.GetBuffer, FrameBuffer.GetBuffer);
+          Frame.Predict(MTPool, FMotionPredictRadius, 0, DCTBuffer, FrameBuffer)
         end
         else
         begin
           for iBuf := 1 to Min(FMotionPredictMaxBufferedFrames, frmRelIdx) do
-            Frame.Predict(FMotionPredictRadius, iBuf, DCTBuffer, FrameBuffer);
-          Frame.PrepareDCTs(DCTBuffer.GetBuffer, FrameBuffer.GetBuffer);
+            Frame.Predict(MTPool, FMotionPredictRadius, iBuf, DCTBuffer, FrameBuffer);
+          Frame.PrepareDCTs(MTPool, DCTBuffer.GetBuffer, FrameBuffer.GetBuffer);
         end;
       finally
         Frame.ReleaseFrameTiles;
@@ -2388,6 +2373,7 @@ begin
   finally
     DCTBuffer.Free;
     FrameBuffer.Free;
+    MTPool.Free;
   end;
 end;
 
@@ -2398,6 +2384,7 @@ var
   Frame: TFrame;
   FrameBuffer: TFrameBuffer;
   DCTBuffer: TDCTBuffer;
+  MTPool: TMTPool;
 begin
   if Length(FFrames) = 0 then
     Exit;
@@ -2409,6 +2396,7 @@ begin
   PrepareReconstruct;
   ProgressRedraw(1, 'PrepareReconstruct', esReconstruct);
 
+  MTPool := TMTPool.Create(MaxThreadCount);
   FrameBuffer := TFrameBuffer.Create(FMotionPredictMaxBufferedFrames + 1, FScreenHeight, FScreenWidth);
   DCTBuffer := TDCTBuffer.Create(FMotionPredictMaxBufferedFrames, (FScreenHeight - cTileWidth + 1) * (FScreenWidth - cTileWidth + 1));
   try
@@ -2425,10 +2413,10 @@ begin
 
         if not isKFFF then
           for iBuf := 1 to Min(FMotionPredictMaxBufferedFrames, frmRelIdx) do
-            Frame.Predict(FMotionPredictRadius, iBuf, DCTBuffer, FrameBuffer);
+            Frame.Predict(MTPool, FMotionPredictRadius, iBuf, DCTBuffer, FrameBuffer);
 
-        Frame.Reconstruct(FMotionPredictRadius, FrameBuffer);
-        Frame.PrepareDCTs(DCTBuffer.GetBuffer, FrameBuffer.GetBuffer);
+        Frame.Reconstruct(MTPool, FMotionPredictRadius, FrameBuffer);
+        Frame.PrepareDCTs(MTPool, DCTBuffer.GetBuffer, FrameBuffer.GetBuffer);
       finally
         Frame.ReleaseFrameTiles;
       end;
@@ -2441,6 +2429,7 @@ begin
   finally
     DCTBuffer.Free;
     FrameBuffer.Free;
+    MTPool.Free;
     FinishReconstruct;
   end;
 
@@ -2677,11 +2666,6 @@ end;
 function TTilingEncoder.GetKeyFrameCount: Integer;
 begin
   Result := Length(FKeyFrames);
-end;
-
-function TTilingEncoder.GetMaxThreadCount: Integer;
-begin
- Result := ProcThreadPool.MaxThreadCount;
 end;
 
 function TTilingEncoder.GetTiles: PTileDynArray;
@@ -3396,8 +3380,8 @@ end;
 
 procedure TTilingEncoder.SetMaxThreadCount(AValue: Integer);
 begin
- if ProcThreadPool.MaxThreadCount = AValue then Exit;
- ProcThreadPool.MaxThreadCount := max(1, AValue);
+ if FMaxThreadCount = AValue then Exit;
+ FMaxThreadCount := max(1, AValue);
 end;
 
 procedure TTilingEncoder.SetPaletteCount(AValue: Integer);
@@ -4684,7 +4668,7 @@ var
   doneFrameCount: Integer;
   newTIdx: Integer;
 
-  procedure DoTransfer(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  procedure DoTransfer(AIndex: PtrInt; AData: Pointer);
   var
     tIdx, sx, sy, irBaseTIdx: Integer;
     Frame: TFrame;
@@ -4767,7 +4751,7 @@ begin
   doneFrameCount := 0;
   newTIdx := 0;
 
-  ProcThreadPool.DoParallelLocalProc(@DoTransfer, 0, High(FFrames));
+  TMTPool.DoStandaloneLocalProc(@DoTransfer, 0, High(FFrames), MaxThreadCount);
 
   Assert(newTIdx = tileCount);
 end;
@@ -4777,7 +4761,7 @@ var
   YakmoDataset: TDoubleDynArray2;
   YakmoWeights: TCardinalDynArray;
 
-  procedure DoDCT(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  procedure DoDCT(AIndex: PtrInt; AData: Pointer);
   var
     iDCT: Integer;
     Tile: PTile;
@@ -4818,7 +4802,7 @@ begin
   begin
     SetLength(YakmoDataset, DSLen, cTileDCTSize);
 
-    ProcThreadPool.DoParallelLocalProc(@DoDCT, 0, DSLen - 1);
+    TMTPool.DoStandaloneLocalProc(@DoDCT, 0, DSLen - 1, MaxThreadCount);
 
     if FPaletteCount > 1 then
     begin
@@ -4935,7 +4919,7 @@ var
   MeanR, MeanG, MeanB: UInt64;
   NewPal: TIntegerDynArray2;
 
-  procedure DoPal(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  procedure DoPal(AIndex: PtrInt; AData: Pointer);
   var
     Data: TMinimizeOPData;
     x: TDoubleDynArray;
@@ -5001,6 +4985,7 @@ var
   palIdx, colIdx, iteration: Integer;
   fSum, prevFSum: Double;
   r, g, b: Byte;
+  MTPool: TMTPool;
 begin
   SetLength(f, FPaletteCount);
   SetLength(NewPal, FPaletteCount, FPaletteSize);
@@ -5031,25 +5016,30 @@ begin
 
   // stepwise algorithm (each palette being optimized alone, needs iterations to attain global optimum)
 
-  repeat
-    prevFSum := max(fSum, prevFSum);
-    Inc(iteration);
+  MTPool := TMTPool.Create(MaxThreadCount);
+  try
+    repeat
+      prevFSum := max(fSum, prevFSum);
+      Inc(iteration);
 
-    ProcThreadPool.DoParallelLocalProc(@DoPal, 0, FPaletteCount - 1);
+      MTPool.DoLocalProc(@DoPal, 0, FPaletteCount - 1);
 
-    fSum := 0;
-    for palIdx := 0 to FPaletteCount - 1 do
-    begin
-      fSum += f[palIdx];
+      fSum := 0;
+      for palIdx := 0 to FPaletteCount - 1 do
+      begin
+        fSum += f[palIdx];
 
-      for colIdx := 0 to FPaletteSize - 1 do
-        FPalettes[palIdx].PaletteRGB[colIdx] := NewPal[palIdx, colIdx];
-    end;
-    fSum /= FPaletteCount;
+        for colIdx := 0 to FPaletteSize - 1 do
+          FPalettes[palIdx].PaletteRGB[colIdx] := NewPal[palIdx, colIdx];
+      end;
+      fSum /= FPaletteCount;
 
-    //WriteLn(iteration:4,fSum:16:3);
+      //WriteLn(iteration:4,fSum:16:3);
 
-  until fSum <= prevFSum;
+    until fSum <= prevFSum;
+  finally
+    MTPool.Free;
+  end;
 
   WriteLn('OptimizePalettes: ', iteration, ' iterations');
 end;
@@ -5188,7 +5178,7 @@ procedure TTilingEncoder.PrepareReconstruct;
 var
   DS: PTilingDataset;
 
-  procedure DoPsyV(AIndex: PtrInt; AData: Pointer; AItem: TMultiThreadProcItem);
+  procedure DoPsyV(AIndex: PtrInt; AData: Pointer);
   var
     T: PTile;
     CpnPixels: TCpnPixels;
@@ -5214,7 +5204,7 @@ begin
   DS^.KNNSize := Length(FTiles);
   SetLength(DS^.Dataset, DS^.KNNSize, cTileDCTSize);
 
-  ProcThreadPool.DoParallelLocalProc(@DoPsyV, 0, High(FTiles));
+  TMTPool.DoStandaloneLocalProc(@DoPsyV, 0, High(FTiles), MaxThreadCount);
 
   // Build KNN
 

@@ -21,7 +21,7 @@ object MainForm: TMainForm
   ParentDoubleBuffered = False
   PopupMenu = pmProcesses
   Position = poScreenCenter
-  LCLVersion = '4.4.0.0'
+  LCLVersion = '4.6.0.0'
   OnCreate = FormCreate
   OnDestroy = FormDestroy
   OnKeyDown = FormKeyDown

@@ -7,7 +7,7 @@ interface
 uses
   windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, LazLogger,
   Forms, Controls, Graphics, Dialogs, ExtCtrls, StdCtrls, ComCtrls, Spin, Menus, IntfGraphics, Buttons,
-  FPimage, FPCanvas, FPWritePNG, GraphType, MTProcs, FileInfo, extern, tilingencoder, utils;
+  FPimage, FPCanvas, FPWritePNG, GraphType, FileInfo, extern, tilingencoder, utils;
 
 type
   { TMainForm }
@@ -793,7 +793,6 @@ begin
     cbxEndStep.ItemIndex := Ord(High(TEncoderStep));
 
     seMaxCores.MaxValue := NumberOfProcessors + QuarterNumberOfProcessors;
-    seMaxCores.Value := ProcThreadPool.MaxThreadCount;
   finally
     FLockChanges := False;
   end;
