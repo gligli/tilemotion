@@ -6,14 +6,21 @@ unit orthogonal_kmeans;
 // yakmo -- yet another k-means via orthogonalization
 //  $Id: yakmo.h 1866 2015-01-21 10:25:43Z ynaga $
 // Copyright (c) 2012-2015 Naoki Yoshinaga <ynaga@tkl.iis.u-tokyo.ac.jp>
+//
+// ported to freepascal by GliGli
 
 interface
 
 uses
-  Classes, SysUtils, StrUtils, math, fgl, Types, utils;
+  Classes, SysUtils, StrUtils, Math, Types, mtpool, utils, extern;
+
+const
+  cKMTMinBinSize = 8;
 
 type
   TKFloat = Double;
+
+{$CODEALIGN RECORDMIN=SizeOf(TKFloat)}
 
   PKFloat = ^TKFloat;
   PPKFloat = ^PKFloat;
@@ -21,6 +28,8 @@ type
   TKFloatArray2 = array of TKFloatArray;
 
   TKInit = (kiRandom, kiKMeansPP);
+
+  { TKOptions }
 
   TKOptions  = record // option handler
     init: TKInit;
@@ -30,6 +39,7 @@ type
     normalize: Boolean;
     verbosity: Cardinal;
     quiet: Boolean;
+    threads: Cardinal;
   end;
 
 // implementation of space-efficient k-means using triangle inequality:
@@ -37,12 +47,16 @@ type
 
   { TKNode }
 
-  TKNode = packed record
+  TKNode = record
     idx: Cardinal;
     val: TKFloat;
     constructor Create(AIdx: Cardinal; AVal: TKFloat);
     class function CompareNodes(Item1,Item2,UserParameter:Pointer):Integer; static;
   end;
+
+{$if SizeOf(TKNode) <> SizeOf(TKFloat) * 2}
+  {$error misaligned SizeOf(TKNode) !}
+{$endif}
 
   PKNode = ^TKNode;
   TKNodeArray = array of TKNode;
@@ -54,6 +68,16 @@ type
   TKPointArray = array of TKPoint;
   TKKMeansArray = array of TKKMeans;
 
+  { TKMTData }
+
+  TKMTData = record
+    BinSize: Cardinal;
+    NumThreads: Cardinal;
+    LastThreadIndex: Cardinal;
+    Buffer: TKFloatArray;
+    constructor Create(ASize, ANumThreads: Cardinal);
+  end;
+
   { TKPoint }
 
   TKPoint = class
@@ -62,6 +86,7 @@ type
     FBody: PKNode;
     FNorm: TKFloat;
     FWeight: Cardinal;
+    FMTPoolRef: TMTPool;
   public
     up_d: TKFloat;  // distance to the closest centroid
     lo_d: TKFloat;  // distance to the second closest centroid
@@ -99,6 +124,7 @@ type
     FNElm: Cardinal;  // # elements belonging to the cluster
     FNF: Cardinal;    // # features
     FSize: Cardinal;  // # nozero features
+    FMTPoolRef: TMTPool;
   public
     delta: TKFloat;  // moved distance
     next_d: TKFloat; // distance to neighbouring centroind
@@ -128,6 +154,7 @@ type
     FBody: TKNodeArray;
     FNF: Cardinal;
     FObj: TKFloat;
+    FMTPoolRef: TMTPool;
   public
     constructor Create(const AOpt: TKOptions; ARowCount, AColCount: Cardinal);
     destructor Destroy; override;
@@ -162,9 +189,10 @@ type
     FOpt: TKOptions;
     FKMs: TKKMeansArray;
     FObjective: TKFloat;
+    FMTPool: TMTPool;
   public
     constructor Create(const option: TKOptions); overload;
-    constructor Create(k: Cardinal; maxIter: Integer; initType: TKInit; isVerbose: Boolean = False); overload;
+    constructor Create(k: Cardinal; maxIter: Integer; initType: TKInit; numThreads: Cardinal; isVerbose: Boolean = False); overload;
     destructor Destroy; override;
 
     procedure load_train_data(rowCount, colCount: Cardinal; trainDS: PPKFloat; trainWeights: PCardinal = nil);
@@ -253,20 +281,28 @@ end;
 
 procedure TKPoint.set_closest(const ACS: TKCentroidArray);
 var
+  mt: TKMTData;
+
+  procedure DoMT(AIndex: PtrInt; AData: Pointer);
+  var
+    i, s, e: PtrInt;
+  begin
+    TMTPool.CalcBlock(AIndex, mt.BinSize, Length(mt.Buffer), s, e);
+    for i := s to e do
+      mt.Buffer[i] := calc_dist(ACS[i]);
+  end;
+
+var
   i, id0: Cardinal;
   d0, d1, di: TKFloat;
-  dissim_buf: TKFloatArray;
 begin
-  SetLength(dissim_buf, Length(ACS));
-
-  //#pragma omp parallel for
-  for i := 0 to High(ACS) do
-    dissim_buf[i] := calc_dist(ACS[i]);
+  mt := TKMTData.Create(Length(ACS), FMTPoolRef.MaxThreads);
+  FMTPoolRef.DoLocalProc(@DoMT, 0, mt.LastThreadIndex, @mt);
 
   i := IfThen(id = 0, 1, 0); // second closest (cand)
   id0 := id;
-  d0 := dissim_buf[id0];
-  d1 := dissim_buf[i];
+  d0 := mt.Buffer[id0];
+  d1 := mt.Buffer[i];
 
   if (d1 < d0) then
   begin
@@ -279,7 +315,7 @@ begin
     if i = id0 then
       Continue;
 
-    di := dissim_buf[i];
+    di := mt.Buffer[i];
 
     if di < d0 then
     begin
@@ -435,23 +471,31 @@ end;
 
 procedure TKCentroid.set_closest(const ACS: TKCentroidArray);
 var
+  mt: TKMTData;
+
+  procedure DoMT(AIndex: PtrInt; AData: Pointer);
+  var
+    i, s, e: PtrInt;
+  begin
+    TMTPool.CalcBlock(AIndex, mt.BinSize, Length(mt.Buffer), s, e);
+    for i := s to e do
+      mt.Buffer[i] := calc_dist(ACS[i]);
+  end;
+
+var
   i: Cardinal;
   di: TKFloat;
-  dissim_buf: TKFloatArray;
 begin
-  SetLength(dissim_buf, Length(ACS));
-
-  //#pragma omp parallel for
-  for i := 0 to High(ACS) do
-    dissim_buf[i] := calc_dist(ACS[i]);
+  mt := TKMTData.Create(Length(ACS), FMTPoolRef.MaxThreads);
+  FMTPoolRef.DoLocalProc(@DoMT, 0, mt.LastThreadIndex, @mt);
 
   i := IfThen(Self = ACS[0], 1, 0);
-  next_d := dissim_buf[i];
+  next_d := mt.Buffer[i];
   for i := i + 1 to High(ACS) do
   begin
     if Self = ACS[i] then
       Continue;
-    di := dissim_buf[i];
+    di := mt.Buffer[i];
     if di < next_d then
       next_d := di;
   end;
@@ -606,6 +650,7 @@ var
   p: TKPoint;
 begin
   p := read_point_fl(AEx, AExEnd, FBody, AWeight, ANormalize);
+  p.FMTPoolRef := FMTPoolRef;
   FPoints[ARow] := p;
 
   if not p.empty() then
@@ -642,6 +687,7 @@ end;
 procedure TKKmeans.push_centroid(AP: TKPoint; AIdx: Cardinal; ADelegate: Boolean);
 begin
   FCentroids[AIdx] := TKCentroid.Create(AP, FNF, ADelegate);
+  FCentroids[AIdx].FMTPoolRef := FMTPoolRef;
 end;
 
 function CompareKFloats(Item1,Item2,UserParameter:Pointer):Integer;
@@ -654,12 +700,24 @@ end;
 
 procedure TKKmeans.init();
 var
-  i, j, k, c, seed: Cardinal;
+  mt: TKMTData;
+  centroidIdx: Cardinal;
+
+  procedure DoMT(AIndex: PtrInt; AData: Pointer);
+  var
+    i, s, e: PtrInt;
+  begin
+    TMTPool.CalcBlock(AIndex, mt.BinSize, Length(mt.Buffer), s, e);
+    for i := s to e do
+      mt.Buffer[i] := FPoints[i].calc_dist(FCentroids[centroidIdx]);
+  end;
+
+var
+  j, c, seed: Cardinal;
   obj, key, di: TKFloat;
   p: TKPoint;
   chosen: TBooleanDynArray;
   r: TKFloatArray;
-  dissim_buf: TKFloatArray;
 begin
   seed := CRandomSeed;
   obj := 0;
@@ -669,9 +727,9 @@ begin
     SetLength(chosen, Length(FPoints));
   end;
 
-  SetLength(dissim_buf, Length(FPoints));
+  mt := TKMTData.Create(Length(FPoints), FOpt.threads);
 
-  for i := 0 to FOpt.k - 1 do
+  for centroidIdx := 0 to FOpt.k - 1 do
   begin
     c := 0;
     repeat
@@ -679,7 +737,7 @@ begin
         kiRandom:
           c := RandInt(Length(FPoints), seed);
         kiKMeansPP:
-          if i = 0 then
+          if centroidIdx = 0 then
           begin
             c := RandInt(Length(FPoints), seed)
           end
@@ -693,31 +751,29 @@ begin
       while chosen[c] do
         c := Min(High(FPoints), c + 1);
     until not chosen[c];
-    push_centroid(FPoints[c], i);
+    push_centroid(FPoints[c], centroidIdx);
     obj := 0;
     chosen[c] := True;
 
-    //#pragma omp parallel for
-    for k := 0 to High(FPoints) do
-      dissim_buf[k] := FPoints[k].calc_dist(FCentroids[i]);
+    FMTPoolRef.DoLocalProc(@DoMT, 0, mt.LastThreadIndex, @mt);
 
     for j := 0 to High(FPoints) do
     begin
       p := FPoints[j];
-      di := dissim_buf[j];
+      di := mt.Buffer[j];
 
-      if (i = 0) or (di < p.up_d) then      // closest
+      if (centroidIdx = 0) or (di < p.up_d) then      // closest
       begin
         p.lo_d := p.up_d;
         p.up_d := di;
-        p.id := i;
+        p.id := centroidIdx;
       end
-      else if (i = 1) or (di < p.lo_d) then // second closest
+      else if (centroidIdx = 1) or (di < p.lo_d) then // second closest
       begin
         p.lo_d := di;
       end;
 
-      if i < FOpt.k - 1 then
+      if centroidIdx < FOpt.k - 1 then
       begin
         if FOpt.init = kiKMeansPP then
         begin
@@ -725,7 +781,7 @@ begin
           r[j] := obj;
         end;
       end
-      else // i == _k - 1
+      else // centroidIdx == _k - 1
       begin
         p.up_d := Sqrt(p.up_d);
         p.lo_d := Sqrt(p.lo_d);
@@ -766,16 +822,22 @@ end;
 
 function TKKmeans.getObj(): TKFloat;
 var
-  i: Cardinal;
-  dissim_buf: TKFloatArray;
+  mt: TKMTData;
+
+  procedure DoMT(AIndex: PtrInt; AData: Pointer);
+  var
+    i, s, e: PtrInt;
+  begin
+    TMTPool.CalcBlock(AIndex, mt.BinSize, Length(mt.Buffer), s, e);
+    for i := s to e do
+      mt.Buffer[i] := FPoints[i].calc_dist(FCentroids[FPoints[i].id]);
+  end;
+
 begin
-  SetLength(dissim_buf, Length(FPoints));
+  mt := TKMTData.Create(Length(FPoints), FOpt.threads);
+  FMTPoolRef.DoLocalProc(@DoMT, 0, mt.LastThreadIndex, @mt);
 
-  //#pragma omp parallel for
-  for i := 0 to High(FPoints) do
-    dissim_buf[i] := FPoints[i].calc_dist(FCentroids[FPoints[i].id]);
-
-  Result := Sum(dissim_buf);
+  Result := Sum(mt.Buffer);
 end;
 
 procedure TKKmeans.run();
@@ -847,18 +909,35 @@ begin
   end;
 end;
 
+{ TKMTData }
+
+constructor TKMTData.Create(ASize, ANumThreads: Cardinal);
+begin
+  NumThreads := ANumThreads;
+  SetLength(Buffer, ASize);
+  BinSize := ASize;
+  if ANumThreads > 1 then
+    BinSize := Max(cKMTMinBinSize, (BinSize - 1) div NumThreads + 1);
+  NumThreads := (ASize - 1) div BinSize + 1;
+  LastThreadIndex := NumThreads - 1;
+end;
+
 { TOrthogonalKmeans }
 
 constructor TOrthogonalKmeans.Create(const option: TKOptions);
 begin
   FObjective := NaN;
   FOpt := option;
+
+  FMTPool := TMTPool.Create(FOpt.threads);
 end;
 
-constructor TOrthogonalKmeans.Create(k: Cardinal; maxIter: Integer; initType: TKInit; isVerbose: Boolean);
+constructor TOrthogonalKmeans.Create(k: Cardinal; maxIter: Integer; initType: TKInit; numThreads: Cardinal; isVerbose: Boolean);
 var
   opt: TKOptions;
 begin
+  Assert(k > 1, 'TOrthogonalKmeans.K should be > 1');
+
   opt.init := initType;
   opt.iter := maxIter;
   opt.k := k;
@@ -867,6 +946,7 @@ begin
   opt.quiet := False;
   opt.verbosity := 1;
   opt.quiet := not isVerbose;
+  opt.threads := IfThen(numThreads = 0, HalfNumberOfProcessors, numThreads);
 
   Create(opt);
 end;
@@ -879,6 +959,8 @@ begin
     FKMs[i].Free;
   SetLength(FKMs, 0);
 
+  FMTPool.Free;
+
   inherited Destroy;
 end;
 
@@ -888,6 +970,7 @@ var
   km: TKKmeans;
 begin
   km := TKKmeans.Create(FOpt, rowCount, colCount);
+  km.FMTPoolRef := FMTPool;
 
   for rc := 0 to rowCount - 1 do
   begin

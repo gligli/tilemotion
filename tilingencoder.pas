@@ -13,7 +13,7 @@ interface
 uses
   windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, zstream, IniFiles, Graphics,
   IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, MTProcs, bufstream,
-  tbbmalloc, extern, utils, powell, orthogonal_kmeans;
+  tbbmalloc, extern, utils, powell, mtpool, orthogonal_kmeans;
 type
   TEncoderStep = (esAll = -1, esLoad = 0, esPredict, esReduce, esPreparePalettes, esDither, esReindex1, esReconstruct, esReindex2, esSave);
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
@@ -1754,7 +1754,7 @@ begin
     SetLength(YakmoClusters, DSLen);
     SetLength(YakmoCentroids, nbTiles, cTileDCTSize);
 
-    Yakmo := TOrthogonalKmeans.Create(nbTiles, cYakmoMaxIterations, kiKMeansPP, True);
+    Yakmo := TOrthogonalKmeans.Create(nbTiles, cYakmoMaxIterations, kiKMeansPP, Encoder.MaxThreadCount, True);
     try
       Yakmo.Process(YakmoDataset, YakmoClusters, YakmoCentroids);
     finally
@@ -4426,15 +4426,27 @@ end;
 
 procedure TTilingEncoder.Test;
 var
+  TestVal: UInt64;
+
+  procedure DoTest(Index: PtrInt; Data: Pointer);
+  begin
+    Assert(InRange(Index, 42, 1337));
+    Assert(Assigned(Data));
+    Assert(TestVal = CRandomSeed);
+  end;
+
+var
   i, j, rng: Integer;
   rr, gg, bb: Byte;
   l, a, b, y, u, v: TFloat;
   DCT: array [0..cTileDCTSize-1] of Double;
   T, T2: PTile;
+  pool: TMTPool;
   km: TOrthogonalKmeans;
   ds, ctr: TDoubleDynArray2;
   p2c: TIntegerDynArray;
   wgt: TCardinalDynArray;
+  prevObj: Double;
 begin
   InitLuts;
 
@@ -4499,6 +4511,17 @@ begin
   TTile.Dispose(T);
   TTile.Dispose(T2);
 
+  for i := 0 to 1 do
+  begin
+    pool := TMTPool.Create(i * 42 + 1);
+    try
+      TestVal := CRandomSeed;
+      pool.DoLocalProc(@DoTest, 42, 1337, Pointer(True));
+    finally
+      pool.Free;
+    end;
+  end;
+
   SetLength(ds, 5000, 4);
   SetLength(wgt, Length(ds));
   for i := 0 to High(ds) do
@@ -4511,12 +4534,19 @@ begin
 
     //WriteLn(wgt[i], ' 1:', ds[i, 0], ' 2:', ds[i, 1], ' 3:', ds[i, 2], ' 4:', ds[i, 3]);
   end;
-  km := TOrthogonalKmeans.Create(3, -1, kiKMeansPP, False);
-  try
-    km.Process(ds, p2c, ctr, wgt);
-    Assert(SameValue(km.Objective, 3.09e12, 1e10), 'TOrthogonalKmeans Objective mismatch');
-  finally
-    km.Free;
+
+  prevObj := NaN;
+  for i := 1 to 4 do
+  begin
+    km := TOrthogonalKmeans.Create(3, -1, kiKMeansPP, i, True);
+    try
+      km.Process(ds, p2c, ctr, wgt);
+      Assert(SameValue(km.Objective, 3.09e12, 1e10), 'TOrthogonalKmeans Objective mismatch');
+      Assert(IsNan(prevObj) or (km.Objective = prevObj), 'TOrthogonalKmeans MT mismatch');
+      prevObj := km.Objective;
+    finally
+      km.Free;
+    end;
   end;
 end;
 
@@ -4820,7 +4850,7 @@ begin
 
     if FPaletteCount > 1 then
     begin
-      Yakmo := TOrthogonalKmeans.Create(FPaletteCount, cYakmoMaxIterations, kiKMeansPP, True);
+      Yakmo := TOrthogonalKmeans.Create(FPaletteCount, cYakmoMaxIterations, kiKMeansPP, MaxThreadCount, True);
       try
         Yakmo.Process(YakmoDataset, YakmoClusters, nil, YakmoWeights);
       finally
@@ -5104,7 +5134,7 @@ begin
 
   if AColorCount > 1 then
   begin
-    Yakmo := TOrthogonalKmeans.Create(AColorCount, cYakmoMaxIterations, kiKMeansPP, False);
+    Yakmo := TOrthogonalKmeans.Create(AColorCount, cYakmoMaxIterations, kiKMeansPP, 1, False);
     try
       Yakmo.Process(Dataset, Clusters, Centroids);
     finally
