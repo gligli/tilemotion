@@ -70,7 +70,7 @@ type
   // FrameEnd:                         data -> none; commandBits -> none (11 bits); keyframe end (1 bit)
   // LoadPalette:                      data -> palette index (16 bits); { RGBA bytes (32bits) } * indexes count; commandBits -> palette format (0: RGBA32) (6 bits); indexes count per palette - 1 (6 bits)
   // TileSet:                          data -> start tile (32 bits); end tile (32 bits); { palette index (16 bits) } * count; { indexes per pixel (64 bytes) } * count; commandBits -> none (11 bits); is keyframe tileset (1 bit)
-  // SetDimensions:                    data -> width in tiles (32 bits); height in tiles (32 bits); frame length in nanoseconds (32 bits) (2^32-1: still frame); global tile count (32 bits); maximum local tile count (32 bits); commandBits -> none (12 bits)
+  // SetDimensions:                    data -> width in tiles (32 bits); height in tiles (32 bits); frame length in nanoseconds (32 bits) (2^32-1: still frame); global tile count (32 bits); maximum key frame tile count (32 bits); commandBits -> none (12 bits)
   // ExtendedCommand:                  data -> following bytes count (32 bits); custom commands, proprietary extensions, ...; commandBits -> extended command index (12 bits)
 
   TGTMCommand = (
@@ -5503,7 +5503,7 @@ procedure TTilingEncoder.LoadStream(AStream: TStream);
 var
   KFStream: TMemoryStream;
   frmIdx, frmCount: Integer;
-  rawTileIdxToTileIdx: TIntegerDynArray;
+  rawTileIdxToTileIdx: array[Boolean{is kf?}] of TIntegerDynArray;
 
   function ReadDWord: Cardinal;
   begin
@@ -5536,7 +5536,7 @@ var
     settings := KFStream.ReadAnsiString;
   end;
 
-  procedure ReadTiles(PaletteSize: Integer);
+  procedure ReadTiles(isKF: Boolean);
   var
     iRawTile, rawStartIdx, rawEndIdx, baseTileIdx, tileIdx, tileCnt: Integer;
   begin
@@ -5555,30 +5555,38 @@ var
     begin
       tileIdx := baseTileIdx + iRawTile - rawStartIdx;
 
-      KFStream.Read(FTiles[tileIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
+      FTiles[tileIdx]^.PalIdx := ReadWord;
       FTiles[tileIdx]^.Active := True;
-      rawTileIdxToTileIdx[iRawTile] := tileIdx;
+      rawTileIdxToTileIdx[isKF, iRawTile] := tileIdx;
     end;
 
-    FPaletteSize := PaletteSize;
+    for iRawTile := rawStartIdx to rawEndIdx do
+    begin
+      tileIdx := baseTileIdx + iRawTile - rawStartIdx;
+
+      KFStream.Read(FTiles[tileIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
+    end;
   end;
 
   procedure ReadDimensions;
   var
     w, h, frmLen, tileCount: Integer;
   begin
-    w := ReadWord; // frame tilemap width
-    h := ReadWord; // frame tilemap height
+    w := ReadDWord; // frame tilemap width
+    h := ReadDWord; // frame tilemap height
     ReframeUI(w, h);
 
     frmLen := ReadDWord; // frame length in nanoseconds
     FFramesPerSecond := 1000*1000*1000 / frmLen;
 
-    tileCount := ReadDWord; // tile count
-    SetLength(rawTileIdxToTileIdx, tileCount);
+    tileCount := ReadDWord; // global tile count
+    SetLength(rawTileIdxToTileIdx[False], tileCount);
+
+    tileCount := ReadDWord; // maximum key frame tile count
+    SetLength(rawTileIdxToTileIdx[True], tileCount);
   end;
 
-  procedure ReadPalette;
+  procedure ReadPalette(palSize: Integer);
   var
     i, palIdx: Integer;
   begin
@@ -5588,13 +5596,15 @@ var
     begin
       SetLength(FPalettes, palIdx + 1);
       for i := 0 to palIdx do
-        SetLength(FPalettes[i].PaletteRGB, FPaletteSize);
+        SetLength(FPalettes[i].PaletteRGB, palSize);
 
       FPaletteCount := Length(FPalettes);
     end;
 
-    for i := 0 to FPaletteSize - 1 do
+    for i := 0 to palSize - 1 do
       FPalettes[palIdx].PaletteRGB[i] := ReadDWord and $ffffff;
+
+    FPaletteSize := palSize;
   end;
 
   procedure SetTMI(tileIdx: Integer; attrs: Integer; var TMI: TTileMapItem);
@@ -5604,12 +5614,7 @@ var
     TMI.VMirror := attrs and 2 <> 0;
 
     TMI.IsPredicted := False;
-
-    if InRange(tileIdx, 0, High(FTiles)) then
-      Inc(FTiles[tileIdx]^.UseCount);
-
-    //if InRange(palIdx, 0, High(FPalettes)) then
-    //  Inc(FPalettes[palIdx].UseCount);
+    TMI.IsBlended := False;
   end;
 
   function NextFrame(KF: TKeyFrame): TFrame;
@@ -5639,6 +5644,7 @@ var
       frm.TileMap[sy, sx].IsPredicted := True;
       frm.TileMap[sy, sx].Attrs.MotionX := 0;
       frm.TileMap[sy, sx].Attrs.MotionY := 0;
+      frm.TileMap[sy, sx].Attrs.MotionBackBufferOffset := 1;
     end;
     tmPos += SkipCount;
   end;
@@ -5647,9 +5653,9 @@ var
   Header: TGTMHeader;
   Command, prevCommand: TGTMCommand;
   CommandData: Word;
+  b: Byte;
   loadedFrmCount, tmPos: Integer;
   tileIdx: Cardinal;
-  palIdx: Word;
   frm: TFrame;
   kf: TKeyFrame;
   TMI: PTileMapItem;
@@ -5663,6 +5669,8 @@ begin
   if Header.FourCC = 'GTMv' then
   begin
     AStream.ReadBuffer(Header, SizeOf(Header));
+    if Header.EncoderVersion <> 5 then
+      raise ETilingEncoderGTMReloadError.Create('Can only reload GTM files made with current version!');
     AStream.Seek(Header.WholeHeaderSize, soBeginning);
     frmCount := Header.FrameCount;
   end;
@@ -5703,11 +5711,11 @@ begin
           end;
           gtTileSet:
           begin
-            ReadTiles(CommandData);
+            ReadTiles((CommandData and 1) <> 0);
           end;
           gtLoadPalette:
           begin
-            ReadPalette;
+            ReadPalette((CommandData and 63) + 1);
           end;
           gtFrameEnd:
           begin
@@ -5721,82 +5729,83 @@ begin
             if (CommandData and 1) <> 0 then // keyframe end?
               Break;
           end;
-          //gtSkipBlock:
-          //begin
-          //  // next frame if needed
-          //  if frm = nil then
-          //    frm := NextFrame(kf);
-          //
-          //  SkipBlock(frm, CommandData + 1, tmPos);
-          //end;
-          //gtShortTileIdxShortPalIdx, gtLongTileIdxShortPalIdx, gtLongTileIdxLongPalIdx:
-          //begin
-          //  if Command in [gtLongTileIdxLongPalIdx] then
-          //    palIdx := ReadWord
-          //  else
-          //    palIdx := (CommandData shr 2) and ((1 shl (CGTMCommandBits - 2)) - 1);
-          //
-          //  if Command in [gtShortTileIdxShortPalIdx] then
-          //    tileIdx := ReadWord
-          //  else
-          //    tileIdx := ReadDWord;
-          //
-          //  // next frame if needed
-          //  if frm = nil then
-          //    frm := NextFrame(kf);
-          //
-          //  tileIdx := rawTileIdxToTileIdx[tileIdx];
-          //
-          //  SetTMI(tileIdx, palIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
-          //  Inc(tmPos);
-          //end;
-          //gtPredictedTileShortOffsets:
-          //begin
-          //  // next frame if needed
-          //  if frm = nil then
-          //    frm := NextFrame(kf);
-          //
-          //  TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
-          //
-          //  TMI^.Attrs.MotionX := (CommandData and 31) - (CommandData and 32);
-          //  TMI^.Attrs.MotionY := ((CommandData shr 6) and 31) - ((CommandData shr 6) and 32);
-          //  TMI^.Attrs.MotionBackBufferOffset := 1;
-          //  TMI^.IsPredicted := True;
-          //
-          //  Inc(tmPos);
-          //end;
-          //gtPredictedTileLongOffsets:
-          //begin
-          //  // next frame if needed
-          //  if frm = nil then
-          //    frm := NextFrame(kf);
-          //
-          //  TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
-          //
-          //  TMI^.Attrs.MotionX := ShortInt(ReadByte);
-          //  TMI^.Attrs.MotionY := ShortInt(ReadByte);
-          //  TMI^.Attrs.MotionBackBufferOffset := CommandData + 1;
-          //  TMI^.IsPredicted := True;
-          //
-          //  Inc(tmPos);
-          //end;
-          //gtIntraTile:
-          //begin
-          //  palIdx := ReadWord;
-          //
-          //  tileIdx := Length(FTiles);
-          //  TTile.Array1DRealloc(FTiles, tileIdx + 1);
-          //
-          //  KFStream.Read(FTiles[tileIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
-          //  FTiles[tileIdx]^.Active := True;
-          //
-          //  // next frame if needed
-          //  if frm = nil then
-          //    frm := NextFrame(kf);
-          //
-          //  SetTMI(tileIdx, palIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
-          //  Inc(tmPos);
-          //end
+          gtPredictedOffsetBlock0x0:
+          begin
+            // next frame if needed
+            if frm = nil then
+              frm := NextFrame(kf);
+
+            SkipBlock(frm, CommandData + 1, tmPos);
+          end;
+          gtGlobalTile10, gtGlobalTile16, gtGlobalTile32,
+          gtKeyFrmTile10, gtKeyFrmTile16, gtKeyFrmTile32:
+          begin
+            if Command in [gtGlobalTile10, gtKeyFrmTile10] then
+              tileIdx := (CommandData shr 2) and (1 shl (CGTMCommandBits - 2) - 1)
+            else if Command in [gtGlobalTile16, gtKeyFrmTile16] then
+              tileIdx := ReadWord
+            else
+              tileIdx := ReadDWord;
+
+            // next frame if needed
+            if frm = nil then
+              frm := NextFrame(kf);
+
+            tileIdx := rawTileIdxToTileIdx[Command in [gtKeyFrmTile10, gtKeyFrmTile16, gtKeyFrmTile32], tileIdx];
+
+            SetTMI(tileIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
+            Inc(tmPos);
+          end;
+          gtPredictedTileOffsets6x6:
+          begin
+            // next frame if needed
+            if frm = nil then
+              frm := NextFrame(kf);
+
+            TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
+
+            TMI^.Attrs.MotionY := ((CommandData shr 6) and 31) - ((CommandData shr 6) and 32);
+            TMI^.Attrs.MotionX := (CommandData and 31) - (CommandData and 32);
+            TMI^.Attrs.MotionBackBufferOffset := 1;
+            TMI^.IsPredicted := True;
+            TMI^.IsBlended := False;
+
+            Inc(tmPos);
+          end;
+          gtPredictedTileOffsets8x8:
+          begin
+            // next frame if needed
+            if frm = nil then
+              frm := NextFrame(kf);
+
+            TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
+
+            b := ReadByte;
+            TMI^.Attrs.MotionY := (b and 127) - (b and 128);
+            b := ReadByte;
+            TMI^.Attrs.MotionX := (b and 127) - (b and 128);
+            TMI^.Attrs.MotionBackBufferOffset := (CommandData and 3) + 1;
+            TMI^.IsPredicted := True;
+            TMI^.IsBlended := False;
+
+            Inc(tmPos);
+          end;
+          gtPredictedFm1Fm2Blend6x6:
+          begin
+            // next frame if needed
+            if frm = nil then
+              frm := NextFrame(kf);
+
+            TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
+
+            TMI^.Attrs.BlendWeight := ((CommandData shr CGTMBlendAlphaShift) and 31) - ((CommandData shr CGTMBlendAlphaShift) and 32);
+            TMI^.Attrs.BlendAlpha := CommandData and CGTMBlendAlphaMax;
+            TMI^.Attrs.Dummy := 0;
+            TMI^.IsPredicted := True;
+            TMI^.IsBlended := True;
+
+            Inc(tmPos);
+          end;
 
           else
             Assert(False, 'Unknown command: ' + IntToStr(Ord(Command)) + ', commandData: ' + IntToStr(CommandData) + ', prevCommand: '+ IntToStr(Ord(prevCommand)));
@@ -5889,20 +5898,19 @@ var
     end
     else
     begin
+      attrs := (Ord(TMI.VMirror) shl 1) or Ord(TMI.HMirror);
       tileIdx := Max(0, TMI.TileIdx);
       finalTileIdx := Max(0, FTiles[tileIdx]^.TmpIndex);
 
       isKeyFrameTile := finalTileIdx >= Length(globalTiles);
-      isTile16 := InRange(finalTileIdx, 1 shl (CGTMCommandBits - 2), High(Word));
-      isTile32 := finalTileIdx > High(Word);
-
-      attrs := (Ord(TMI.VMirror) shl 1) or Ord(TMI.HMirror);
-
       if isKeyFrameTile then
       begin
         finalTileIdx -= Length(globalTiles);
         Assert(finalTileIdx >= 0);
       end;
+
+      isTile16 := InRange(finalTileIdx, 1 shl (CGTMCommandBits - 2), High(Word));
+      isTile32 := finalTileIdx > High(Word);
 
       if not isTile32 and not isTile16 then
       begin
