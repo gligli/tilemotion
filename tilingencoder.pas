@@ -432,7 +432,7 @@ type
 
     FRenderPredicted: Boolean;
     FRenderFrameIndex: Integer;
-    FRenderPrevFrameIndex: Integer;
+    FRenderOuptutFrameIndex: Integer;
     FRenderPage: TRenderPage;
     FRenderPsychoVisualQuality: Double;
     FRenderTitleText: String;
@@ -450,7 +450,7 @@ type
     FOnProgress: TTilingEncoderProgressEvent;
     FProgressStep: TEncoderStep;
     FProgressAllStartTime, FProgressProcessStartTime, FProgressPrevTime: Int64;
-    FRenderOutputStateChanged: Boolean;
+    FRenderOutputDirty: Boolean;
 
     FProgressSyncPos, FProgressSyncMax: Integer;
     FProgressSyncHG: Boolean;
@@ -3267,7 +3267,7 @@ procedure TTilingEncoder.SetRenderFrameIndex(AValue: Integer);
 begin
   if FRenderFrameIndex = AValue then Exit;
   FRenderFrameIndex := EnsureRange(AValue, 0, High(FFrames));
-  FRenderOutputStateChanged := not InRange(AValue, FRenderPrevFrameIndex, FRenderPrevFrameIndex + 1);
+  FRenderOutputDirty := FRenderOutputDirty or not InRange(AValue, FRenderOuptutFrameIndex, FRenderOuptutFrameIndex + 1);
 end;
 
 procedure TTilingEncoder.SetRenderGammaValue(AValue: Double);
@@ -3281,35 +3281,35 @@ procedure TTilingEncoder.SetRenderMirrored(AValue: Boolean);
 begin
   if FRenderMirrored = AValue then Exit;
   FRenderMirrored := AValue;
-  FRenderOutputStateChanged := True;
+  FRenderOutputDirty := True;
 end;
 
 procedure TTilingEncoder.SetRenderOutputDithered(AValue: Boolean);
 begin
   if FRenderOutputDithered = AValue then Exit;
   FRenderOutputDithered := AValue;
-  FRenderOutputStateChanged := True;
+  FRenderOutputDirty := True;
 end;
 
 procedure TTilingEncoder.SetRenderPage(AValue: TRenderPage);
 begin
   if FRenderPage = AValue then Exit;
   FRenderPage := AValue;
-  FRenderOutputStateChanged := (AValue = rpOutput) and not InRange(FRenderFrameIndex, FRenderPrevFrameIndex, FRenderPrevFrameIndex + 1);
+  FRenderOutputDirty := FRenderOutputDirty or ((AValue = rpOutput) and not InRange(FRenderFrameIndex, FRenderOuptutFrameIndex, FRenderOuptutFrameIndex + 1));
 end;
 
 procedure TTilingEncoder.SetRenderPaletteIndex(AValue: Integer);
 begin
   if FRenderPaletteIndex = AValue then Exit;
   FRenderPaletteIndex := EnsureRange(AValue, -1, FPaletteCount - 1);
-  FRenderOutputStateChanged := True;
+  FRenderOutputDirty := True;
 end;
 
 procedure TTilingEncoder.SetRenderPredicted(AValue: Boolean);
 begin
   if FRenderPredicted = AValue then Exit;
   FRenderPredicted := AValue;
-  FRenderOutputStateChanged := AValue;
+  FRenderOutputDirty := AValue;
 end;
 
 procedure TTilingEncoder.SetRenderTilePage(AValue: Integer);
@@ -3881,7 +3881,7 @@ begin
 
     if APage = rpOutput then
     begin
-      if Frame.Index <> FRenderPrevFrameIndex then
+      if Frame.Index <> FRenderOuptutFrameIndex then
         FRenderFrameBuffer.AdvanceFrame;
 
       for sy := 0 to FTileMapHeight - 1 do
@@ -4015,6 +4015,9 @@ begin
             end;
           end;
       end;
+
+      FRenderOutputDirty := False;
+      FRenderOuptutFrameIndex := Frame.Index;
     end;
 
     // "FPalettes / Tiles" tab
@@ -4093,8 +4096,6 @@ begin
     FRenderPsychoVisualQuality := EuclideanToPSNR(errCml);
 
   finally
-    FRenderPrevFrameIndex := Frame.Index;
-    FRenderOutputStateChanged := False;
     TTile.Dispose(TempTile);
   end;
 end;
@@ -4103,7 +4104,7 @@ procedure TTilingEncoder.Render;
 var
   frmIdx: Integer;
 begin
-  if not FRenderOutputStateChanged or (FRenderPage <> rpOutput) or not Assigned(FFrames) then
+  if not FRenderOutputDirty or (FRenderPage <> rpOutput) or not Assigned(FFrames) then
   begin
     RenderFrame(FRenderFrameIndex, FRenderPage)
   end
@@ -6063,7 +6064,7 @@ begin
   FTilesBitmap := TBitmap.Create;
   FPaletteBitmap := TBitmap.Create;
 
-  FRenderPrevFrameIndex := -1;
+  FRenderOuptutFrameIndex := -1;
   FRenderPredicted := True;
   FRenderMirrored := True;
   FRenderOutputDithered := True;
