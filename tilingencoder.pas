@@ -1525,8 +1525,12 @@ var
   state: TDCTCribbleState;
   PrevDCTPtr: PDCTScalar;
 begin
-  Result := High(Cardinal);
-  state.Error := High(Cardinal);
+  if ATMI^.IsPredicted then
+    Result := ATMI^.Error
+  else
+    Result := High(Cardinal);
+
+  state.Error := Result;
   state.Y := MaxInt;
   state.X := MaxInt;
   state.DY := ADY;
