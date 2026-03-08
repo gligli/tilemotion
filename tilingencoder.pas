@@ -18,7 +18,7 @@ type
   TEncoderStep = (esAll = -1, esLoad = 0, esPredict, esReduce, esPreparePalettes, esDither, esReindex1, esReconstruct, esReindex2, esSave);
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
   TRenderPage = (rpNone, rpInput, rpOutput, rpTilesPalette);
-  TPsyVisMode = (pvsDCT, pvsWeightedDCT, pvsWavelets, pvsSpeDCT, pvsWeightedSpeDCT);
+  TPsyVisMode = (pvsDCT, pvsWeightedDCT, pvsSpeDCT, pvsWeightedSpeDCT);
 
 const
   cEncoderStepLen: array[TEncoderStep] of Integer = ({esAll} -1, {esLoad} 5, {esPredict} 1, {esReduce} 3, {esPreparePalettes} 4, {esDither} 2, {esReindex1} 3, {esReconstruct} 2, {esReindex2} 3, {esSave} 1);
@@ -386,7 +386,6 @@ type
     FGammaCorLut: array[-1..1, 0..High(Byte)] of TFloat;
     FVecInv: array[0..256 * 4 - 1] of Cardinal;
     FDCTLut:array[Boolean {Special?}, 0..cUnrolledDCTSize - 1] of TFloat;
-    FDCTLutDouble:array[Boolean {Special?}, 0..cUnrolledDCTSize - 1] of Double;
     FInvDCTLutDouble:array[0..cUnrolledDCTSize - 1] of Double;
 
     FTiles: PTileDynArray;
@@ -495,9 +494,6 @@ type
 
     function GammaCorrect(lut: Integer; x: Byte): TFloat; inline;
     function GammaUncorrect(lut: Integer; x: TFloat): Byte; inline;
-
-    generic procedure WaveletGS<T, PT>(Data: PT; Output: PT; dx, dy, depth: cardinal);
-    generic procedure DeWaveletGS<T, PT>(wl: PT; pic: PT; dx, dy, depth: longint);
 
     procedure ConvertToCpnPixels(const ATile: TTile; FromPal, UseLAB, VMirror, HMirror: Boolean; const APalette: TIntegerDynArray; out ACpnPixel: TCpnPixels); inline;
     procedure ComputeCpnPixelsPsyVisFeatures(const ACpnPixel: TCpnPixels; Mode: TPsyVisMode; ColorCpns: Integer; ADCT: PDCTScalar); inline;
@@ -2091,10 +2087,8 @@ begin
       for y := 0 to cTileWidth - 1 do
         for x := 0 to cTileWidth - 1 do
         begin
-          FDCTLutDouble[False, i] := cos((x + 0.5) * u * PI / (cTileWidth)) * cos((y + 0.5) * v * PI / (cTileWidth)) * cDCTUVRatio[Min(v, 7), Min(u, 7)];
-          FDCTLutDouble[True, i] := cos((x + 0.5) * u * PI / (cTileWidth * 2)) * cos((y + 0.5) * v * PI / (cTileWidth * 2)) * cDCTUVRatio[Min(v, 7), Min(u, 7)];
-          FDCTLut[False, i] := FDCTLutDouble[False, i];
-          FDCTLut[True, i] := FDCTLutDouble[True, i];
+          FDCTLut[False, i] := cos((x + 0.5) * u * PI / (cTileWidth)) * cos((y + 0.5) * v * PI / (cTileWidth)) * cDCTUVRatio[Min(v, 7), Min(u, 7)];
+          FDCTLut[True, i] := cos((x + 0.5) * u * PI / (cTileWidth * 2)) * cos((y + 0.5) * v * PI / (cTileWidth * 2)) * cDCTUVRatio[Min(v, 7), Min(u, 7)];
           Inc(i);
         end;
 
@@ -3160,199 +3154,6 @@ begin
   end;
 end;
 
-// from https://lists.freepascal.org/pipermail/fpc-announce/2006-September/000508.html
-generic procedure TTilingEncoder.WaveletGS<T, PT>(Data: PT; Output: PT; dx, dy, depth: cardinal);
-var
-  x, y: longint;
-  offset: cardinal;
-  factor: T;
-  tempX: array[0 .. sqr(cTileWidth) - 1] of T;
-  tempY: array[0 .. sqr(cTileWidth) - 1] of T;
-begin
-  FillChar(tempX[0], SizeOf(tempX), 0);
-  FillChar(tempY[0], SizeOf(tempY), 0);
-
-  factor:=(1.0 / sqrt(2.0)); //Normalized Haar
-
-  for y:=0 to dy - 1 do //Transform Rows
-  begin
-    offset := y * cTileWidth;
-    for x := 0 to (dx div 2) - 1 do
-    begin
-      tempX[x + offset]             := (Data[x * 2 + offset] + Data[(x * 2 + 1) + offset]) * factor; //LOW-PASS
-      tempX[(x + dx div 2) +offset] := (Data[x * 2 + offset] - Data[(x * 2 + 1) + offset]) * factor; //HIGH-PASS
-    end;
-  end;
-
-  for x := 0 to dx - 1 do //Transform Columns
-    for y := 0 to (dy div 2) - 1 do
-    begin
-      tempY[x +y * cTileWidth]              := (tempX[x +y * 2 * cTileWidth] + tempX[x +(y * 2 + 1) * cTileWidth]) * factor; //LOW-PASS
-      tempY[x +(y + dy div 2) * cTileWidth] := (tempX[x +y * 2 * cTileWidth] - tempX[x +(y * 2 + 1) * cTileWidth]) * factor; //HIGH-PASS
-    end;
-
-  for y := 0 to dy - 1 do
-    Move(tempY[y * cTileWidth], Output[y * cTileWidth], dx * sizeof(T)); //Copy to Wavelet
-
-  if depth>0 then
-    specialize waveletgs<T, PT>(Output, Output, dx div 2, dy div 2, depth - 1); //Repeat for SubDivisionDepth
-end;
-
-generic procedure TTilingEncoder.DeWaveletGS<T, PT>(wl: PT; pic: PT; dx, dy, depth: longint);
-Var x,y : longint;
-    tempX: array[0 .. sqr(cTileWidth) - 1] of T;
-    tempY: array[0 .. sqr(cTileWidth) - 1] of T;
-    offset,offsetm1,offsetp1 : longint;
-    factor : T;
-    dyoff,yhalf,yhalfoff,yhalfoff2,yhalfoff3 : longint;
-BEGIN
- FillChar(tempX[0], SizeOf(tempX), 0);
- FillChar(tempY[0], SizeOf(tempY), 0);
-
- if depth>0 then specialize dewaveletgs<T, PT>(wl,wl,dx div 2,dy div 2,depth-1); //Repeat for SubDivisionDepth
-
- factor:=(1.0/sqrt(2.0)); //Normalized Haar
-
- ////
-
- yhalf:=(dy div 2)-1;
- dyoff:=(dy div 2)*cTileWidth;
- yhalfoff:=yhalf*cTileWidth;
- yhalfoff2:=(yhalf+(dy div 2))*cTileWidth;
- yhalfoff3:=yhalfoff*2 +cTileWidth;
-
- if (yhalf>0) then begin //The first and last pixel has to be done "normal"
-  for x:=0 to dx-1 do begin
-   tempy[x]     := (wl[x] + wl[x+dyoff])*factor; //LOW-PASS
-   tempy[x+cTileWidth]:= (wl[x] - wl[x+dyoff])*factor; //HIGH-PASS
-
-   tempy[x +yhalfoff*2]:= (wl[x +yhalfoff] + wl[x +yhalfoff2])*factor; //LOW-PASS
-   tempy[x +yhalfoff3] := (wl[x +yhalfoff] - wl[x +yhalfoff2])*factor; //HIGH-PASS
-  end;
- end else begin
-  for x:=0 to dx-1 do begin
-   tempy[x]     := (wl[x] + wl[x+dyoff])*factor; //LOW-PASS
-   tempy[x+cTileWidth]:= (wl[x] - wl[x+dyoff])*factor; //HIGH-PASS
-  end;
- end;
-
- //
-
- dyoff:=(dy div 2)*cTileWidth;
- yhalf:=(dy div 2)-2;
-
- if (yhalf>=1) then begin                  //More then 2 pixels in the row?
-  //
-  if (dy>=4) then begin                    //DY must be greater then 4 to make the faked algo look good.. else it must be done "normal"
-  //
-   for x:=0 to dx-1 do begin               //Inverse Transform Colums (fake: if (high-pass coefficient=0.0) and (surrounding high-pass coefficients=0.0) then interpolate between surrounding low-pass coefficients)
-    offsetm1:=0;
-    offset:=cTileWidth;
-    offsetp1:=cTileWidth*2;
-
-    for y:=1 to yhalf do begin
-     if (wl[x +offset+dyoff]<>0.0) then begin //!UPDATED
-      tempy[x +offset*2]       := (wl[x +offset] + wl[x +offset+dyoff])*factor; //LOW-PASS
-      tempy[x +offset*2 +cTileWidth] := (wl[x +offset] - wl[x +offset+dyoff])*factor; //HIGH-PASS
-     end else begin //!UPDATED
-      if (wl[x +offsetm1 +dyoff]=0.0) and (wl[x +offsetp1]<>wl[x +offset]) and ((y=yhalf) or (wl[x +offsetp1]<>wl[x +offsetp1 +cTileWidth])) then tempy[x +offset*2]:=(wl[x +offset]*0.8 + wl[x +offsetm1]*0.2)*factor //LOW-PASS
-       else tempy[x +offset*2]:=wl[x +offset]*factor;
-      if (wl[x +offsetp1 +dyoff]=0.0) and (wl[x +offsetm1]<>wl[x +offset]) and ((y=1) or (wl[x +offsetm1]<>wl[x +offsetm1 -cTileWidth])) then tempy[x +offset*2 +cTileWidth]:=(wl[x +offset]*0.8 + wl[x +offsetp1]*0.2)*factor //HIGH-PASS
-       else tempy[x +offset*2 +cTileWidth]:=wl[x +offset]*factor;
-     end;
-
-     inc(offsetm1,cTileWidth);
-     inc(offset,cTileWidth);
-     inc(offsetp1,cTileWidth);
-    end;
-
-   end;
-  //
-  end else //DY<4
-  //
-   for x:=0 to dx-1 do begin
-    offset:=cTileWidth;
-    for y:=1 to yhalf do begin
-     tempy[x +offset*2]      := (wl[x +offset] + wl[x +offset +dyoff])*factor; //LOW-PASS
-     tempy[x +offset*2+cTileWidth] := (wl[x +offset] - wl[x +offset +dyoff])*factor; //HIGH-PASS
-
-     inc(offset,cTileWidth);
-    end;
-   end;
-  //
- end;
-
- ////
-
- offset:=0;
- yhalf:=(dx div 2)-1;
- yhalfoff:=(yhalf+dx div 2);
- yhalfoff2:=yhalf*2+1;
-
- if (yhalf>0) then begin
-  for y:=0 to dy-1 do begin //The first and last pixel has to be done "normal"
-   tempx[offset]   :=(tempy[offset] + tempy[yhalf+1 +offset])*factor; //LOW-PASS
-   tempx[offset+1] :=(tempy[offset] - tempy[yhalf+1 +offset])*factor; //HIGH-PASS
-
-   tempx[yhalf*2 +offset]   :=(tempy[yhalf +offset] + tempy[yhalfoff +offset])*factor; //LOW-PASS
-   tempx[yhalfoff2 +offset] :=(tempy[yhalf +offset] - tempy[yhalfoff +offset])*factor; //HIGH-PASS
-
-   inc(offset,cTileWidth);
-  end;
- end else begin
-  for y:=0 to dy-1 do begin //The first and last pixel has to be done "normal"
-   tempx[offset]   :=(tempy[offset] + tempy[yhalf+1 +offset])*factor; //LOW-PASS
-   tempx[offset+1] :=(tempy[offset] - tempy[yhalf+1 +offset])*factor; //HIGH-PASS
-
-   inc(offset,cTileWidth);
-  end;
- end;
-
- //
-
- dyoff:=(dx div 2);
- yhalf:=(dx div 2)-2;
-
- if (yhalf>=1) then begin
-
-  if (dx>=4) then begin
-
-   offset:=0;
-   for y:=0 to dy-1 do begin               //Inverse Transform Rows (fake: if (high-pass coefficient=0.0) and (surrounding high-pass coefficients=0.0) then interpolate between surrounding low-pass coefficients)
-    for x:=1 to yhalf do
-     if (tempy[x +dyoff +offset]<>0.0) then begin //!UPDATED
-      tempx[x*2 +offset]   :=(tempy[x +offset] + tempy[x +dyoff +offset])*factor; //LOW-PASS
-      tempx[x*2+1 +offset] :=(tempy[x +offset] - tempy[x +dyoff +offset])*factor; //HIGH-PASS
-     end else begin //!UPDATED
-      if (tempy[x-1+dyoff +offset]=0.0) and (tempy[x+1 +offset]<>tempy[x +offset]) and ((x=yhalf) or (tempy[x+1 +offset]<>tempy[x+2 +offset])) then tempx[x*2 +offset]:=(tempy[x +offset]*0.8 + tempy[x-1 +offset]*0.2)*factor //LOW-PASS
-       else tempx[x*2 +offset]:=tempy[x +offset]*factor;
-      if (tempy[x+1+dyoff +offset]=0.0) and (tempy[x-1 +offset]<>tempy[x +offset]) and ((x=1) or (tempy[x-1 +offset]<>tempy[x-2 +offset])) then tempx[x*2+1 +offset]:=(tempy[x +offset]*0.8 + tempy[x+1 +offset]*0.2)*factor //HIGH-PASS
-       else tempx[x*2+1 +offset]:=tempy[x +offset]*factor;
-     end;
-    inc(offset,cTileWidth);
-   end;
-
-  end else begin //DX<4
-
-   offset:=0;
-   for y:=0 to dy-1 do begin               //Inverse Transform Rows (fake: if (high-pass coefficient=0.0) and (surrounding high-pass coefficients=0.0) then interpolate between surrounding low-pass coefficients)
-    for x:=1 to yhalf do begin
-     tempx[x*2 +offset]   := (tempy[x +offset] + tempy[x +dyoff +offset])*factor; //LOW-PASS
-     tempx[x*2+1 +offset] := (tempy[x +offset] - tempy[x +dyoff +offset])*factor; //HIGH-PASS
-    end;
-    inc(offset,cTileWidth);
-   end;
-
-  end;
-
- end;
-
- ////
-
- for y:=0 to dy-1 do
-  move(tempx[y*cTileWidth],pic[y*cTileWidth],dx*sizeof(T)); //Copy to Pic
-END;
-
 procedure TTilingEncoder.SetDitheringYliluoma2MixedColors(AValue: Integer);
 begin
   if FDitheringYliluoma2MixedColors = AValue then Exit;
@@ -3587,11 +3388,9 @@ var
   pDCT: PSmallInt;
   pSnake: PByte;
 begin
-  Assert(not (Mode in [pvsWavelets]), 'Wavelets on SmallInt vector unimplemented!');
-
   for cpn := 0 to ColorCpns - 1 do
   begin
-    pDCT := @ADCT[cpn * sqr(cTileWidth)];
+    pDCT := @ADCT[cpn];
     pLut := @FDCTLut[Mode in [pvsSpeDCT, pvsWeightedSpeDCT], 0];
     pSnake := @cDCTSnake[0];
     for v := 0 to cTileWidth - 1 do
@@ -3602,7 +3401,7 @@ begin
         if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
            z *= cDCTWeights[cpn, v, u];
 
-        pDCT[pSnake^] := Round(z);
+        pDCT[pSnake^ * ColorCpns] := Round(z);
         Inc(pLut, Sqr(cTileWidth));
         Inc(pSnake);
       end;
@@ -3612,52 +3411,33 @@ end;
 procedure TTilingEncoder.ComputeTilePsyVisFeatures(const ATile: TTile; Mode: TPsyVisMode; FromPal, UseLAB, VMirror,
   HMirror: Boolean; ColorCpns: Integer; const APalette: TIntegerDynArray; ADCT: PDouble);
 var
-  i, u, v, cpn: Integer;
+  u, v, cpn: Integer;
   z: Double;
   CpnPixels: TCpnPixels;
-  CpnPixelsDouble: TCpnPixelsDouble;
-  pDCT, pLut: PDouble;
-  LocalDCT: array[0..cTileDCTSize - 1] of Double;
+  pLut: PSingle;
+  pDCT: PDouble;
+  pSnake: PByte;
 begin
   ConvertToCpnPixels(ATile, FromPal, UseLAB, VMirror, HMirror, APalette, CpnPixels);
 
   for cpn := 0 to ColorCpns - 1 do
+  begin
+    pDCT := @ADCT[cpn];
+    pLut := @FDCTLut[Mode in [pvsSpeDCT, pvsWeightedSpeDCT], 0];
+    pSnake := @cDCTSnake[0];
     for v := 0 to cTileWidth - 1 do
       for u := 0 to cTileWidth - 1 do
-        CpnPixelsDouble[cpn, v, u] := CpnPixels[cpn, v, u];
+      begin
+  		  z := DCTInner_asm(@CpnPixels[cpn, 0, 0], pLut);
 
-  if Mode = pvsWavelets then
-  begin
-   for cpn := 0 to ColorCpns - 1 do
-   begin
-     pDCT := @LocalDCT[cpn * sqr(cTileWidth)];
-     specialize WaveletGS<Double, PDouble>(@CpnPixelsDouble[cpn, 0, 0], pDCT, cTileWidth, cTileWidth, 2);
-   end;
-  end
-  else
-  begin
-    for cpn := 0 to ColorCpns - 1 do
-    begin
-      pDCT := @LocalDCT[cpn * sqr(cTileWidth)];
-      pLut := @FDCTLutDouble[Mode in [pvsSpeDCT, pvsWeightedSpeDCT], 0];
-      for v := 0 to cTileWidth - 1 do
-        for u := 0 to cTileWidth - 1 do
-        begin
-          z := specialize DCTInner<PDouble>(@CpnPixelsDouble[cpn, 0, 0], pLut, 1);
+        if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
+           z *= cDCTWeights[cpn, v, u];
 
-          if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
-             z *= cDCTWeights[cpn, v, u];
-
-          pDCT^ := z;
-          Inc(pDCT);
-          Inc(pLut, Sqr(cTileWidth));
-        end;
-    end;
+        pDCT[pSnake^ * ColorCpns] := Round(z);
+        Inc(pLut, Sqr(cTileWidth));
+        Inc(pSnake);
+      end;
   end;
-
-  for cpn := 0 to ColorCpns - 1 do
-    for i := 0 to sqr(cTileWidth) - 1 do
-      ADCT[cDCTSnake[i] + cpn * sqr(cTileWidth)] := LocalDCT[i + cpn * sqr(cTileWidth)];
 end;
 
 procedure TTilingEncoder.ComputeInvTilePsyVisFeatures(DCT: PDouble; Mode: TPsyVisMode; UseLAB: Boolean; ColorCpns: Integer;
@@ -3693,7 +3473,7 @@ begin
     for v := 0 to cTileWidth - 1 do
       for u := 0 to cTileWidth - 1 do
       begin
-        d := DCT[cDCTSnake[i] + cpn * sqr(cTileWidth)];
+        d := DCT[cDCTSnake[i] * ColorCpns + cpn];
         if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
           pDCT^ := d / cDCTWeights[cpn, v, u]
         else
@@ -3703,29 +3483,18 @@ begin
       end;
   end;
 
-  if Mode = pvsWavelets then
+  for cpn := 0 to ColorCpns - 1 do
   begin
-    for cpn := 0 to ColorCpns - 1 do
-    begin
-      pCpn := @CpnPixels[cpn, 0, 0];
-      specialize DeWaveletGS<Double, PDouble>(@LocalDCT[cpn * sqr(cTileWidth)], pCpn, cTileWidth, cTileWidth, 2);
-    end;
-  end
-  else
-  begin
-    for cpn := 0 to ColorCpns - 1 do
-    begin
-      pCpn := @CpnPixels[cpn, 0, 0];
-      pLut := @FInvDCTLutDouble[0];
+    pCpn := @CpnPixels[cpn, 0, 0];
+    pLut := @FInvDCTLutDouble[0];
 
-      for y := 0 to cTileWidth - 1 do
-        for x := 0 to cTileWidth - 1 do
-        begin
-          pCpn^ := specialize DCTInner<PDouble>(@LocalDCT[cpn * sqr(cTileWidth)], pLut, 1);
-          Inc(pCpn);
-          Inc(pLut, Sqr(cTileWidth));
-        end;
-    end;
+    for y := 0 to cTileWidth - 1 do
+      for x := 0 to cTileWidth - 1 do
+      begin
+        pCpn^ := specialize DCTInner<PDouble>(@LocalDCT[cpn * sqr(cTileWidth)], pLut, 1);
+        Inc(pCpn);
+        Inc(pLut, Sqr(cTileWidth));
+      end;
   end;
 
   for y := 0 to (cTileWidth - 1) do
@@ -4528,9 +4297,6 @@ begin
   ComputeInvTilePsyVisFeatures(@DCT[0], pvsWeightedDCT, False, cColorCpns, T2^);
 
   Assert(CompareMem(T^.GetRGBPixelsPtr, T2^.GetRGBPixelsPtr, SizeOf(TRGBPixels)), 'QWeighted DCT/InvDCT mismatch');
-
-  ComputeTilePsyVisFeatures(T^, pvsWavelets, False, False, False, False, cColorCpns, nil, @DCT[0]);
-  ComputeInvTilePsyVisFeatures(@DCT[0], pvsWavelets, False, cColorCpns, T2^);
 
   Assert(CompareMem(T^.GetRGBPixelsPtr, T2^.GetRGBPixelsPtr, SizeOf(TRGBPixels)), 'WL/InvWL mismatch');
 

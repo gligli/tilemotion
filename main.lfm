@@ -447,7 +447,6 @@ object MainForm: TMainForm
         Items.Strings = (
           'DCT'
           'Weighted DCT'
-          'Haar wavelets'
           'Special DCT'
           'Spe. Wgt. DCT'
         )
