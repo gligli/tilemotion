@@ -451,6 +451,7 @@ type
     FOnProgress: TTilingEncoderProgressEvent;
     FProgressStep: TEncoderStep;
     FProgressAllStartTime, FProgressProcessStartTime, FProgressPrevTime: Int64;
+    FRenderOutputStateChanged: Boolean;
 
     FProgressSyncPos, FProgressSyncMax: Integer;
     FProgressSyncHG: Boolean;
@@ -470,10 +471,15 @@ type
     procedure SetMotionPredictMaxBufferedFrames(AValue: Integer);
     procedure SetRenderFrameIndex(AValue: Integer);
     procedure SetRenderGammaValue(AValue: Double);
+    procedure SetRenderMirrored(AValue: Boolean);
+    procedure SetRenderOutputDithered(AValue: Boolean);
+    procedure SetRenderPage(AValue: TRenderPage);
     procedure SetRenderPaletteIndex(AValue: Integer);
+    procedure SetRenderPredicted(AValue: Boolean);
     procedure SetRenderTilePage(AValue: Integer);
     procedure SetGlobalTilingTargetPSNR(AValue: Double);
     procedure SetGlobalTilingTileCount(AValue: Integer);
+    procedure SetRenderUseGamma(AValue: Boolean);
     procedure SetScaling(AValue: Double);
     procedure SetShotTransCorrelLoThres(AValue: Double);
     procedure SetShotTransMaxSecondsPerKF(AValue: Double);
@@ -624,14 +630,14 @@ type
 
     property RenderPlaying: Boolean read FRenderPlaying write FRenderPlaying;
     property RenderFrameIndex: Integer read FRenderFrameIndex write SetRenderFrameIndex;
-    property RenderPredicted: Boolean read FRenderPredicted write FRenderPredicted;
-    property RenderMirrored: Boolean read FRenderMirrored write FRenderMirrored;
-    property RenderOutputDithered: Boolean read FRenderOutputDithered write FRenderOutputDithered;
-    property RenderUseGamma: Boolean read FRenderUseGamma write FRenderUseGamma;
+    property RenderPredicted: Boolean read FRenderPredicted write SetRenderPredicted;
+    property RenderMirrored: Boolean read FRenderMirrored write SetRenderMirrored;
+    property RenderOutputDithered: Boolean read FRenderOutputDithered write SetRenderOutputDithered;
+    property RenderUseGamma: Boolean read FRenderUseGamma write SetRenderUseGamma;
     property RenderPaletteIndex: Integer read FRenderPaletteIndex write SetRenderPaletteIndex;
     property RenderTilePage: Integer read FRenderTilePage write SetRenderTilePage;
     property RenderGammaValue: Double read GetRenderGammaValue write SetRenderGammaValue;
-    property RenderPage: TRenderPage read FRenderPage write FRenderPage;
+    property RenderPage: TRenderPage read FRenderPage write SetRenderPage;
     property RenderTitleText: String read FRenderTitleText;
     property RenderPsychoVisualQuality: Double read FRenderPsychoVisualQuality;
     property OutputBitmap: TBitmap read FOutputBitmap;
@@ -3416,6 +3422,12 @@ begin
     FGlobalTilingTileCount := max(FGlobalTilingTileCount, 0);
 end;
 
+procedure TTilingEncoder.SetRenderUseGamma(AValue: Boolean);
+begin
+  if FRenderUseGamma = AValue then Exit;
+  FRenderUseGamma := AValue;
+end;
+
 procedure TTilingEncoder.SetScaling(AValue: Double);
 begin
   if FScaling = AValue then Exit;
@@ -3450,6 +3462,7 @@ procedure TTilingEncoder.SetRenderFrameIndex(AValue: Integer);
 begin
   if FRenderFrameIndex = AValue then Exit;
   FRenderFrameIndex := EnsureRange(AValue, 0, High(FFrames));
+  FRenderOutputStateChanged := not InRange(AValue, FRenderPrevFrameIndex, FRenderPrevFrameIndex + 1);
 end;
 
 procedure TTilingEncoder.SetRenderGammaValue(AValue: Double);
@@ -3459,10 +3472,39 @@ begin
   InitLuts;
 end;
 
+procedure TTilingEncoder.SetRenderMirrored(AValue: Boolean);
+begin
+  if FRenderMirrored = AValue then Exit;
+  FRenderMirrored := AValue;
+  FRenderOutputStateChanged := True;
+end;
+
+procedure TTilingEncoder.SetRenderOutputDithered(AValue: Boolean);
+begin
+  if FRenderOutputDithered = AValue then Exit;
+  FRenderOutputDithered := AValue;
+  FRenderOutputStateChanged := True;
+end;
+
+procedure TTilingEncoder.SetRenderPage(AValue: TRenderPage);
+begin
+  if FRenderPage = AValue then Exit;
+  FRenderPage := AValue;
+  FRenderOutputStateChanged := (AValue = rpOutput) and not InRange(FRenderFrameIndex, FRenderPrevFrameIndex, FRenderPrevFrameIndex + 1);
+end;
+
 procedure TTilingEncoder.SetRenderPaletteIndex(AValue: Integer);
 begin
   if FRenderPaletteIndex = AValue then Exit;
   FRenderPaletteIndex := EnsureRange(AValue, -1, FPaletteCount - 1);
+  FRenderOutputStateChanged := True;
+end;
+
+procedure TTilingEncoder.SetRenderPredicted(AValue: Boolean);
+begin
+  if FRenderPredicted = AValue then Exit;
+  FRenderPredicted := AValue;
+  FRenderOutputStateChanged := AValue;
 end;
 
 procedure TTilingEncoder.SetRenderTilePage(AValue: Integer);
@@ -4279,6 +4321,7 @@ begin
 
   finally
     FRenderPrevFrameIndex := Frame.Index;
+    FRenderOutputStateChanged := False;
     TTile.Dispose(TempTile);
   end;
 end;
@@ -4287,7 +4330,7 @@ procedure TTilingEncoder.Render;
 var
   frmIdx: Integer;
 begin
-  if (FRenderFrameIndex = FRenderPrevFrameIndex + 1) or (FRenderPage <> rpOutput) then
+  if not FRenderOutputStateChanged or (FRenderPage <> rpOutput) or not Assigned(FFrames) then
   begin
     RenderFrame(FRenderFrameIndex, FRenderPage)
   end
