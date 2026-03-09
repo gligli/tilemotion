@@ -45,22 +45,6 @@ type
 // implementation of space-efficient k-means using triangle inequality:
 //   G. Hamerly. Making k-means even faster (SDM 2010)
 
-  { TKNode }
-
-  TKNode = record
-    idx: Cardinal;
-    val: TKFloat;
-    constructor Create(AIdx: Cardinal; AVal: TKFloat);
-    class function CompareNodes(Item1,Item2,UserParameter:Pointer):Integer; static;
-  end;
-
-{$if SizeOf(TKNode) <> SizeOf(TKFloat) * 2}
-  {$error misaligned SizeOf(TKNode) !}
-{$endif}
-
-  PKNode = ^TKNode;
-  TKNodeArray = array of TKNode;
-
   TKPoint = class;
   TKCentroid = class;
   TKKMeans = class;
@@ -92,7 +76,7 @@ type
   TKPoint = class
   private
     FSize: Cardinal;
-    FBody: PKNode;
+    FDV: PKFloat;
     FNorm: TKFloat;
     FWeight: Cardinal;
     FMTPoolRef: TMTPool;
@@ -101,25 +85,24 @@ type
     lo_d: TKFloat;  // distance to the second closest centroid
     id: Cardinal;   // cluster id
 
-    constructor Create(AN: PKNode; ASize: Cardinal; ANorm: TKFloat; AWeight: Cardinal);
+    constructor Create(ADV: PKFloat; ASize: Cardinal; ANorm: TKFloat; AWeight: Cardinal);
 
     procedure CopyFrom(const AP: TKPoint);
     function calc_ip(const AC: TKCentroid): TKFloat;
     function calc_dist(const AC: TKCentroid): TKFloat;
     procedure set_closest(const ACS: TKCentroidArray);
-    procedure shrink(ANF: Cardinal);
     procedure project(const AC: TKCentroid);
 
-    function nbegin(): PKNode;
-    function nend(): PKNode;
-    function back(): PKNode;
+    function dbegin(): PKFloat;
+    function dend(): PKFloat;
+    function back(): PKFloat;
     function empty(): Boolean;
     procedure clear();
 
     property Norm: TKFloat read FNorm;
     property Weight: Cardinal read FWeight;
     property Size: Cardinal read FSize;
-    property Body: PKNode read FBody;
+    property DV: PKFloat read FDV;
   end;
 
   { TKCentroid }
@@ -129,24 +112,20 @@ type
     FNorm: TKFloat;  // norm
     FDV: PKFloat;
     FSum: PKFloat;
-    FBody: PKNode;
     FNElm: Cardinal;  // # elements belonging to the cluster
     FNF: Cardinal;    // # features
-    FSize: Cardinal;  // # nozero features
     FMTPoolRef: TMTPool;
   public
     delta: TKFloat;  // moved distance
     next_d: TKFloat; // distance to neighbouring centroind
 
-    constructor Create(AP: TKPoint; ANF: Cardinal; ADelegate: Boolean = False);
+    constructor Create(AP: TKPoint; ANF: Cardinal);
 
     procedure pop(AP: TKPoint);
     procedure push(AP: TKPoint);
     function calc_dist(const AC: TKCentroid; ASkip: Boolean = True): TKFloat;
     procedure set_closest(const ACS: TKCentroidArray);
     procedure reset();
-    procedure compress();
-    procedure decompress();
     procedure get_values (AValues: PKFloat);
     procedure clear();
 
@@ -160,7 +139,7 @@ type
     FOpt: TKOptions;
     FPoints: TKPointArray;
     FCentroids: TKCentroidArray;
-    FBody: TKNodeArray;
+    FBody:TKFloatArray;
     FNF: Cardinal;
     FObj: TKFloat;
     FMTPoolRef: TMTPool;
@@ -170,12 +149,10 @@ type
 
     procedure clear_point();
     procedure clear_centroid();
-    class function read_point_fl(AEx, AExEnd: PKFloat; const ATmp: TKNodeArray; AWeight: Cardinal; ANormalize: Boolean = false): TKPoint;
+    class function read_point_fl(AEx, AExEnd: PKFloat; const ATmp: TKFloatArray; AWeight: Cardinal; ANormalize: Boolean = false): TKPoint;
     procedure set_point_fl(AEx, AExEnd: PKFloat; ARow, AWeight: Cardinal; ANormalize: Boolean);
     procedure delegate(AKM: TKKmeans);
-    procedure compress();
-    procedure decompress();
-    procedure push_centroid(AP: TKPoint; AIdx: Cardinal; ADelegate: Boolean = False);
+    procedure push_centroid(AP: TKPoint; AIdx: Cardinal);
     // implementation of fast k-means:
     //   D. Arthur and S. Vassilvitskii. k-means++: the advantages of careful seeding. SODA (2007)
     procedure init();
@@ -208,38 +185,22 @@ type
     procedure train_on_data(pointToCluster: PInteger);
     procedure get_centroids(centroids: PPKFloat);
 
-    function Process(const trainDS: TKFloatArray2; var pointToCluster: TIntegerDynArray; const centroids: TKFloatArray2; const trainWeights: TCardinalDynArray = nil): Double;
+    procedure Process(const trainDS: TKFloatArray2; var pointToCluster: TIntegerDynArray; const centroids: TKFloatArray2; const trainWeights: TCardinalDynArray = nil);
 
     property Objective: TKFloat read FObjective;
   end;
 
 implementation
 
-{ TKNode }
-
-constructor TKNode.Create(AIdx: Cardinal; AVal: TKFloat);
-begin
-  idx := AIdx;
-  val := AVal;
-end;
-
-class function TKNode.CompareNodes(Item1, Item2, UserParameter: Pointer): Integer;
-var
-  N1: PKNode absolute Item1;
-  N2: PKNode absolute Item2;
-begin
-  Result := CompareValue(N1^.idx, N2^.idx);
-end;
-
 { TKPoint }
 
-constructor TKPoint.Create(AN: PKNode; ASize: Cardinal; ANorm: TKFloat; AWeight: Cardinal);
+constructor TKPoint.Create(ADV: PKFloat; ASize: Cardinal; ANorm: TKFloat; AWeight: Cardinal);
 begin
   FSize := ASize;
   FNorm := ANorm;
   FWeight := AWeight;
-  FBody := AllocMem(FSize * SizeOf(TKNode));
-  Move(AN^, FBody^, FSize * SizeOf(TKNode));
+  FDV := AllocMem(FSize * SizeOf(TKFloat));
+  Move(ADV^, FDV^, FSize * SizeOf(TKFloat));
 end;
 
 procedure TKPoint.CopyFrom(const AP: TKPoint);
@@ -248,44 +209,47 @@ begin
   lo_d := AP.lo_d;
   id := AP.id;
   FSize := AP.FSize;
-  FBody := AP.FBody;
+  FDV := AP.FDV;
   FNorm := AP.FNorm;
   FWeight := AP.FWeight;
 end;
 
 function TKPoint.calc_ip(const AC: TKCentroid): TKFloat;
 var
-  n: PKNode;
+  d, c: PKFloat;
 begin
   // return inner product between this point and the given centroid
 
   Result := 0.0;
 
-  n := nbegin();
-  while n <> nend() do
+  d := dbegin();
+  c := AC.FDV;
+  while d <> dend() do
   begin
-    Result += n^.val * AC.FDV[n^.idx];
-    Inc(n);
+    Result += d^ * c^;
+    Inc(d);
+    Inc(c);
   end;
 end;
 
 function TKPoint.calc_dist(const AC: TKCentroid): TKFloat;
 var
-  n: PKNode;
+  d, c: PKFloat;
 begin
   // return distance from this point to the given centroid
 
   Result := 0.0;
-  Result += FNorm + AC.Norm;
 
-  n := nbegin();
-  while n <> nend() do
+  d := dbegin();
+  c := AC.FDV;
+  while d <> dend() do
   begin
-    Result -= 2 * n^.val * AC.FDV[n^.idx];
-    Inc(n);
+    Result += Sqr(d^ - c^);
+    Inc(d);
+    Inc(c);
   end;
 
-  Result := Max(0.0, Result * FWeight);
+  Result := Result * FWeight;
 end;
 
 procedure TKPoint.set_closest(const ACS: TKCentroidArray);
@@ -342,12 +306,6 @@ begin
   lo_d := Sqrt(d1);
 end;
 
-procedure TKPoint.shrink(ANF: Cardinal);
-begin
-   while not empty() and (back()^.idx > ANF) do
-    Dec(FSize);
-end;
-
 procedure TKPoint.project(const AC: TKCentroid);
 var
   i: Integer;
@@ -359,25 +317,25 @@ begin
 
   for i := 0 to FSize - 1 do
   begin
-    v := AC.FDV[FBody[i].idx] * norm_ip;
+    v := AC.FDV[i] * norm_ip;
     FNorm += Sqr(v);
-    FBody[i].val := v;
+    FDV[i] := v;
   end;
 end;
 
-function TKPoint.nbegin(): PKNode;
+function TKPoint.dbegin(): PKFloat;
 begin
-  Result := FBody;
+  Result := FDV;
 end;
 
-function TKPoint.nend(): PKNode;
+function TKPoint.dend(): PKFloat;
 begin
-  Result := FBody + FSize;
+  Result := FDV + FSize;
 end;
 
-function TKPoint.back(): PKNode;
+function TKPoint.back(): PKFloat;
 begin
-  Result := @FBody[FSize - 1];
+  Result := FDV + (FSize - 1);
 end;
 
 function TKPoint.empty(): Boolean;
@@ -387,53 +345,48 @@ end;
 
 procedure TKPoint.clear();
 begin
-  if Assigned(FBody) then FreeMemAndNil(FBody);
+  if Assigned(FDV) then FreeMemAndNil(FDV);
 end;
 
 { TKCentroid }
 
-constructor TKCentroid.Create(AP: TKPoint; ANF: Cardinal; ADelegate: Boolean);
+constructor TKCentroid.Create(AP: TKPoint; ANF: Cardinal);
 var
-  sz: Cardinal;
-  n: PKNode;
+  dsz: Cardinal;
+  d, c: PKFloat;
 begin
   FNorm := AP.Norm;
   FNF := ANF;
 
-  if ADelegate then
+  dsz := (FNF + 1) * SizeOf(TKFloat);
+
+  FDV := AllocMem(dsz);
+  FSum := AllocMem(dsz);
+
+  FillChar(FDV^, dsz, 0);
+  FillChar(FSum^, dsz, 0);
+
+  d := AP.dbegin();
+  c := FDV;
+  while d <> AP.dend() do
   begin
-    FSize := AP.Size;
-    FBody := AP.Body; // ADelegate
-  end
-  else
-  begin
-    // workaround for a bug in value initialization in gcc 4.0
-    sz := (FNF + 1) * SizeOf(TKFloat);
-
-    FDV := AllocMem(sz);
-    FSum := AllocMem(sz);
-
-    FillChar(FDV^, sz, 0);
-    FillChar(FSum^, sz, 0);
-
-    n := AP.nbegin();
-    while n <> AP.nend() do
-    begin
-      FDV[n^.idx] := n^.val;
-      Inc(n);
-    end;
+    c^ := d^;
+    Inc(d);
+    Inc(c);
   end;
 end;
 
 procedure TKCentroid.pop(AP: TKPoint);
 var
-  n: PKNode;
+  d, s: PKFloat;
 begin
-  n := AP.nbegin();
-  while n <> AP.nend() do
+  d := AP.dbegin();
+  s := FSum;
+  while d <> AP.dend() do
   begin
-    FSum[n^.idx] -= n^.val * AP.Weight;
-    Inc(n);
+    s^ -= d^ * AP.Weight;
+    Inc(d);
+    Inc(s);
   end;
 
   FNElm -= AP.Weight;
@@ -441,13 +394,15 @@ end;
 
 procedure TKCentroid.push(AP: TKPoint);
 var
-  n: PKNode;
+  d, s: PKFloat;
 begin
-  n := AP.nbegin();
-  while n <> AP.nend() do
+  d := AP.dbegin();
+  s := FSum;
+  while d <> AP.dend() do
   begin
-    FSum[n^.idx] += n^.val * AP.Weight;
-    Inc(n);
+    s^ += d^ * AP.Weight;
+    Inc(d);
+    Inc(s);
   end;
 
   FNElm += AP.Weight;
@@ -531,59 +486,20 @@ begin
   delta := Sqrt(delta);
 end;
 
-procedure TKCentroid.compress();
-var
-  i, j: Cardinal;
-begin
-  FSize := 0;
-  for i := 0 to FNF do
-    if FDV[i] <> 0.0 then
-      Inc(FSize);
-  FBody := AllocMem(FSize * SizeOf(TKNode));
-
-  j := 0;
-  for i := 0 to FNF do
-    if FDV[i] <> 0.0 then
-    begin
-      FBody[j].idx := i;
-      FBody[j].val := FDV[i];
-      Inc(j);
-    end;
-
-  FreeMemAndNil(FDV);
-  FreeMemAndNil(FSum);
-end;
-
-procedure TKCentroid.decompress();
-var
-  i: Integer;
-  sz: Integer;
-begin
-  sz := (FNF + 1) * SizeOf(TKFloat);
-  FDV := AllocMem(sz);
-  FillChar(FDV^, sz, 0);
-
-  for i := 0 to FSize - 1 do
-    FDV[FBody[i].idx] := FBody[i].val;
-
-  FreeMemAndNil(FBody);
-end;
-
 procedure TKCentroid.get_values(AValues: PKFloat);
 var
   i: Integer;
 begin
   if FNF > 0 then FillChar(AValues^, FNF * sizeof(TKFloat), 0);
 
-  for i := 0 to FSize - 1 do
-    AValues[FBody[i].idx] := FBody[i].val;
+  for i := 0 to FNF do
+    AValues[i] := FDV[i];
 end;
 
 procedure TKCentroid.clear();
 begin
   if Assigned(FDV) then FreeMemAndNil(FDV);
   if Assigned(FSum) then FreeMemAndNil(FSum);
-  if Assigned(FBody) then FreeMemAndNil(FBody);
 end;
 
 { TKKmeans }
@@ -621,33 +537,30 @@ begin
   SetLength(FCentroids, 0);
 end;
 
-class function TKKmeans.read_point_fl(AEx, AExEnd: PKFloat; const ATmp: TKNodeArray; AWeight: Cardinal; ANormalize: Boolean): TKPoint;
+class function TKKmeans.read_point_fl(AEx, AExEnd: PKFloat; const ATmp: TKFloatArray; AWeight: Cardinal; ANormalize: Boolean): TKPoint;
 var
   i, fi: Cardinal;
   norm, v: TKFloat;
   p: PKFloat;
 begin
-  if Assigned(ATmp) then FillChar(ATmp[0], Length(ATmp) * SizeOf(TKNode), 0);
+  if Assigned(ATmp) then FillChar(ATmp[0], Length(ATmp) * SizeOf(TKFloat), 0);
   norm := 0;
   p := AEx;
   fi := 0;
   while p <> AExEnd do
   begin
     v := p^;
-    ATmp[fi].idx := fi;
-    ATmp[fi].val := v;
+    ATmp[fi] := v;
     norm += Sqr(v);
     Inc(fi);
     Inc(p);
   end;
 
-  QuickSort(ATmp[0], 0, fi - 1, SizeOf(TKNode), @TKNode.CompareNodes);
-
   if ANormalize then // ANormalize
   begin
     norm := Sqrt(norm);
     for i := 0 to fi - 1 do
-      ATmp[i].val := DivDef(ATmp[i].val, norm, 0.0);
+      ATmp[i] := DivDef(ATmp[i], norm, 0.0);
     norm := 1.0;
   end;
 
@@ -663,7 +576,7 @@ begin
   FPoints[ARow] := p;
 
   if not p.empty() then
-    FNF := Max(p.back()^.idx, FNF);
+    FNF := Max(p.FSize - 1, FNF);
 end;
 
 procedure TKKmeans.delegate(AKM: TKKmeans);
@@ -677,25 +590,9 @@ begin
   AKM.FNF := FNF;
 end;
 
-procedure TKKmeans.compress();
-var
-  i: Cardinal;
+procedure TKKmeans.push_centroid(AP: TKPoint; AIdx: Cardinal);
 begin
-  for i := 0 to High(FCentroids) do
-      FCentroids[i].compress();
-end;
-
-procedure TKKmeans.decompress();
-var
-  i: Cardinal;
-begin
-  for i := 0 to High(FCentroids) do
-      FCentroids[i].decompress();
-end;
-
-procedure TKKmeans.push_centroid(AP: TKPoint; AIdx: Cardinal; ADelegate: Boolean);
-begin
-  FCentroids[AIdx] := TKCentroid.Create(AP, FNF, ADelegate);
+  FCentroids[AIdx] := TKCentroid.Create(AP, FNF);
   FCentroids[AIdx].FMTPoolRef := FMTPoolRef;
 end;
 
@@ -1061,14 +958,13 @@ var
   centroid: TKCentroidArray;
 begin
   km := FKMs[High(FKMs)];
-  km.compress();
   centroid := km.centroid;
   for i := 0 to High(centroid) do
     centroid[i].get_values(centroids[i]);
 end;
 
-function TOrthogonalKmeans.Process(const trainDS: TKFloatArray2; var pointToCluster: TIntegerDynArray;
-  const centroids: TKFloatArray2; const trainWeights: TCardinalDynArray): Double;
+procedure TOrthogonalKmeans.Process(const trainDS: TKFloatArray2; var pointToCluster: TIntegerDynArray;
+  const centroids: TKFloatArray2; const trainWeights: TCardinalDynArray);
 var
   rc, cc: Cardinal;
   tw: PCardinal;
