@@ -6,8 +6,6 @@ unit tilingencoder;
 {$CODEALIGN LOCALMIN=16}
 {$PACKSET 1}
 
-{$define ASM_DBMP}
-
 interface
 
 uses
@@ -504,7 +502,7 @@ type
 
     // Dithering algorithms ported from http://bisqwit.iki.fi/story/howto/dither/jy/
 
-    class function ColorCompare(r1, g1, b1, r2, g2, b2: Int64): Int64;
+    class function ColorCompare(r1, g1, b1, r2, g2, b2: Double): Double;
     procedure PreparePlan(var Plan: TMixingPlan; const pal: array of Integer);
     procedure TerminatePlan(var Plan: TMixingPlan);
     function DeviseBestMixingPlanYliluoma(var Plan: TMixingPlan; col: Integer; var List: array of Byte): Integer;
@@ -531,7 +529,7 @@ type
 
     procedure DoPalettization;
     function MinimizeOP(const x: TDoubleDynArray; data: Pointer): Double;
-    procedure QuantizeUsingYakmo(APalIdx, AColorCount, APosterize: Integer);
+    procedure QuantizeUsingYakmo(APalIdx, AColorCount: Integer);
     procedure DoQuantization(APalIdx: Integer);
     procedure OptimizePalettes;
 
@@ -2794,89 +2792,31 @@ begin
   Result := CompareValue(pi1^, pi2^);
 end;
 
-class function TTilingEncoder.ColorCompare(r1, g1, b1, r2, g2, b2: Int64): Int64;
+class function TTilingEncoder.ColorCompare(r1, g1, b1, r2, g2, b2: Double): Double;
 var
-  luma1, luma2, lumadiff, diffR, diffG, diffB: Int64;
+  luma1, luma2, lumadiff, diffR, diffG, diffB: Double;
 begin
-  luma1 := r1 * cRedMul + g1 * cGreenMul + b1 * cBlueMul;
-  luma2 := r2 * cRedMul + g2 * cGreenMul + b2 * cBlueMul;
-  lumadiff := (luma1 - luma2) div cLumaDiv;
+  luma1 := (r1 * cRedMul + g1 * cGreenMul + b1 * cBlueMul) * (1.0 / (cLumaDiv * 255.0));
+  luma2 := (r2 * cRedMul + g2 * cGreenMul + b2 * cBlueMul) *  (1.0 / (cLumaDiv * 255.0));
+  lumadiff := luma1 - luma2;
   diffR := r1 - r2;
   diffG := g1 - g2;
   diffB := b1 - b2;
-  Result := (diffR * diffR) * cRGBw;
-  Result += (diffG * diffG) * cRGBw;
-  Result += (diffB * diffB) * cRGBw;
-  Result += (lumadiff * lumadiff) shl 5;
+  Result := (diffR * diffR) * (cRedMul / 255.0 * 0.75);
+  Result += (diffG * diffG) * (cGreenMul / 255.0 * 0.75);
+  Result += (diffB * diffB) * (cBlueMul / 255.0 * 0.75);
+  Result += lumadiff * lumadiff;
 end;
 
 function TTilingEncoder.DeviseBestMixingPlanYliluoma(var Plan: TMixingPlan; col: Integer; var List: array of Byte): Integer;
-label
-  pal_loop, inner_loop, worst;
 var
   r, g, b: Integer;
-  t, index, max_test_count, plan_count, y2pal_len: Integer;
-  chosen_amount, chosen, least_penalty, penalty: Int64;
+  t, index, max_test_count, plan_count, chosen_amount, chosen: Integer;
+  least_penalty, penalty: Double;
   so_far, sum, add: array[0..3] of Integer;
-  VecInv: PCardinal;
-  y2pal: PInteger;
-  cachePos: Integer;
-  pb: PByte;
 begin
   FromRGB(col, r, g, b);
 
-{$if defined(ASM_DBMP) and defined(CPUX86_64)}
-  asm
-    sub rsp, 16 * 6
-    movdqu oword ptr [rsp + $00], xmm1
-    movdqu oword ptr [rsp + $10], xmm2
-    movdqu oword ptr [rsp + $20], xmm3
-    movdqu oword ptr [rsp + $30], xmm4
-    movdqu oword ptr [rsp + $40], xmm5
-    movdqu oword ptr [rsp + $50], xmm6
-
-    push rax
-    push rbx
-    push rcx
-    push rdx
-
-    mov eax, r
-    mov ebx, g
-    mov ecx, b
-
-    pinsrd xmm4, eax, 0
-    pinsrd xmm4, ebx, 1
-    pinsrd xmm4, ecx, 2
-
-    imul eax, cRedMul
-    imul ebx, cGreenMul
-    imul ecx, cBlueMul
-
-    add eax, ebx
-    add eax, ecx
-    mov ecx, cLumaDiv
-    xor edx, edx
-    div ecx
-
-    pinsrd xmm4, eax, 3
-
-    mov rax, 1 or (1 shl 32)
-    pinsrq xmm5, rax, 0
-    pinsrq xmm5, rax, 1
-
-    mov rax, cRGBw or (cRGBw shl 32)
-    pinsrq xmm6, rax, 0
-    mov rax, cRGBw or (32 shl 32)
-    pinsrq xmm6, rax, 1
-
-    pop rdx
-    pop rcx
-    pop rbx
-    pop rax
-  end;
-{$endif}
-
-  VecInv := @FVecInv[0];
   plan_count := 0;
   so_far[0] := 0; so_far[1] := 0; so_far[2] := 0; so_far[3] := 0;
 
@@ -2884,103 +2824,10 @@ begin
   begin
     max_test_count := IfThen(plan_count = 0, 1, plan_count);
 
-{$if defined(ASM_DBMP) and defined(CPUX86_64)}
-    y2pal_len := Length(Plan.Y2Palette);
-    y2pal := @Plan.Y2Palette[0][0];
-
-    asm
-      push rax
-      push rbx
-      push rcx
-      push rdx
-      push rsi
-      push rdi
-      push r8
-      push r9
-      push r10
-
-      xor r9, r9
-      xor r10, r10
-      inc r10
-
-      mov rbx, (1 shl 63) - 1
-
-      mov rdi, y2pal
-      mov r8d, dword ptr [y2pal_len]
-      shl r8d, 4
-      add r8, rdi
-
-      pal_loop:
-
-        movdqu xmm1, oword ptr [so_far]
-        movdqu xmm2, oword ptr [rdi]
-
-        mov ecx, plan_count
-        inc rcx
-        mov edx, max_test_count
-        shl rcx, 4
-        shl rdx, 4
-        add rcx, VecInv
-        add rdx, rcx
-
-        inner_loop:
-          paddd xmm1, xmm2
-          paddd xmm2, xmm5
-
-          movdqu xmm3, oword ptr [rcx]
-
-          pmulld xmm3, xmm1
-          psrld xmm3, cVecInvWidth
-
-          psubd xmm3, xmm4
-          pmulld xmm3, xmm3
-          pmulld xmm3, xmm6
-
-          phaddd xmm3, xmm3
-          phaddd xmm3, xmm3
-          pextrd eax, xmm3, 0
-
-          cmp rax, rbx
-          jae worst
-
-            mov rbx, rax
-            mov r9, rdi
-            mov r10, rcx
-
-          worst:
-
-        add rcx, 16
-        cmp rcx, rdx
-        jne inner_loop
-
-      add rdi, 16
-      cmp rdi, r8
-      jne pal_loop
-
-      sub r9, y2pal
-      shr r9, 4
-      mov chosen, r9
-
-      sub r10, VecInv
-      shr r10, 4
-      sub r10d, plan_count
-      mov chosen_amount, r10
-
-      pop r10
-      pop r9
-      pop r8
-      pop rdi
-      pop rsi
-      pop rdx
-      pop rcx
-      pop rbx
-      pop rax
-    end ['rax', 'rbx', 'rcx', 'rdx', 'rsi', 'rdi', 'r8', 'r9', 'r10'];
-{$else}
     chosen_amount := 1;
     chosen := 0;
 
-    least_penalty := High(Int64);
+    least_penalty := Infinity;
 
     for index := 0 to High(Plan.Y2Palette) do
     begin
@@ -2993,11 +2840,11 @@ begin
         sum[1] += add[1];
         sum[2] += add[2];
 
-        Inc(add[0]);
-        Inc(add[1]);
-        Inc(add[2]);
+        add[0] += 1;
+        add[1] += 1;
+        add[2] += 1;
 
-        penalty := ColorCompare(r, g, b, sum[0] div t, sum[1] div t, sum[2] div t);
+        penalty := ColorCompare(r, g, b, sum[0] / t, sum[1] / t, sum[2] / t);
 
         if penalty < least_penalty then
         begin
@@ -3007,7 +2854,6 @@ begin
         end;
       end;
     end;
-{$endif}
 
     chosen_amount := Min(chosen_amount, Length(List) - plan_count);
     FillByte(List[plan_count], chosen_amount, chosen);
@@ -3022,26 +2868,16 @@ begin
   QuickSort(List[0], 0, plan_count - 1, SizeOf(Byte), @PlanCompareLuma, @Plan.LumaPal[0]);
 
   Result := plan_count;
-
-{$if defined(ASM_DBMP) and defined(CPUX86_64)}
-  asm
-    movdqu xmm1, oword ptr [rsp + $00]
-    movdqu xmm2, oword ptr [rsp + $10]
-    movdqu xmm3, oword ptr [rsp + $20]
-    movdqu xmm4, oword ptr [rsp + $30]
-    movdqu xmm5, oword ptr [rsp + $40]
-    movdqu xmm6, oword ptr [rsp + $50]
-    add rsp, 16 * 6
-  end;
-{$endif}
 end;
 
 procedure TTilingEncoder.DeviseBestMixingPlanThomasKnoll(var Plan: TMixingPlan; col: Integer; var List: array of Byte);
+const
+  CErrorMultiplier = 0.09;
 var
   index, chosen, c: Integer;
   src : array[0..2] of Byte;
-  s, t, e: array[0..2] of Int64;
-  least_penalty, penalty: Int64;
+  s, t, e: array[0..2] of Double;
+  least_penalty, penalty: Double;
 begin
   FromRGB(col, src[0], src[1], src[2]);
 
@@ -3055,11 +2891,12 @@ begin
 
   for c := 0 to cDitheringLen - 1 do
   begin
-    t[0] := s[0] + (e[0] * 9) div 100;
-    t[1] := s[1] + (e[1] * 9) div 100;
-    t[2] := s[2] + (e[2] * 9) div 100;
+    t[0] := EnsureRange(s[0] + e[0] * CErrorMultiplier, 0.0, 255.0);
+    t[1] := EnsureRange(s[1] + e[1] * CErrorMultiplier, 0.0, 255.0);
+    t[2] := EnsureRange(s[2] + e[2] * CErrorMultiplier, 0.0, 255.0);
 
-    least_penalty := High(Int64);
+
+    least_penalty := Infinity;
     chosen := c mod length(Plan.Y2Palette);
     for index := 0 to length(Plan.Y2Palette) - 1 do
     begin
@@ -4878,7 +4715,7 @@ begin
   WriteLn('OptimizePalettes: ', iteration, ' iterations');
 end;
 
-procedure TTilingEncoder.QuantizeUsingYakmo(APalIdx, AColorCount, APosterize: Integer);
+procedure TTilingEncoder.QuantizeUsingYakmo(APalIdx, AColorCount: Integer);
 const
   cFeatureCount = 3;
 var
@@ -4965,9 +4802,9 @@ begin
 
     if not IsNan(Centroids[i, 0]) and not IsNan(Centroids[i, 1]) and not IsNan(Centroids[i, 2]) then
     begin
-      CMItem^.R := Posterize(GammaUncorrect(0, Centroids[i, 0]), APosterize);
-      CMItem^.G := Posterize(GammaUncorrect(0, Centroids[i, 1]), APosterize);
-      CMItem^.B := Posterize(GammaUncorrect(0, Centroids[i, 2]), APosterize);
+      CMItem^.R := GammaUncorrect(0, Centroids[i, 0]);
+      CMItem^.G := GammaUncorrect(0, Centroids[i, 1]);
+      CMItem^.B := GammaUncorrect(0, Centroids[i, 2]);
     end;
 
     CMItem^.Count := 0;
@@ -4986,7 +4823,7 @@ begin
   try
     // do quantize
 
-    QuantizeUsingYakmo(APalIdx, FPaletteSize, (1 shl cBitsPerComp) - 1);
+    QuantizeUsingYakmo(APalIdx, FPaletteSize);
 
     // split most used colors into tile palettes
 

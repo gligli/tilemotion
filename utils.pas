@@ -20,7 +20,6 @@ const
   cGreenMul = 587;
   cBlueMul = 114;
 
-  cRGBw = 16; // in 1 / 32th
   cChromaWeight = 1.0;
 
   CRandomSeed = $42381337;
