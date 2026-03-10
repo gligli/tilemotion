@@ -141,7 +141,7 @@ type
     DX, DY: Integer;
     oxmn, oxmx: Integer;
     oymn, oymx: Integer;
-    PenaltyWeight: Integer;
+    PenaltyLUT: PCardinal;
   end;
 
   PDCTCribbleState = ^TDCTCribbleState;
@@ -161,8 +161,8 @@ type
   TDCTDynArray2 = array of TDCTDynArray;
 
 const
-  cYUVScale = -Low(TDCTScalar) / ((1 shl cBitsPerComp) * Sqr(cTileWidth));
-  cBestPSNR = 20.0 * Ln((1 shl cBitsPerComp) * cYUVScale - 1) / Ln(10.0);
+  cDCTScale = -Low(TDCTScalar) / ((1 shl cBitsPerComp) * Sqr(cTileWidth));
+  cBestPSNR = 20.0 * Ln((1 shl cBitsPerComp) * cDCTScale - 1) / Ln(10.0);
 
 procedure SpinEnter(Lock: PSpinLock); register; assembler;
 procedure SpinEnterSleep(Lock: PSpinLock); register; assembler;
@@ -197,7 +197,7 @@ function revlerp(x, r, alpha: Double): Double; inline;
 function BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte): Integer;
 function Posterize(v: Byte; cvt: Integer): Byte; inline;
 function PosterizeBpc(v, bpc: Byte): Byte; inline;
-function CompareEuclideanDCTPtr(pa, pb: PDCTScalar): Cardinal; overload;
+function CompareEuclideanDCTPtr(pa, pb: PDCTScalar): Cardinal;
 function CompareEuclideanDCTPtr_asm(pa_rcx, pb_rdx: PDCTScalar): Cardinal; register; assembler;
 function CompareEuclidean(a, b: PDouble; size: Integer): Double; inline;
 function CompareCountIndexVSH(const Item1,Item2:PCountIndex):Integer;
@@ -206,7 +206,7 @@ function CompareDoubles(Item1,Item2,UserParameter:Pointer):Integer;
 function ComparePaletteUseCount(Item1,Item2,UserParameter:Pointer):Integer;
 function QuickTestEuclideanDCTPtr(pa, pb: PDCTScalar; min_dist: Cardinal): Boolean;
 function QuickTestEuclideanDCTPtr_asm(pa_rcx, pb_rdx: PDCTScalar; min_dist_r8: Cardinal): Boolean; register; assembler;
-function ApplyMotionPredictionPenalty(ox, oy, dx, dy: Integer): Cardinal;
+function ApplyMotionPredictionPenalty(ox, oy, dx, dy, backBufOff: Integer): Cardinal;
 procedure CribbleEuclideanDCTPtr(cur: PDCTScalar; prev: PDCTScalar; state: PDCTCribbleState; oy: Integer);
 procedure CribbleEuclideanDCTPtr_asm(cur_rcx: PDCTScalar; prev_rdx: PDCTScalar; state_r8: PDCTCribbleState; oy_r9: Integer); register; assembler;
 generic function DCTInner<T>(pCpn, pLut: T; count: Integer): Double;
@@ -671,7 +671,7 @@ begin
   Result := Posterize(v, (1 shl bpc) - 1);
 end;
 
-function CompareEuclideanDCTPtr(pa, pb: PDCTScalar): Cardinal; overload;
+function CompareEuclideanDCTPtr(pa, pb: PDCTScalar): Cardinal;
 var
   i: Integer;
 begin
@@ -689,144 +689,54 @@ begin
   end;
 end;
 
-function CompareEuclideanDCTPtr_asm(pa_rcx, pb_rdx: PDCTScalar): Cardinal; register;
+function CompareEuclideanDCTPtr_asm(pa_rcx, pb_rdx: PDCTScalar): Cardinal; register; assembler;
+label
+  loop;
 asm
   push rcx
   push rdx
 
-  sub rsp, 16 * 13
+  sub rsp, 16 * 5
   movdqu oword ptr [rsp],       xmm0
   movdqu oword ptr [rsp + $10], xmm1
   movdqu oword ptr [rsp + $20], xmm2
   movdqu oword ptr [rsp + $30], xmm3
   movdqu oword ptr [rsp + $40], xmm4
-  movdqu oword ptr [rsp + $50], xmm5
-  movdqu oword ptr [rsp + $60], xmm6
-  movdqu oword ptr [rsp + $70], xmm7
-  movdqu oword ptr [rsp + $80], xmm8
-  movdqu oword ptr [rsp + $90], xmm9
-  movdqu oword ptr [rsp + $a0], xmm10
-  movdqu oword ptr [rsp + $b0], xmm11
-  movdqu oword ptr [rsp + $c0], xmm12
 
-  // unrolled for 96 = (cTileDCTSize / 2)
+  // unrolled for 32 = (cTileDCTSize / cDCTUnroll)
 
-  // step 1
+  pxor xmm0, xmm0
+  mov al, 6
 
-  movdqu xmm1,  oword ptr [rcx]
-  movdqu xmm2,  oword ptr [rcx + $10]
-  movdqu xmm3,  oword ptr [rcx + $20]
-  movdqu xmm4,  oword ptr [rcx + $30]
-  movdqu xmm5,  oword ptr [rcx + $40]
-  movdqu xmm6,  oword ptr [rcx + $50]
-  movdqu xmm7,  oword ptr [rcx + $60]
-  movdqu xmm8,  oword ptr [rcx + $70]
-  movdqu xmm9,  oword ptr [rcx + $80]
-  movdqu xmm10, oword ptr [rcx + $90]
-  movdqu xmm11, oword ptr [rcx + $a0]
-  movdqu xmm12, oword ptr [rcx + $b0]
+loop:
 
-  psubsw xmm1,  oword ptr [rdx]
-  psubsw xmm2,  oword ptr [rdx + $10]
-  psubsw xmm3,  oword ptr [rdx + $20]
-  psubsw xmm4,  oword ptr [rdx + $30]
-  psubsw xmm5,  oword ptr [rdx + $40]
-  psubsw xmm6,  oword ptr [rdx + $50]
-  psubsw xmm7,  oword ptr [rdx + $60]
-  psubsw xmm8,  oword ptr [rdx + $70]
-  psubsw xmm9,  oword ptr [rdx + $80]
-  psubsw xmm10, oword ptr [rdx + $90]
-  psubsw xmm11, oword ptr [rdx + $a0]
-  psubsw xmm12, oword ptr [rdx + $b0]
+  movdqu xmm1, oword ptr [rcx]
+  movdqu xmm2, oword ptr [rcx + $10]
+  movdqu xmm3, oword ptr [rcx + $20]
+  movdqu xmm4, oword ptr [rcx + $30]
 
-  pmaddwd xmm1,  xmm1
-  pmaddwd xmm2,  xmm2
-  pmaddwd xmm3,  xmm3
-  pmaddwd xmm4,  xmm4
-  pmaddwd xmm5,  xmm5
-  pmaddwd xmm6,  xmm6
-  pmaddwd xmm7,  xmm7
-  pmaddwd xmm8,  xmm8
-  pmaddwd xmm9,  xmm9
-  pmaddwd xmm10,  xmm10
-  pmaddwd xmm11,  xmm11
-  pmaddwd xmm12,  xmm12
+  psubsw xmm1, oword ptr [rdx]
+  psubsw xmm2, oword ptr [rdx + $10]
+  psubsw xmm3, oword ptr [rdx + $20]
+  psubsw xmm4, oword ptr [rdx + $30]
+
+  pmaddwd xmm1, xmm1
+  pmaddwd xmm2, xmm2
+  pmaddwd xmm3, xmm3
+  pmaddwd xmm4, xmm4
 
   paddd xmm1, xmm2
   paddd xmm3, xmm4
-  paddd xmm5, xmm6
-  paddd xmm7, xmm8
-  paddd xmm9, xmm10
-  paddd xmm11, xmm12
 
   paddd xmm1, xmm3
-  paddd xmm5, xmm7
-  paddd xmm9, xmm11
-
-  paddd xmm1, xmm5
-  paddd xmm1, xmm9
-
-  movdqa xmm0, xmm1
-
-  // step 2
-
-  lea rcx, [rcx + $c0]
-  lea rdx, [rdx + $c0]
-
-  movdqu xmm1,  oword ptr [rcx]
-  movdqu xmm2,  oword ptr [rcx + $10]
-  movdqu xmm3,  oword ptr [rcx + $20]
-  movdqu xmm4,  oword ptr [rcx + $30]
-  movdqu xmm5,  oword ptr [rcx + $40]
-  movdqu xmm6,  oword ptr [rcx + $50]
-  movdqu xmm7,  oword ptr [rcx + $60]
-  movdqu xmm8,  oword ptr [rcx + $70]
-  movdqu xmm9,  oword ptr [rcx + $80]
-  movdqu xmm10, oword ptr [rcx + $90]
-  movdqu xmm11, oword ptr [rcx + $a0]
-  movdqu xmm12, oword ptr [rcx + $b0]
-
-  psubsw xmm1,  oword ptr [rdx]
-  psubsw xmm2,  oword ptr [rdx + $10]
-  psubsw xmm3,  oword ptr [rdx + $20]
-  psubsw xmm4,  oword ptr [rdx + $30]
-  psubsw xmm5,  oword ptr [rdx + $40]
-  psubsw xmm6,  oword ptr [rdx + $50]
-  psubsw xmm7,  oword ptr [rdx + $60]
-  psubsw xmm8,  oword ptr [rdx + $70]
-  psubsw xmm9,  oword ptr [rdx + $80]
-  psubsw xmm10, oword ptr [rdx + $90]
-  psubsw xmm11, oword ptr [rdx + $a0]
-  psubsw xmm12, oword ptr [rdx + $b0]
-
-  pmaddwd xmm1,  xmm1
-  pmaddwd xmm2,  xmm2
-  pmaddwd xmm3,  xmm3
-  pmaddwd xmm4,  xmm4
-  pmaddwd xmm5,  xmm5
-  pmaddwd xmm6,  xmm6
-  pmaddwd xmm7,  xmm7
-  pmaddwd xmm8,  xmm8
-  pmaddwd xmm9,  xmm9
-  pmaddwd xmm10,  xmm10
-  pmaddwd xmm11,  xmm11
-  pmaddwd xmm12,  xmm12
-
-  paddd xmm1, xmm2
-  paddd xmm3, xmm4
-  paddd xmm5, xmm6
-  paddd xmm7, xmm8
-  paddd xmm9, xmm10
-  paddd xmm11, xmm12
-
-  paddd xmm1, xmm3
-  paddd xmm5, xmm7
-  paddd xmm9, xmm11
-
-  paddd xmm1, xmm5
-  paddd xmm1, xmm9
 
   paddd xmm0, xmm1
+
+  lea rcx, [rcx + $40]
+  lea rdx, [rdx + $40]
+
+  dec al
+  jnz loop
 
   // end
 
@@ -840,15 +750,7 @@ asm
   movdqu xmm2,  oword ptr [rsp + $20]
   movdqu xmm3,  oword ptr [rsp + $30]
   movdqu xmm4,  oword ptr [rsp + $40]
-  movdqu xmm5,  oword ptr [rsp + $50]
-  movdqu xmm6,  oword ptr [rsp + $60]
-  movdqu xmm7,  oword ptr [rsp + $70]
-  movdqu xmm8,  oword ptr [rsp + $80]
-  movdqu xmm9,  oword ptr [rsp + $90]
-  movdqu xmm10, oword ptr [rsp + $a0]
-  movdqu xmm11, oword ptr [rsp + $b0]
-  movdqu xmm12, oword ptr [rsp + $c0]
-  add rsp, 16 * 13
+  add rsp, 16 * 5
 
   pop rdx
   pop rcx
@@ -914,26 +816,29 @@ asm
   add rsp, 16 * 1
 end;
 
-function ApplyMotionPredictionPenalty(ox, oy, dx, dy: Integer): Cardinal; inline;
+function ApplyMotionPredictionPenalty(ox, oy, dx, dy, backBufOff: Integer): Cardinal;
 begin
   // apply a penalty of the euclidean distance to the center
   // rationale: slightly favoring the center in case of ties improves compressibility
-  Result := Sqr(ox - dx) + Sqr(oy - dy);
+  Result := (Sqr(ox - dx) + Sqr(oy - dy)) * backBufOff;
 end;
 
 procedure CribbleEuclideanDCTPtr(cur: PDCTScalar; prev: PDCTScalar; state: PDCTCribbleState; oy: Integer);
 var
   ox: Integer;
   err, best: Cardinal;
+  pPenalty: PCardinal;
 begin
   best := state^.Error;
+
+  pPenalty := @state^.PenaltyLUT[state^.oxmn - state^.DX];
 
   for ox := state^.oxmn to state^.oxmx do
   begin
     if QuickTestEuclideanDCTPtr_asm(cur, prev, best) then
     begin
       err := CompareEuclideanDCTPtr_asm(cur, prev);
-      err += ApplyMotionPredictionPenalty(ox, oy, state^.DX, state^.DY) * state^.PenaltyWeight;
+      err += pPenalty^;
 
       if err < best then
       begin
@@ -945,12 +850,13 @@ begin
     end;
 
     Inc(prev, cTileDCTSize);
+    Inc(pPenalty);
   end;
 end;
 
 procedure CribbleEuclideanDCTPtr_asm(cur_rcx: PDCTScalar; prev_rdx: PDCTScalar; state_r8: PDCTCribbleState; oy_r9: Integer); register; assembler;
 label
-  xloop, evicted, worse;
+  x_loop, quick_evicted, dct_bailout, dct_better, dct_loop;
 asm
   push rax
   push rbx
@@ -960,24 +866,29 @@ asm
   push r10
   push r11
   push r12
-  push r13
 
-  sub rsp, 16 * 2
+  sub rsp, 16 * 6
   movdqu oword ptr [rsp], xmm0
   movdqu oword ptr [rsp + $10], xmm1
+  movdqu oword ptr [rsp + $20], xmm2
+  movdqu oword ptr [rsp + $30], xmm3
+  movdqu oword ptr [rsp + $40], xmm4
+  movdqu oword ptr [rsp + $50], xmm5
 
-  movdqu xmm1, oword ptr [rcx]
+  movdqu xmm5, oword ptr [rcx]
 
   mov ebx, dword ptr [r8]
-  mov r10d, dword ptr [r8 + 3 * 4]
-  mov r11d, dword ptr [r8 + 4 * 4]
   mov esi, dword ptr [r8 + 5 * 4]
   mov edi, dword ptr [r8 + 6 * 4]
-  mov r13d, dword ptr [r8 + 9 * 4]
 
-  xloop:
-    movdqa xmm0, xmm1
-    psubsw xmm0, oword ptr [rdx]
+  mov r10, dword ptr [r8 + 9 * 4]
+  mov eax, esi
+  sub eax, dword ptr [r8 + 3 * 4]
+  lea r10, dword ptr [r10 + eax * 4]
+
+  x_loop:
+    movdqa xmm0, oword ptr [rdx]
+    psubsw xmm0, xmm5
 
     pmaddwd xmm0, xmm0
 
@@ -985,47 +896,83 @@ asm
     phaddd xmm0, xmm0
 
     movd eax, xmm0
+    add eax, dword ptr [r10]
+
     cmp eax, ebx
-    jae evicted
+    jae quick_evicted
 
-        call CompareEuclideanDCTPtr_asm
+    push rcx
+    push rdx
+    mov eax, dword ptr [r10]
+    mov r12b, 6
 
-        mov r12d, esi
-        sub r12d, r10d
-        imul r12d, r12d
-        imul r12d, r13d
-        add eax, r12d
+    dct_loop:
 
-        mov r12d, r9d
-        sub r12d, r11d
-        imul r12d, r12d
-        imul r12d, r13d
-        add eax, r12d
+      movdqu xmm1, oword ptr [rcx]
+      movdqu xmm2, oword ptr [rcx + $10]
+      movdqu xmm3, oword ptr [rcx + $20]
+      movdqu xmm4, oword ptr [rcx + $30]
 
-        cmp eax, ebx
-        jae worse
+      psubsw xmm1, oword ptr [rdx]
+      psubsw xmm2, oword ptr [rdx + $10]
+      psubsw xmm3, oword ptr [rdx + $20]
+      psubsw xmm4, oword ptr [rdx + $30]
 
-           mov ebx, eax
-           mov dword ptr [r8 + 1 * 4], esi
-           mov dword ptr [r8 + 2 * 4], r9d
+      pmaddwd xmm1, xmm1
+      pmaddwd xmm2, xmm2
+      pmaddwd xmm3, xmm3
+      pmaddwd xmm4, xmm4
 
-        worse:
+      paddd xmm1, xmm2
+      paddd xmm3, xmm4
 
-    evicted:
+      paddd xmm1, xmm3
+
+      phaddd xmm1, xmm1
+      phaddd xmm1, xmm1
+
+      lea rcx, [rcx + $40]
+      lea rdx, [rdx + $40]
+
+      movd r11d, xmm1
+      add eax, r11d
+
+      cmp eax, ebx
+      jae dct_bailout
+
+      dec r12b
+      jnz dct_loop
+
+      dct_better:
+
+        mov ebx, eax
+        mov dword ptr [r8 + 1 * 4], esi
+        mov dword ptr [r8 + 2 * 4], r9d
+
+      dct_bailout:
+
+        pop rdx
+        pop rcx
+
+    quick_evicted:
 
     add rdx, 192 * 2
+    add r10, 4
 
     inc esi
     cmp esi, edi
-    jbe xloop
+    jbe x_loop
 
   mov dword ptr [r8], ebx
 
   movdqu xmm0, oword ptr [rsp]
   movdqu xmm1, oword ptr [rsp + $10]
-  add rsp, 16 * 2
+  movdqu xmm2, oword ptr [rsp + $20]
+  movdqu xmm3, oword ptr [rsp + $30]
+  movdqu xmm4, oword ptr [rsp + $40]
+  movdqu xmm5, oword ptr [rsp + $50]
+  add rsp, 16 * 6
 
-  pop r13
   pop r12
   pop r11
   pop r10

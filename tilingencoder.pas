@@ -335,7 +335,7 @@ type
     procedure GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
 
     function PredictTileBlending(AUnipolar: Boolean; ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; AFrameBuffer: TFrameBuffer): Cardinal;
-    function PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Cardinal;
+    function PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray; const APenaltyLUT: TCardinalDynArray): Cardinal;
     function PredictTileIntra(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Cardinal;
 
     // processes
@@ -1519,9 +1519,10 @@ begin
   end;
 end;
 
-function TFrame.PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Cardinal;
+function TFrame.PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT;
+  const ADCTs: TDCTDynArray; const APenaltyLUT: TCardinalDynArray): Cardinal;
 var
-  oy, yx: Integer;
+  oy, yx, penLutMidOff, penLutWH: Integer;
   state: TDCTCribbleState;
   PrevDCTPtr: PDCTScalar;
 begin
@@ -1535,16 +1536,20 @@ begin
   state.X := MaxInt;
   state.DY := ADY;
   state.DX := ADX;
-  state.PenaltyWeight := ABackBufferOffset;
 
   GetPredictExtents(ARadius, state.DY, state.DX, state.oxmn, state.oxmx, state.oymn, state.oymx);
 
+  penLutMidOff := ARadius + 1;
+  penLutWH := penLutMidOff shl 1;
+  state.PenaltyLUT := @APenaltyLUT[(penLutMidOff + (state.oymn - ADY)) * penLutWH + penLutMidOff];
   for oy := state.oymn to state.oymx do
   begin
     yx := oy * (Encoder.FScreenWidth - cTileWidth + 1) + state.oxmn;
     PrevDCTPtr := ADCTs[yx];
 
     CribbleEuclideanDCTPtr_asm(ADCT, PrevDCTPtr, @state, oy);
+
+    Inc(state.PenaltyLUT, penLutWH);
   end;
 
   if not ATMI^.IsPredicted or (state.Error < ATMI^.Error) then
@@ -1612,8 +1617,9 @@ begin
   ATMI^.Attrs.MotionX := bestX - ADX;
 end;
 
-procedure TFrame.Predict(AMTPool: TMTPool; ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBuffer;
-  AFrameBuffer: TFrameBuffer);
+procedure TFrame.Predict(AMTPool: TMTPool; ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBuffer; AFrameBuffer: TFrameBuffer);
+var
+  PenaltyLUT: TCardinalDynArray;
 
   procedure DoXY(AIndex: PtrInt; AData: Pointer);
   var
@@ -1644,10 +1650,13 @@ procedure TFrame.Predict(AMTPool: TMTPool; ARadius, ABackBufferOffset: Integer; 
         PredictTileBlending(False, dy, dx, TMI, CurDCT, AFrameBuffer)
       else if (ABackBufferOffset = 1) and (Index = PKeyFrame.StartFrame + 1) then
         PredictTileBlending(True, dy, dx, TMI, CurDCT, AFrameBuffer);
-      PredictTileMotion(ARadius, ABackBufferOffset, dy, dx, TMI, CurDCT, ADCTBuffer.GetBuffer(-ABackBufferOffset));
+      PredictTileMotion(ARadius, ABackBufferOffset, dy, dx, TMI, CurDCT, ADCTBuffer.GetBuffer(-ABackBufferOffset), PenaltyLUT);
     end;
   end;
 
+var
+  x, y, penLutMidOff, penLutWH: Integer;
+  pPenalty: PCardinal;
 begin
   Assert(ARadius >= 0);
   Assert(ABackBufferOffset >= 0);
@@ -1656,6 +1665,17 @@ begin
     Exit;
 
   Dec(ARadius);
+
+  penLutMidOff := ARadius + 1;
+  penLutWH := penLutMidOff shl 1;
+  SetLength(PenaltyLUT, Sqr(penLutWH));
+  pPenalty := @PenaltyLUT[0];
+  for x := 0 to penLutWH - 1 do
+    for y := 0 to penLutWH - 1 do
+    begin
+      pPenalty^ := ApplyMotionPredictionPenalty(x, y, penLutMidOff, penLutMidOff, ABackBufferOffset);
+      Inc(pPenalty);
+    end;
 
   AMTPool.DoLocalProc(@DoXY, 0, Encoder.FTileMapSize - 1);
 end;
@@ -3345,7 +3365,7 @@ procedure TTilingEncoder.ConvertToCpnPixels(const ATile: TTile; FromPal, UseLAB,
     end
     else
     begin
-      RGBToYUV(r, g, b, yy, uu, vv, cYUVScale);
+      RGBToYUV(r, g, b, yy, uu, vv, cDCTScale);
     end;
 
     ACpnPixel[0, y, x] := yy;
@@ -3464,7 +3484,7 @@ var
     if UseLAB then
       Result := LABToRGB(yy, uu, vv)
     else
-      Result := YUVToRGB(yy, uu, vv, cYUVScale);
+      Result := YUVToRGB(yy, uu, vv, cDCTScale);
   end;
 
 begin
