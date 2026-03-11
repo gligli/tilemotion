@@ -873,10 +873,10 @@ asm
   mov esi, dword ptr [r8 + 5 * 4]
   mov edi, dword ptr [r8 + 6 * 4]
 
-  mov r10, dword ptr [r8 + 9 * 4]
+  mov r10, qword ptr [r8 + 9 * 4]
   mov eax, esi
   sub eax, dword ptr [r8 + 3 * 4]
-  lea r10, dword ptr [r10 + eax * 4]
+  lea r10, qword ptr [r10 + eax * 4]
 
   x_loop:
     movdqa xmm0, oword ptr [rdx]
