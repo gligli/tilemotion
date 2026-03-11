@@ -159,7 +159,7 @@ type
     procedure CopyPalPixels(const APalPixels: TByteDynArray); overload;
     procedure CopyRGBPixels(const ARGBPixels: TRGBPixels); overload;
     procedure CopyRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer); overload;
-    procedure BlendRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer; AWeight: ShortInt);
+    procedure BlendRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer; AWeight: Integer);
     procedure BlitPalPixels(const AFrameBuffer: TIntegerDynArray2; const APalette: TIntegerDynArray; AVMirror, AHMirror: Boolean; AY, AX: Integer);
     procedure BlitRGBPixels(const AFrameBuffer: TIntegerDynArray2; AVMirror, AHMirror: Boolean; AY, AX: Integer);
     procedure ClearPalPixels;
@@ -492,7 +492,7 @@ type
     function GammaCorrect(lut: Integer; x: Byte): TFloat; inline;
     function GammaUncorrect(lut: Integer; x: TFloat): Byte; inline;
 
-    procedure ConvertToCpnPixels(const ATile: TTile; FromPal, UseLAB, VMirror, HMirror: Boolean; const APalette: TIntegerDynArray; out ACpnPixel: TCpnPixels); inline;
+    procedure ConvertToCpnPixels(const ATile: TTile; FromPal, UseLAB, VMirror, HMirror: Boolean; const APalette: TIntegerDynArray; out ACpnPixels: TCpnPixels); inline;
     procedure ComputeCpnPixelsPsyVisFeatures(const ACpnPixel: TCpnPixels; Mode: TPsyVisMode; ColorCpns: Integer; ADCT: PDCTScalar); inline;
 
     procedure ComputeTilePsyVisFeatures(const ATile: TTile; Mode: TPsyVisMode; FromPal, UseLAB, VMirror, HMirror: Boolean;
@@ -994,7 +994,7 @@ begin
   end;
 end;
 
-procedure TTileHelper.BlendRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer; AWeight: ShortInt);
+procedure TTileHelper.BlendRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer; AWeight: Integer);
 var
   ty, tx: Integer;
 begin
@@ -1448,9 +1448,8 @@ end;
 
 function TFrame.PredictTileBlending(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ABuffer: TIntegerDynArray2): Cardinal;
 var
-  weight, bestWeight: Integer;
+  weight, bestWeight, ty, tx, col: Integer;
   err: Cardinal;
-  BlendTile: PTile;
   BlendCpnPixels: TCpnPixels;
   BlendDCT: TDCT;
 begin
@@ -1461,25 +1460,30 @@ begin
 
   bestWeight := MaxInt;
 
-  BlendTile := TTile.New(True, False);
-  try
-    for weight := CGTMBlendWeightMin to CGTMBlendWeightMax do
+  for weight := CGTMBlendWeightMin to CGTMBlendWeightMax do
+  begin
+    for ty := 0 to (cTileWidth - 1) do
     begin
-      BlendTile^.BlendRGBPixels(ABuffer, ADY, ADX, weight);
-
-      Encoder.ConvertToCpnPixels(BlendTile^, False, False, False, False, nil, BlendCpnPixels);
-      Encoder.ComputeCpnPixelsPsyVisFeatures(BlendCpnPixels, pvsWeightedDCT, cColorCpns, BlendDCT);
-
-      err := CompareEuclideanDCTPtr_asm(ADCT, BlendDCT);
-
-      if err < Result then
+      for tx := 0 to (cTileWidth - 1) do
       begin
-        Result := err;
-        bestWeight := weight;
+        col := BlendRGB(ABuffer[ADY, ADX], weight, CGTMBlendWeightBaseShift);
+        RGBToYUV(col, BlendCpnPixels[0, ty, tx], BlendCpnPixels[1, ty, tx], BlendCpnPixels[2, ty, tx], cDCTScale);
+        Inc(ADX);
       end;
+      Dec(ADX, cTileWidth);
+      Inc(ADY);
     end;
-  finally
-    TTile.Dispose(BlendTile);
+    Dec(ADY, cTileWidth);
+
+    Encoder.ComputeCpnPixelsPsyVisFeatures(BlendCpnPixels, pvsWeightedDCT, cColorCpns, BlendDCT);
+
+    err := CompareEuclideanDCTPtr_asm(ADCT, BlendDCT);
+
+    if err < Result then
+    begin
+      Result := err;
+      bestWeight := weight;
+    end;
   end;
 
   if not ATMI^.IsPredicted or (Result < ATMI^.Error) then
@@ -1929,7 +1933,6 @@ end;
 
 procedure TFrame.Reconstruct(AMTPool: TMTPool; ARadius: Integer; AFrameBuffer: TFrameBuffer);
 const
-  cEpuKnnK = 64;
   cPSNREpsilon = 0.1;
 var
   DS: PTilingDataset;
@@ -2278,7 +2281,7 @@ end;
 
 procedure TTilingEncoder.Reduce;
 var
-  kfIdx, tileCount: Integer;
+  kfIdx: Integer;
   KF: TKeyFrame;
   Frame: TFrame;
 begin
@@ -3159,7 +3162,7 @@ begin
   FMotionPredictMaxBufferedFrames := EnsureRange(AValue, 1, 3);
 end;
 
-procedure TTilingEncoder.ConvertToCpnPixels(const ATile: TTile; FromPal, UseLAB, VMirror, HMirror: Boolean; const APalette: TIntegerDynArray; out ACpnPixel: TCpnPixels);
+procedure TTilingEncoder.ConvertToCpnPixels(const ATile: TTile; FromPal, UseLAB, VMirror, HMirror: Boolean; const APalette: TIntegerDynArray; out ACpnPixels: TCpnPixels);
 
   procedure ToCpn(col, x, y: Integer);
   var
@@ -3177,9 +3180,9 @@ procedure TTilingEncoder.ConvertToCpnPixels(const ATile: TTile; FromPal, UseLAB,
       RGBToYUV(r, g, b, yy, uu, vv, cDCTScale);
     end;
 
-    ACpnPixel[0, y, x] := yy;
-    ACpnPixel[1, y, x] := uu;
-    ACpnPixel[2, y, x] := vv;
+    ACpnPixels[0, y, x] := yy;
+    ACpnPixels[1, y, x] := uu;
+    ACpnPixels[2, y, x] := vv;
   end;
 
 var
@@ -3195,7 +3198,7 @@ begin
         if HMirror then xx := cTileWidth - 1 - x;
         if VMirror then yy := cTileWidth - 1 - y;
 
-        ToCpn(APalette[ATile.PalPixels[yy,xx]], x, y);
+        ToCpn(APalette[ATile.PalPixels[yy, xx]], x, y);
       end;
   end
   else
@@ -3208,7 +3211,7 @@ begin
         if HMirror then xx := cTileWidth - 1 - x;
         if VMirror then yy := cTileWidth - 1 - y;
 
-        ToCpn(ATile.RGBPixels[yy,xx], x, y);
+        ToCpn(ATile.RGBPixels[yy, xx], x, y);
       end;
   end;
 end;
@@ -3802,7 +3805,7 @@ begin
               if TMI^.IsBlended then
               begin
                 siz := 0;
-                col := $ff - (Abs(TMI^.Attrs.BlendWeight) * 4);
+                col := $ff - (Abs(TMI^.Attrs.BlendWeight) * 7);
                 col := ToRGB(col, $ff, col);
 
                 canvas.Brush.Color := col;
