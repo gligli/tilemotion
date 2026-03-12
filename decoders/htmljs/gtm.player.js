@@ -244,7 +244,7 @@ function unpackNextKeyframe() {
 	
 	if (gtmWLZMA.nextStreams.length >= 1 && gtmWLZMA.nextStreams[gtmWLZMA.nextStreams.length - 1] == null) {
 		gtmWLZMA.nextStreams.pop();
-		console.log('Finished Unpacking LZMA')
+		console.log('Finished Unpacking LZMA');
 		gtmUnpackingFinished = true;
 		return;
 	}
@@ -287,7 +287,7 @@ function renderEnd() {
 
 function drawTilemapItem(idx, attrs, iskf) {
 	let palIdx = gtmTilePalIdxs[iskf][idx];
-	let tOff = (attrs * gtmTileCount[iskf] + idx) * CTileSize;
+	let tOff = idx * CTileSize;
 	let palR = gtmPaletteR[palIdx];
 	let palG = gtmPaletteG[palIdx];
 	let palB = gtmPaletteB[palIdx];
@@ -299,13 +299,20 @@ function drawTilemapItem(idx, attrs, iskf) {
 	var data = gtmTMBuffers[gtmTMBufIdxs[0]].data;
 	
 	for (let ty = 0; ty < CTileWidth; ty++) {
+		let tym = ty * CTileWidth;
+		if (attrs & 2) tym = CTileSize - CTileWidth - tym;
+
 		for (let tx = 0; tx < CTileWidth; tx++) {
-			let v = gtmTiles[iskf][tOff++];
+			let txm = tx;
+			if (attrs & 1) txm = CTileWidth - 1 - txm;
+			
+			let v = gtmTiles[iskf][tOff + tym + txm];
 			data[p++] = palR[v]; 
 			data[p++] = palG[v]; 
 			data[p++] = palB[v]; 
 			data[p++] = palA[v]; 
 		}
+
 		p += (gtmWidth - 1) * CTileWidth * 4;
 	}
 	
@@ -366,6 +373,21 @@ function skipBlock(skipCount) {
 	}
 }
 
+function readBuffer_Unsafe(buffer, offset, size) {
+	buffer.set(gtmOutStream.buffers[gtmDataBufIdx].slice(gtmDataBufPos, gtmDataBufPos + size), offset);
+	
+	gtmDataBufPos += size;
+	
+	if (gtmDataBufPos >= gtmOutStream.buffers[gtmDataBufIdx].length)
+	{
+		// move to next buffer
+		++gtmDataBufIdx;
+		gtmDataBufPos = 0;
+	}
+	
+	gtmDataBufGlobalPos += size;
+}
+
 function readByte() {
 	let v = gtmOutStream.buffers[gtmDataBufIdx][gtmDataBufPos++];
 	
@@ -421,8 +443,8 @@ function decodeFrame() {
 				
 				if (gtmLoopCount <= 0) {
 					gtmFrameInterval = setInterval(decodeFrame, gtmFrameLength);
-					gtmTiles[0] = new Uint8Array(gtmTileCount[0] * CTileSize * 4);
-					gtmTiles[1] = new Uint8Array(gtmTileCount[1] * CTileSize * 4);
+					gtmTiles[0] = new Uint8Array(gtmTileCount[0] * CTileSize);
+					gtmTiles[1] = new Uint8Array(gtmTileCount[1] * CTileSize);
 					gtmTilePalIdxs[0] = new Uint16Array(gtmTileCount[0]);
 					gtmTilePalIdxs[1] = new Uint16Array(gtmTileCount[1]);
 					redimFrame();
@@ -458,27 +480,7 @@ function decodeFrame() {
 					tlpal[p] = readWord();
 				}
 
-				let off = tstart * CTileSize + tcnt * CTileSize * 0;
-				let offh = tstart * CTileSize + tcnt * CTileSize * 1;
-				let offv = tstart * CTileSize + tcnt * CTileSize * 2;
-				let offhv = tstart * CTileSize + tcnt * CTileSize * 3;
-
-				for (let p = tstart; p <= tend; p++) {
-					for (let ty = 0; ty < CTileWidth; ty++) {
-						for (let tx = 0; tx < CTileWidth; tx++) {
-							let b = readByte();
-							tiles[off + ty * CTileWidth + tx] = b;
-							tiles[offh + ty * CTileWidth + (CTileWidth - 1 - tx)] = b;
-							tiles[offv + (CTileWidth - 1 - ty) * CTileWidth + tx] = b;
-							tiles[offhv + (CTileWidth - 1 - ty) * CTileWidth + (CTileWidth - 1 - tx)] = b;
-						}
-					}
-					
-					off += CTileSize;
-					offh += CTileSize;
-					offv += CTileSize;
-					offhv += CTileSize;
-				}
+				readBuffer_Unsafe(tiles, tstart * CTileSize, (tend - tstart + 1) * CTileSize);
 				break;
 				
 			case GTMCommand.FrameEnd:
