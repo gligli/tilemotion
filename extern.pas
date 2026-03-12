@@ -229,20 +229,21 @@ end;
 
 procedure LZCompress(ASourceStream: TStream; ADestStream: TStream);
 var
-  i: Integer;
+  plainSz: Int64;
   LZMA: TLZMAEncoder;
 begin
   ASourceStream.Seek(0, soBeginning);
+  plainSz := ASourceStream.Size;
 
   LZMA := TLZMAEncoder.Create;
   try
     LZMA.SetEndMarkerMode(True);
+    LZMA.SetDictionarySize(1 shl Ceil(Log2(plainSz)));
     LZMA.SetLcLpPb(8,0,2);
     LZMA.WriteCoderProperties(ADestStream);
-    for i := 0 to 7 do
-        ADestStream.WriteByte($ff);
+    ADestStream.WriteQWord(High(UInt64));
 
-    LZMA.Code(ASourceStream,ADestStream,-1,-1);
+    LZMA.Code(ASourceStream,ADestStream, plainSz, -1);
   finally
     LZMA.Free;
   end;
@@ -250,7 +251,6 @@ end;
 
 procedure LZDecompress(ASourceStream: TStream; ADestStream: TStream);
 var
-  i: Integer;
   LZMA: TLZMADecoder;
   EncoderProperties: array[0..4] of Byte;
 begin
@@ -258,8 +258,7 @@ begin
   try
     ASourceStream.Read(EncoderProperties,SizeOf(EncoderProperties));
     LZMA.SetDecoderProperties(EncoderProperties);
-    for i := 0 to 7 do
-        ASourceStream.ReadByte;
+    ASourceStream.ReadQWord;
 
     LZMA.Code(ASourceStream, ADestStream, -1);
   finally
