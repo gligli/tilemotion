@@ -2249,9 +2249,6 @@ procedure TTilingEncoder.Dither;
   var
     Tile: PTile;
   begin
-    if not InRange(AIndex, 0, High(FTiles)) then
-      Exit;
-
     Tile := FTiles[AIndex];
 
     if not Tile^.Active then
@@ -3269,7 +3266,7 @@ begin
         if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
            z *= cDCTWeights[cpn, v, u];
 
-        pDCT[pSnake^ * ColorCpns] := Round(z);
+        pDCT[pSnake^ * ColorCpns] := z;
         Inc(pLut, Sqr(cTileWidth));
         Inc(pSnake);
       end;
@@ -3530,6 +3527,8 @@ begin
   for i := 0 to High(FKeyFrames) do
     FKeyFrames[i].Free;
   SetLength(FKeyFrames, 0);
+
+  SetLength(FPalettes, 0);
 
   FreeAndNil(FRenderFrameBuffer);
 
@@ -4321,9 +4320,6 @@ var
     Tile: PTile;
     TMI: PTileMapItem;
   begin
-    if not InRange(AIndex, 0, High(FFrames)) then
-      Exit;
-
     Frame := FFrames[AIndex];
 
     if Assigned(Frame.IntraReducedTiles) then
@@ -4409,21 +4405,12 @@ var
 
   procedure DoDCT(AIndex: PtrInt; AData: Pointer);
   var
-    iDCT: Integer;
     Tile: PTile;
-    CpnPixels: TCpnPixels;
-    DCT: TDCT;
   begin
-    if not InRange(AIndex, 0, High(FTiles)) then
-      Exit;
-
     Tile := FTiles[AIndex];
     Assert(Tile^.Active);
 
-    ConvertToCpnPixels(Tile^, False, True, False, False, nil, CpnPixels);
-    ComputeCpnPixelsPsyVisFeatures(CpnPixels, DitheringMode, cColorCpns, DCT);
-    for iDCT := 0 to cTileDCTSize - 1 do
-      YakmoDataset[AIndex, iDCT] := DCT[iDCT];
+    ComputeTilePsyVisFeatures(Tile^, DitheringMode, False, True, False, False, cColorCpns, nil, @YakmoDataset[AIndex, 0]);
     YakmoWeights[AIndex] := Tile^.UseCount;
   end;
 
@@ -4479,7 +4466,10 @@ begin
   SetLength(PalIdxLUT, FPaletteCount);
 
   for palIdx := 0 to FPaletteCount - 1 do
+  begin
+    FPalettes[palIdx].UseCount := 0;
     FPalettes[palIdx].PalIdx_Initial := palIdx;
+  end;
 
   for di := 0 to High(YakmoClusters) do
     Inc(FPalettes[YakmoClusters[di]].UseCount, YakmoWeights[di]);
@@ -4573,9 +4563,6 @@ var
     iw: PIndexWeight;
     r, g, b: Byte;
   begin
-    if not InRange(AIndex, 0, FPaletteCount - 1) then
-      Exit;
-
     SetLength(x, FPaletteSize - 1);
     for colIdx := 1 to FPaletteSize - 1 do
       x[colIdx - 1] := colIdx;
@@ -4829,9 +4816,6 @@ var
     T: PTile;
     CpnPixels: TCpnPixels;
   begin
-    if not InRange(AIndex, 0, High(FTiles)) then
-      Exit;
-
     T := Tiles[AIndex];
     Assert(T^.Active);
 
