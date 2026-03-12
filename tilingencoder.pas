@@ -3266,7 +3266,7 @@ begin
         if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
            z *= cDCTWeights[cpn, v, u];
 
-        pDCT[pSnake^ * ColorCpns] := z;
+        pDCT[pSnake^ * ColorCpns] := Round(z);
         Inc(pLut, Sqr(cTileWidth));
         Inc(pSnake);
       end;
