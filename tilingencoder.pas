@@ -160,6 +160,7 @@ type
     procedure CopyRGBPixels(const ARGBPixels: TRGBPixels); overload;
     procedure CopyRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer); overload;
     procedure BlendRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer; AWeight: Integer);
+    procedure BlendRGBPixels(const AM1Buffer, AM2Buffer: TIntegerDynArray2; AY, AX: Integer; AAlpha: Byte; AWeight: ShortInt);
     procedure BlitPalPixels(const AFrameBuffer: TIntegerDynArray2; const APalette: TIntegerDynArray; AVMirror, AHMirror: Boolean; AY, AX: Integer);
     procedure BlitRGBPixels(const AFrameBuffer: TIntegerDynArray2; AVMirror, AHMirror: Boolean; AY, AX: Integer);
     procedure ClearPalPixels;
@@ -188,7 +189,7 @@ type
     Error: Cardinal; // 4
     Attrs: record case Boolean of // 3 * 1
       False: (MotionX, MotionY: ShortInt; MotionBackBufferOffset: Byte);
-      True: (BlendWeight: ShortInt; Dummy1, Dummy2: Byte);
+      True: (BlendAlpha: Byte; BlendWeight: ShortInt; Dummy: Byte);
     end;
     Flags: set of (tmfHMirror, tmfVMirror, tmfPredicted, tmfBlended); // 1
   end;
@@ -655,6 +656,7 @@ const
   CGTMCommandCodeBits = round(ln(CGTMCommandsCount) / ln(2));
   CGTMCommandBits = 16 - CGTMCommandCodeBits;
   CGTMBlendAlphaShift = 6;
+  CGTMBlendAlphaMax = (1 shl CGTMBlendAlphaShift) - 1;
   CGTMBlendWeightBaseShift = 8;
   CGTMBlendWeightMin = -32;
   CGTMBlendWeightMax = 31;
@@ -718,7 +720,7 @@ function TTileMapItemHelper.GetIsSmoothed: Boolean;
 begin
   Result := IsPredicted and
     ((not IsBlended and (Attrs.MotionX = 0) and (Attrs.MotionY = 0) and (Attrs.MotionBackBufferOffset = 1)) or
-     (IsBlended and (Attrs.BlendWeight = 0)));
+     (IsBlended and (Attrs.BlendAlpha = 0) and (Attrs.BlendWeight = 0)));
 end;
 
 function TTileMapItemHelper.GetVMirror: Boolean;
@@ -1003,6 +1005,22 @@ begin
     for tx := 0 to cTileWidth - 1 do
     begin
       RGBPixels[ty, tx] := BlendRGB(AFrameBuffer[AY, AX], AWeight, CGTMBlendWeightBaseShift);
+      Inc(AX);
+    end;
+    Dec(AX, cTileWidth);
+    Inc(AY);
+  end;
+end;
+
+procedure TTileHelper.BlendRGBPixels(const AM1Buffer, AM2Buffer: TIntegerDynArray2; AY, AX: Integer; AAlpha: Byte; AWeight: ShortInt);
+var
+  ty, tx: Integer;
+begin
+  for ty := 0 to cTileWidth - 1 do
+  begin
+    for tx := 0 to cTileWidth - 1 do
+    begin
+      RGBPixels[ty, tx] := BlendRGB(AM1Buffer[AY, AX], AM2Buffer[AY, AX], AAlpha, AWeight, CGTMBlendAlphaShift, CGTMBlendWeightBaseShift);
       Inc(AX);
     end;
     Dec(AX, cTileWidth);
@@ -3724,9 +3742,9 @@ begin
           begin
             if TMI^.IsBlended then
               TempTile^.BlendRGBPixels(
-                FRenderFrameBuffer.GetBuffer(-1),
+                FRenderFrameBuffer.GetBuffer(-1), FRenderFrameBuffer.GetBuffer(-2),
                 sy shl cTileWidthBits, sx shl cTileWidthBits,
-                TMI^.Attrs.BlendWeight)
+                TMI^.Attrs.BlendAlpha, TMI^.Attrs.BlendWeight)
             else
               TempTile^.CopyRGBPixels(
                 FRenderFrameBuffer.GetBuffer(-TMI^.Attrs.MotionBackBufferOffset),
@@ -5429,8 +5447,8 @@ begin
             TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
 
             TMI^.Attrs.BlendWeight := ((CommandData shr CGTMBlendAlphaShift) and 31) - ((CommandData shr CGTMBlendAlphaShift) and 32);
-            TMI^.Attrs.Dummy1 := 0;
-            TMI^.Attrs.Dummy2 := 0;
+            TMI^.Attrs.BlendAlpha := CommandData and CGTMBlendAlphaMax;
+            TMI^.Attrs.Dummy := 0;
             TMI^.IsPredicted := True;
             TMI^.IsBlended := True;
 
@@ -5506,7 +5524,7 @@ var
     begin
       if TMI.IsBlended then
       begin
-        DoCmd(gtPredictedFm1Fm2Blend6x6, (PByte(@TMI.Attrs.BlendWeight)^ and ((1 shl (CGTMCommandBits - CGTMBlendAlphaShift)) - 1)) shl CGTMBlendAlphaShift);
+        DoCmd(gtPredictedFm1Fm2Blend6x6, ((PByte(@TMI.Attrs.BlendWeight)^ and ((1 shl (CGTMCommandBits - CGTMBlendAlphaShift)) - 1)) shl CGTMBlendAlphaShift) or TMI.Attrs.BlendAlpha);
       end
       else
       begin
