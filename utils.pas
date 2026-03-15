@@ -34,7 +34,7 @@ const
   cTileWidthBits = 3;
   cTileWidth = 1 shl cTileWidthBits;
   cColorCpns = 3;
-  cTileDCTSize = cColorCpns * sqr(cTileWidth);
+  cTileDCTSize = cColorCpns * sqr(cTileWidth) * 2;
   cUnrolledDCTSize = sqr(sqr(cTileWidth));
   cPhi = (1 + sqrt(5)) / 2;
   cInvPhi = 1 / cPhi;
@@ -710,6 +710,8 @@ begin
 end;
 
 function CompareEuclideanDCTPtr_asm(pa_rcx, pb_rdx: PDCTScalar): Cardinal; register; assembler;
+const
+  cUnroll = 32;
 label
   loop;
 asm
@@ -723,10 +725,10 @@ asm
   movdqu oword ptr [rsp + $30], xmm3
   movdqu oword ptr [rsp + $40], xmm4
 
-  // unrolled for 32 = (cTileDCTSize / cDCTUnroll)
+  // unrolled by 32 = (cTileDCTSize / cUnroll)
 
   pxor xmm0, xmm0
-  mov al, 6
+  mov al, (cTileDCTSize / cUnroll)
 
 loop:
 
@@ -875,6 +877,8 @@ begin
 end;
 
 procedure CribbleEuclideanDCTPtr_asm(cur_rcx: PDCTScalar; prev_rdx: PDCTScalar; state_r8: PDCTCribbleState; oy_r9: Integer); register; assembler;
+const
+  cUnroll = 32;
 label
   x_loop, quick_evicted, dct_bailout, dct_better, dct_loop;
 asm
@@ -924,7 +928,10 @@ asm
     push rcx
     push rdx
     mov eax, dword ptr [r10]
-    mov r12b, 6
+
+    // unrolled by 32 = (cTileDCTSize / cUnroll)
+
+    mov r12b, (cTileDCTSize / cUnroll)
 
     dct_loop:
 
@@ -976,7 +983,7 @@ asm
 
     quick_evicted:
 
-    add rdx, 192 * 2
+    add rdx, cTileDCTSize * 2
     add r10, 4
 
     inc esi

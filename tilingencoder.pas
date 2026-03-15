@@ -3229,12 +3229,15 @@ procedure TTilingEncoder.ComputeCpnPixelsPsyVisFeatures(const ACpnPixel: TCpnPix
 var
   u, v, cpn: Integer;
   z: Double;
+  zMean: array[0 .. cColorCpns - 1] of Integer;
   pLut: PSingle;
   pDCT: PSmallInt;
   pSnake: PByte;
 begin
   for cpn := 0 to ColorCpns - 1 do
   begin
+    zMean[cpn] := 0;
+
     pDCT := @ADCT[cpn];
     pLut := @FDCTLut[Mode in [pvsSpeDCT, pvsWeightedSpeDCT], 0];
     pSnake := @cDCTSnake[0];
@@ -3243,11 +3246,33 @@ begin
       begin
   		  z := DCTInner_asm(@ACpnPixel[cpn, 0, 0], pLut);
 
+        zMean[cpn] += Round(z);
+        pDCT[pSnake^ * ColorCpns + (cColorCpns * Sqr(cTileWidth))] := Round(z);
+
         if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
            z *= cDCTWeights[cpn, v, u];
 
         pDCT[pSnake^ * ColorCpns] := Round(z);
         Inc(pLut, Sqr(cTileWidth));
+        Inc(pSnake);
+      end;
+
+    zMean[cpn] := SarLongint(zMean[cpn] + Sqr(cTileWidth) div 2, cTileWidthBits * 2);
+  end;
+
+  for cpn := 0 to ColorCpns - 1 do
+  begin
+    pDCT := @ADCT[(cColorCpns * Sqr(cTileWidth)) + cpn];
+    pSnake := @cDCTSnake[0];
+    for v := 0 to cTileWidth - 1 do
+      for u := 0 to cTileWidth - 1 do
+      begin
+        z := Abs(zMean[cpn] - pDCT[pSnake^ * ColorCpns]);
+
+        if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
+           z *= cDCTWeights[cpn, v, u];
+
+        pDCT[pSnake^ * ColorCpns] := Round(z);
         Inc(pSnake);
       end;
   end;
@@ -3256,33 +3281,14 @@ end;
 procedure TTilingEncoder.ComputeTilePsyVisFeatures(const ATile: TTile; Mode: TPsyVisMode; FromPal, UseLAB, VMirror,
   HMirror: Boolean; ColorCpns: Integer; const APalette: TIntegerDynArray; ADCT: PDouble);
 var
-  u, v, cpn: Integer;
-  z: Double;
-  CpnPixels: TCpnPixels;
-  pLut: PSingle;
-  pDCT: PDouble;
-  pSnake: PByte;
+  i: Integer;
+  LocalCpnPixels: TCpnPixels;
+  LocalDCT: TDCT;
 begin
-  ConvertToCpnPixels(ATile, FromPal, UseLAB, VMirror, HMirror, APalette, CpnPixels);
-
-  for cpn := 0 to ColorCpns - 1 do
-  begin
-    pDCT := @ADCT[cpn];
-    pLut := @FDCTLut[Mode in [pvsSpeDCT, pvsWeightedSpeDCT], 0];
-    pSnake := @cDCTSnake[0];
-    for v := 0 to cTileWidth - 1 do
-      for u := 0 to cTileWidth - 1 do
-      begin
-  		  z := DCTInner_asm(@CpnPixels[cpn, 0, 0], pLut);
-
-        if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
-           z *= cDCTWeights[cpn, v, u];
-
-        pDCT[pSnake^ * ColorCpns] := Round(z);
-        Inc(pLut, Sqr(cTileWidth));
-        Inc(pSnake);
-      end;
-  end;
+  ConvertToCpnPixels(ATile, FromPal, UseLAB, VMirror, HMirror, APalette, LocalCpnPixels);
+  ComputeCpnPixelsPsyVisFeatures(LocalCpnPixels, Mode, ColorCpns, @LocalDCT[0]);
+  for i := 0 to cTileDCTSize - 1 do
+    ADCT[i] := LocalDCT[i];
 end;
 
 procedure TTilingEncoder.ComputeInvTilePsyVisFeatures(DCT: PDouble; Mode: TPsyVisMode; UseLAB: Boolean; ColorCpns: Integer;
