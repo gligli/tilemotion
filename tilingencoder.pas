@@ -1727,18 +1727,12 @@ var
 
   procedure DoDCT(AIndex: PtrInt; AData: Pointer);
   var
-    iDCT: Integer;
     Tile: PTile;
-    CpnPixels: TCpnPixels;
-    DCT: TDCT;
   begin
     Tile := FrameTiles[AIndex];
     Assert(Tile^.Active);
 
-    Encoder.ConvertToCpnPixels(Tile^, False, False, False, False, nil, CpnPixels);
-    Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsWeightedDCT, cColorCpns, DCT);
-    for iDCT := 0 to cTileDCTSize - 1 do
-      YakmoDataset[AIndex, iDCT] := DCT[iDCT];
+    Encoder.ComputeTilePsyVisFeatures(Tile^, pvsWeightedDCT, False, False, False, False, cColorCpns, nil, @YakmoDataset[AIndex, 0]);
   end;
 
 var
