@@ -225,8 +225,17 @@ type
   { TTilingDataset }
 
   TTilingDataset = record
+  type
+    TDSTilePalIdx = packed record
+      TileIdx: Integer;
+      PalIdx: Integer;
+    end;
+  public
+
     KNNSize: Integer;
-    Dataset: TSmallIntDynArray2;
+    Dataset: TSmallIntDynArray;
+    DatasetPtrs: array of PDCTScalar;
+    DSToTilePalIdx: array of TDSTilePalIdx;
     ANN: PANNkdtree;
   end;
 
@@ -326,6 +335,7 @@ type
     function GetUnpredictedTileCount: Integer;
     procedure ResetTileMap(AKeepMirrors: Boolean);
 
+    function PowellWeight(const x: TVector; data: Pointer): TScalar;
     procedure GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
 
     function PredictTileWeight(ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ABuffer: TIntegerDynArray2): Cardinal;
@@ -1405,6 +1415,45 @@ begin
       TileMap[sy,sx].Reset(AKeepMirrors);
 end;
 
+
+type
+  TPowellBlendData = record
+    DX, DY: Integer;
+    DCT: TDCT;
+    FrameBuffer: TIntegerDynArray2;
+  end;
+
+  PPowellBlendData = ^TPowellBlendData;
+
+function TFrame.PowellWeight(const x: TVector; data: Pointer): TScalar;
+var
+  pbData: PPowellBlendData absolute data;
+  dx, dy, ty, tx, col, weight: Integer;
+  BlendCpnPixels: TCpnPixels;
+  BlendDCT: TDCT;
+begin
+  weight := EnsureRange(Round(x[0]), CGTMBlendWeightMin, CGTMBlendWeightMax);
+
+  dx := pbData^.DX;
+  dy := pbData^.DY;
+
+  for ty := 0 to (cTileWidth - 1) do
+  begin
+    for tx := 0 to (cTileWidth - 1) do
+    begin
+      col := WeightRGB(pbData^.FrameBuffer[dy, dx], weight, CGTMBlendWeightBaseShift);
+      RGBToYUV(col, BlendCpnPixels[0, ty, tx], BlendCpnPixels[1, ty, tx], BlendCpnPixels[2, ty, tx], cDCTScale);
+      Inc(dx);
+    end;
+    Dec(dx, cTileWidth);
+    Inc(dy);
+  end;
+
+  Encoder.ComputeCpnPixelsPsyVisFeatures(BlendCpnPixels, pvsWeightedDCT, cColorCpns, BlendDCT);
+
+  Result := CompareEuclideanDCTPtr_asm(pbData^.DCT, BlendDCT);
+end;
+
 procedure TFrame.GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
 begin
   oymn := Max(0, ADY - ARadius - 1);
@@ -1446,43 +1495,21 @@ end;
 function TFrame.PredictTileWeight(ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT;
   const ABuffer: TIntegerDynArray2): Cardinal;
 var
-  weight, bestWeight, ty, tx, col: Integer;
-  err: Cardinal;
-  BlendCpnPixels: TCpnPixels;
-  BlendDCT: TDCT;
+  bestWeight: Integer;
+  pbData: TPowellBlendData;
+  X: TVector;
 begin
-  if ATMI^.IsPredicted then
-    Result := ATMI^.Error
-  else
-    Result := High(Cardinal);
+  Assert(InRange(ABackBufferOffset, 1, Encoder.MotionPredictMaxBufferedFrames));
 
-  bestWeight := MaxInt;
+  pbData.DCT := ADCT;
+  pbData.DX := ADX;
+  pbData.DY := ADY;
+  pbData.FrameBuffer := ABuffer;
 
-  for weight := CGTMBlendWeightMin to CGTMBlendWeightMax do
-  begin
-    for ty := 0 to (cTileWidth - 1) do
-    begin
-      for tx := 0 to (cTileWidth - 1) do
-      begin
-        col := WeightRGB(ABuffer[ADY, ADX], weight, CGTMBlendWeightBaseShift);
-        RGBToYUV(col, BlendCpnPixels[0, ty, tx], BlendCpnPixels[1, ty, tx], BlendCpnPixels[2, ty, tx], cDCTScale);
-        Inc(ADX);
-      end;
-      Dec(ADX, cTileWidth);
-      Inc(ADY);
-    end;
-    Dec(ADY, cTileWidth);
+  X := [0.0];
 
-    Encoder.ComputeCpnPixelsPsyVisFeatures(BlendCpnPixels, pvsWeightedDCT, cColorCpns, BlendDCT);
-
-    err := CompareEuclideanDCTPtr_asm(ADCT, BlendDCT);
-
-    if err < Result then
-    begin
-      Result := err;
-      bestWeight := weight;
-    end;
-  end;
+  Result := Round(PowellMinimize(@PowellWeight, X, (1 shl CGTMBlendWeightBaseShift) * 0.25, 0.5, 0.5, MaxInt, @pbData)[0]);
+  bestWeight := EnsureRange(Round(x[0]), CGTMBlendWeightMin, CGTMBlendWeightMax);
 
   if not ATMI^.IsPredicted or (Result < ATMI^.Error) then
   begin
@@ -1931,7 +1958,7 @@ var
 
   procedure DoXY(AIndex: PtrInt; AData: Pointer);
   var
-    sx, sy, dx, dy, ty, tx: Integer;
+    sx, sy, dx, dy, ty, tx, dsIdx: Integer;
     knnErr: Cardinal;
     knnPSNR, mpPSNR: Double;
 
@@ -1962,15 +1989,17 @@ var
     // use the KNN dataset to predict a tile with its associated palette
 
     knnErr := High(Cardinal);
-    TMI^.TileIdx := ann_kdtree_short_search(DS^.ANN, @FTDCT[0], 0, @knnErr);
-    if InRange(TMI^.TileIdx, 0, DS^.KNNSize - 1) then
+    dsIdx := ann_kdtree_short_search(DS^.ANN, @FTDCT[0], 0, @knnErr);
+    if InRange(dsIdx, 0, DS^.KNNSize - 1) then
     begin
-      TMI^.PalIdx := Encoder.FTiles[TMI^.TileIdx]^.PalIdx_Initial;
+      TMI^.TileIdx := DS^.DSToTilePalIdx[dsIdx].TileIdx;
+      TMI^.PalIdx := DS^.DSToTilePalIdx[dsIdx].PalIdx;
       knnPSNR := EuclideanToPSNR(knnErr);
     end
     else
     begin
       TMI^.TileIdx := -1;
+		    TMI^.PalIdx := -1;
       knnPSNR := -Infinity;
     end;
 
@@ -2030,7 +2059,7 @@ var
       // draw fb (pal tile)
 
       Tile := Encoder.FTiles[TMI^.TileIdx];
-      Tile^.BlitPalPixels(AFrameBuffer.GetBuffer, Encoder.FPalettes[Tile^.PalIdx_Initial].PaletteRGB, TMI^.VMirror, TMI^.HMirror, dy, dx);
+      Tile^.BlitPalPixels(AFrameBuffer.GetBuffer, Encoder.FPalettes[TMI^.PalIdx].PaletteRGB, TMI^.VMirror, TMI^.HMirror, dy, dx);
     end;
 
     SpinEnter(@PKeyFrame.ReconstructLock);
@@ -3744,16 +3773,16 @@ begin
             if FRenderOutputDithered then
               if FRenderPaletteIndex < 0 then
               begin
-                if not InRange(tilePtr^.PalIdx_Initial, 0, High(FPalettes)) then
+                if not InRange(TMI^.PalIdx, 0, High(FPalettes)) then
                 begin
                   DrawDummyTile(FRenderFrameBuffer.GetBuffer, sy, sx);
                   Continue;
                 end;
-                pal := FPalettes[tilePtr^.PalIdx_Initial].PaletteRGB;
+                pal := FPalettes[TMI^.PalIdx].PaletteRGB;
               end
               else
               begin
-                if FRenderPaletteIndex <> tilePtr^.PalIdx_Initial then
+                if FRenderPaletteIndex <> TMI^.PalIdx then
                 begin
                   DrawDummyTile(FRenderFrameBuffer.GetBuffer, sy, sx);
                   Continue;
@@ -4805,37 +4834,70 @@ begin
 end;
 
 procedure TTilingEncoder.PrepareReconstruct;
+const
+  CDSMultiplier = 7;
 var
   DS: PTilingDataset;
+  dsIterator, reusableTileCount: Integer;
 
   procedure DoPsyV(AIndex: PtrInt; AData: Pointer);
   var
+    palIdx, dsIdx: Integer;
     T: PTile;
     CpnPixels: TCpnPixels;
   begin
     T := Tiles[AIndex];
     Assert(T^.Active);
 
-    ConvertToCpnPixels(T^, True, False, False, False, FPalettes[T^.PalIdx_Initial].PaletteRGB, CpnPixels);
-    ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsWeightedDCT, cColorCpns, @DS^.Dataset[AIndex, 0]);
+    for palIdx := 0 to FPaletteCount - 1 do
+    begin
+      if (palIdx = T^.PalIdx_Initial) or (AIndex < reusableTileCount) then
+      begin
+        ConvertToCpnPixels(T^, True, False, False, False, FPalettes[palIdx].PaletteRGB, CpnPixels);
+
+        dsIdx := InterLockedIncrement(dsIterator);
+
+        ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsWeightedDCT, cColorCpns, DS^.DatasetPtrs[dsIdx]);
+        DS^.DSToTilePalIdx[dsIdx].TileIdx := AIndex;
+        DS^.DSToTilePalIdx[dsIdx].PalIdx := palIdx;
+      end;
+    end;
   end;
 
 var
-  kfIdx: Integer;
+  kfIdx, dsIdx: Integer;
+  pDS: PDCTScalar;
 begin
-  // Compute psycho visual model for all tiles in all palettes
+  // Compute psycho visual model for all tiles in their inital palettes, and some tiles in all palettes
+
+  reusableTileCount :=  Ceil((CDSMultiplier - 1) * Length(FTiles) / Max(1, FPaletteCount - 1));
+
+  WriteLn('Reusable tiles:', reusableTileCount:7, ' , (', reusableTileCount * 100.0 / Length(FTiles):4:3, '%)');
 
   DS := New(PTilingDataset);
   FillChar(DS^, SizeOf(TTilingDataset), 0);
 
-  DS^.KNNSize := Length(FTiles);
-  SetLength(DS^.Dataset, DS^.KNNSize, cTileDCTSize);
+  DS^.KNNSize := Length(FTiles) + reusableTileCount * Max(0, FPaletteCount - 1);
+  SetLength(DS^.Dataset, DS^.KNNSize * cTileDCTSize);
+  SetLength(DS^.DatasetPtrs, DS^.KNNSize);
+  SetLength(DS^.DSToTilePalIdx, DS^.KNNSize);
 
+  pDS := @DS^.Dataset[0];
+  for dsIdx := 0 to DS^.KNNSize - 1 do
+  begin
+    DS^.DatasetPtrs[dsIdx] := pDS;
+    Inc(pDS, cTileDCTSize);
+  end;
+
+  dsIterator := -1;
   TMTPool.DoStandaloneLocalProc(@DoPsyV, 0, High(FTiles), MaxThreadCount);
+  Assert(dsIterator + 1 = DS^.KNNSize);
+
+  WriteLn('Dataset size: ', DS^.KNNSize:8);
 
   // Build KNN
 
-  DS^.ANN := ann_kdtree_short_create(PPSmallint(@DS^.Dataset[0]), DS^.KNNSize, cTileDCTSize, 32, ANN_KD_STD);
+  DS^.ANN := ann_kdtree_short_create(@DS^.DatasetPtrs[0], DS^.KNNSize, cTileDCTSize, 32, ANN_KD_STD);
 
   // Dataset is ready
 
