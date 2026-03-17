@@ -52,36 +52,32 @@ type
   // Commands Description:
   // =====================
   //
-  // PredictedTileOffsets6x6:          data -> none; commandBits -> y offset (6 bits); x offset (6 bits)
-  // PredictedTileOffsets8x8:          data -> y offset (8 bits); x offset (8 bits); commandBits -> none (10 bits); backbuffer offset - 1 (2 bits)
-  // PredictedFm1Fm2Blend6x6:          data -> none; commandBits -> alpha additive weight (256 + w) (6 bits); frame -2 to frame -1 alpha (6 bits)
-  // PredictedOffsetBlock0x0:          data -> none; commandBits -> block size in tiles - 1 (12 bits)
-  // GlobalTile10:                     data -> none; commandBits -> global tile index (10 bits); V mirror (1 bit); H mirror (1 bit)
-  // KeyFrmTile10:                     data -> none; commandBits -> keyframe tile index (10 bits); V mirror (1 bit); H mirror (1 bit)
-  // GlobalTile16:                     data -> global tile index (16 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
-  // KeyFrmTile16:                     data -> keyframe tile index (16 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
-  // GlobalTile32:                     data -> global tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
-  // KeyFrmTile32:                     data -> keyframe tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
+  // PredictedTileShortOffsets:        data -> none; commandBits -> y offset (6 bits); x offset (6 bits)
+  // PredictedTileLongOffsets:         data -> x offset (8 bits); y offset (8 bits); commandBits -> none (10 bits); backbuffer offset - 1 (2 bits)
+  // ShortTileIdxShortPalIdx:          data -> tile index (16 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
+  // LongTileIdxShortPalIdx:           data -> tile index (32 bits); commandBits -> palette index (10 bits); V mirror (1 bit); H mirror (1 bit)
+  // LongTileIdxLongPalIdx:            data -> palette index (16 bits); tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
+  // IntraTile:                        data -> palette index (16 bits); indexes per pixel (64 bytes); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
+  // SkipBlock:                        data -> none; commandBits -> skip count - 1 (12 bits)
+  // Weight:                           data -> none; commandBits -> alpha additive weight (1024 + w) (10 bits); backbuffer offset - 1 (2 bits)
   //
   // (insert new commands here...)
   //
   // FrameEnd:                         data -> none; commandBits -> none (11 bits); keyframe end (1 bit)
-  // LoadPalette:                      data -> palette index (16 bits); { RGBA bytes (32bits) } * indexes count; commandBits -> palette format (0: RGBA32) (6 bits); indexes count per palette - 1 (6 bits)
-  // TileSet:                          data -> start tile (32 bits); end tile (32 bits); { palette index (16 bits) } * count; { indexes per pixel (64 bytes) } * count; commandBits -> none (11 bits); is keyframe tileset (1 bit)
-  // SetDimensions:                    data -> width in tiles (32 bits); height in tiles (32 bits); frame length in nanoseconds (32 bits) (2^32-1: still frame); global tile count (32 bits); maximum key frame tile count (32 bits); commandBits -> none (12 bits)
+  // LoadPalette:                      data -> palette index (16 bits); { RGBA bytes (32bits) } * indexes count; commandBits -> palette format (0: RGBA32) (12 bits)
+  // TileSet:                          data -> start tile (32 bits); end tile (32 bits); { indexes per pixel (64 bytes) } * count; commandBits -> indexes count per palette
+  // SetDimensions:                    data -> width in tiles (16 bits); height in tiles (16 bits); frame length in nanoseconds (32 bits) (2^32-1: still frame); maximum tile count (32 bits); commandBits -> none
   // ExtendedCommand:                  data -> following bytes count (32 bits); custom commands, proprietary extensions, ...; commandBits -> extended command index (12 bits)
 
   TGTMCommand = (
-    gtPredictedTileOffsets6x6 = 0,
-    gtPredictedTileOffsets8x8 = 1,
-    gtPredictedFm1Fm2Blend6x6 = 2,
-    gtPredictedOffsetBlock0x0 = 3,
-    gtGlobalTile10 = 4,
-    gtKeyFrmTile10 = 5,
-    gtGlobalTile16 = 6,
-    gtKeyFrmTile16 = 7,
-    gtGlobalTile32 = 8,
-    gtKeyFrmTile32 = 9,
+    gtPredictedTileShortOffsets = 0,
+    gtPredictedTileLongOffsets = 1,
+    gtShortTileIdxShortPalIdx = 2,
+    gtLongTileIdxShortPalIdx = 3,
+    gtLongTileIdxLongPalIdx = 4,
+    gtIntraTile = 5,
+    gtSkipBlock = 6,
+    gtWeight = 7,
 
     gtFrameEnd = 11,
     gtLoadPalette = 12,
@@ -121,7 +117,7 @@ type
   TTile = packed record // /!\ update TTileHelper.CopyFrom each time this structure is changed /!\
     UseCount: Cardinal;
     TmpIndex, MergeIndex: Integer;
-    PalIdx: Integer;
+    PalIdx_Initial: Integer;
     Flags: set of (tfActive, tfHasRGBPixels, tfHasPalPixels, tfHMirror_Initial, tfVMirror_Initial);
   end;
 
@@ -159,8 +155,7 @@ type
     procedure CopyPalPixels(const APalPixels: TByteDynArray); overload;
     procedure CopyRGBPixels(const ARGBPixels: TRGBPixels); overload;
     procedure CopyRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer); overload;
-    procedure BlendRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer; AWeight: Integer);
-    procedure BlendRGBPixels(const AM1Buffer, AM2Buffer: TIntegerDynArray2; AY, AX: Integer; AAlpha: Byte; AWeight: ShortInt);
+    procedure WeightRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer; AWeight: Integer);
     procedure BlitPalPixels(const AFrameBuffer: TIntegerDynArray2; const APalette: TIntegerDynArray; AVMirror, AHMirror: Boolean; AY, AX: Integer);
     procedure BlitRGBPixels(const AFrameBuffer: TIntegerDynArray2; AVMirror, AHMirror: Boolean; AY, AX: Integer);
     procedure ClearPalPixels;
@@ -186,15 +181,16 @@ type
 
   TTileMapItem = packed record
     TileIdx: Integer; // 4
+    PalIdx: Integer; // 4
     Error: Cardinal; // 4
     Attrs: record case Boolean of // 3 * 1
       False: (MotionX, MotionY: ShortInt; MotionBackBufferOffset: Byte);
-      True: (BlendAlpha: Byte; BlendWeight: ShortInt; Dummy: Byte);
+      True: (Weight: SmallInt; WeightBackBufferOffset: Byte);
     end;
-    Flags: set of (tmfHMirror, tmfVMirror, tmfPredicted, tmfBlended); // 1
+    Flags: set of (tmfHMirror, tmfVMirror, tmfPredicted, tmfWeighted); // 1
   end;
 
-{$if SizeOf(TTileMapItem) <> 12}
+{$if SizeOf(TTileMapItem) <> 16}
   {$error misaligned SizeOf(TTileMapItem) !}
 {$endif}
 
@@ -208,11 +204,11 @@ type
   TTileMapItemHelper = record helper for TTileMapItem
   private
     function GetHMirror: Boolean;
-    function GetIsBlended: Boolean;
+    function GetIsWeighted: Boolean;
     function GetIsSmoothed: Boolean;
     function GetVMirror: Boolean;
     procedure SetHMirror(AValue: Boolean);
-    procedure SetIsBlended(AValue: Boolean);
+    procedure SetIsWeighted(AValue: Boolean);
     procedure SetVMirror(AValue: Boolean);
     function GetIsPredicted: Boolean;
     procedure SetIsPredicted(AValue: Boolean);
@@ -220,7 +216,7 @@ type
     procedure Reset(AKeepMirrors: Boolean);
 
     property IsPredicted: Boolean read GetIsPredicted write SetIsPredicted;
-    property IsBlended: Boolean read GetIsBlended write SetIsBlended;
+    property IsWeighted: Boolean read GetIsWeighted write SetIsWeighted;
     property IsSmoothed: Boolean read GetIsSmoothed;
     property HMirror: Boolean read GetHMirror write SetHMirror;
     property VMirror: Boolean read GetVMirror write SetVMirror;
@@ -332,7 +328,7 @@ type
 
     procedure GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
 
-    function PredictTileBlending(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ABuffer: TIntegerDynArray2): Cardinal;
+    function PredictTileWeight(ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ABuffer: TIntegerDynArray2): Cardinal;
     function PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray; const APenaltyLUT: TCardinalDynArray): Cardinal;
     function PredictTileIntra(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray): Cardinal;
 
@@ -655,11 +651,9 @@ const
   CGTMCommandsCount = Ord(High(TGTMCommand)) + 1;
   CGTMCommandCodeBits = round(ln(CGTMCommandsCount) / ln(2));
   CGTMCommandBits = 16 - CGTMCommandCodeBits;
-  CGTMBlendAlphaShift = 6;
-  CGTMBlendAlphaMax = (1 shl CGTMBlendAlphaShift) - 1;
-  CGTMBlendWeightBaseShift = 8;
-  CGTMBlendWeightMin = -32;
-  CGTMBlendWeightMax = 31;
+  CGTMBlendWeightBaseShift = 10;
+  CGTMBlendWeightMin = -512;
+  CGTMBlendWeightMax = 511;
 
   function CompareTileUseCountRev(Item1, Item2, UserParameter:Pointer):Integer;
   var
@@ -696,12 +690,13 @@ end;
 procedure TTileMapItemHelper.Reset(AKeepMirrors: Boolean);
 begin
   TileIdx := -1;
+  PalIdx := -1;
   Error := 0;
   Attrs.MotionX := 0;
   Attrs.MotionY := 0;
   Attrs.MotionBackBufferOffset := 0;
   IsPredicted := False;
-  IsBlended := False;
+  IsWeighted := False;
   if not AKeepMirrors then
     Flags := [];
 end;
@@ -711,16 +706,16 @@ begin
   Result := tmfHMirror in Flags;
 end;
 
-function TTileMapItemHelper.GetIsBlended: Boolean;
+function TTileMapItemHelper.GetIsWeighted: Boolean;
 begin
-  Result := tmfBlended in Flags;
+  Result := tmfWeighted in Flags;
 end;
 
 function TTileMapItemHelper.GetIsSmoothed: Boolean;
 begin
   Result := IsPredicted and
-    ((not IsBlended and (Attrs.MotionX = 0) and (Attrs.MotionY = 0) and (Attrs.MotionBackBufferOffset = 1)) or
-     (IsBlended and (Attrs.BlendAlpha = 0) and (Attrs.BlendWeight = 0)));
+    ((not IsWeighted and (Attrs.MotionX = 0) and (Attrs.MotionY = 0) and (Attrs.MotionBackBufferOffset = 1)) or
+     (IsWeighted and (Attrs.Weight = 0)));
 end;
 
 function TTileMapItemHelper.GetVMirror: Boolean;
@@ -736,12 +731,12 @@ begin
     Flags -= [tmfHMirror];
 end;
 
-procedure TTileMapItemHelper.SetIsBlended(AValue: Boolean);
+procedure TTileMapItemHelper.SetIsWeighted(AValue: Boolean);
 begin
   if AValue then
-    Flags += [tmfBlended]
+    Flags += [tmfWeighted]
   else
-    Flags -= [tmfBlended];
+    Flags -= [tmfWeighted];
 end;
 
 procedure TTileMapItemHelper.SetVMirror(AValue: Boolean);
@@ -877,7 +872,7 @@ begin
   begin
     PTile(data)^.HasPalPixels := APalPixels;
     PTile(data)^.HasRGBPixels := ARGBPixels;
-    PTile(data)^.PalIdx := -1;
+    PTile(data)^.PalIdx_Initial := -1;
     Result[i] := PTile(data);
     Inc(data, size);
   end;
@@ -939,7 +934,7 @@ begin
     FillChar(AArray[i]^, size, 0);
     AArray[i]^.HasPalPixels := HasPalPx;
     AArray[i]^.HasRGBPixels := HasRGBPx;
-    AArray[i]^.PalIdx := -1;
+    AArray[i]^.PalIdx_Initial := -1;
     Inc(data, size);
   end;
 end;
@@ -951,7 +946,7 @@ begin
 
   Result^.HasPalPixels := APalPixels;
   Result^.HasRGBPixels := ARGBPixels;
-  Result^.PalIdx := -1;
+  Result^.PalIdx_Initial := -1;
 
   if APalPixels then
     FillByte(Result^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth), 0);
@@ -996,7 +991,7 @@ begin
   end;
 end;
 
-procedure TTileHelper.BlendRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer; AWeight: Integer);
+procedure TTileHelper.WeightRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer; AWeight: Integer);
 var
   ty, tx: Integer;
 begin
@@ -1004,23 +999,7 @@ begin
   begin
     for tx := 0 to cTileWidth - 1 do
     begin
-      RGBPixels[ty, tx] := BlendRGB(AFrameBuffer[AY, AX], AWeight, CGTMBlendWeightBaseShift);
-      Inc(AX);
-    end;
-    Dec(AX, cTileWidth);
-    Inc(AY);
-  end;
-end;
-
-procedure TTileHelper.BlendRGBPixels(const AM1Buffer, AM2Buffer: TIntegerDynArray2; AY, AX: Integer; AAlpha: Byte; AWeight: ShortInt);
-var
-  ty, tx: Integer;
-begin
-  for ty := 0 to cTileWidth - 1 do
-  begin
-    for tx := 0 to cTileWidth - 1 do
-    begin
-      RGBPixels[ty, tx] := BlendRGB(AM1Buffer[AY, AX], AM2Buffer[AY, AX], AAlpha, AWeight, CGTMBlendAlphaShift, CGTMBlendWeightBaseShift);
+      RGBPixels[ty, tx] := WeightRGB(AFrameBuffer[AY, AX], AWeight, CGTMBlendWeightBaseShift);
       Inc(AX);
     end;
     Dec(AX, cTileWidth);
@@ -1169,7 +1148,7 @@ procedure TTileHelper.CopyFrom(const ATile: TTile);
 begin
   UseCount := ATile.UseCount;
   TmpIndex := ATile.TmpIndex;
-  PalIdx := ATile.PalIdx;
+  PalIdx_Initial := ATile.PalIdx_Initial;
   MergeIndex := ATile.MergeIndex;
   Active := ATile.Active;
   HMirror_Initial := ATile.HMirror_Initial;
@@ -1464,7 +1443,8 @@ begin
   AMTPool.DoLocalProc(@DoDCTs, 0, Encoder.FScreenHeight - cTileWidth);
 end;
 
-function TFrame.PredictTileBlending(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ABuffer: TIntegerDynArray2): Cardinal;
+function TFrame.PredictTileWeight(ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT;
+  const ABuffer: TIntegerDynArray2): Cardinal;
 var
   weight, bestWeight, ty, tx, col: Integer;
   err: Cardinal;
@@ -1484,7 +1464,7 @@ begin
     begin
       for tx := 0 to (cTileWidth - 1) do
       begin
-        col := BlendRGB(ABuffer[ADY, ADX], weight, CGTMBlendWeightBaseShift);
+        col := WeightRGB(ABuffer[ADY, ADX], weight, CGTMBlendWeightBaseShift);
         RGBToYUV(col, BlendCpnPixels[0, ty, tx], BlendCpnPixels[1, ty, tx], BlendCpnPixels[2, ty, tx], cDCTScale);
         Inc(ADX);
       end;
@@ -1507,9 +1487,10 @@ begin
   if not ATMI^.IsPredicted or (Result < ATMI^.Error) then
   begin
     ATMI^.IsPredicted := True;
-    ATMI^.IsBlended := True;
+    ATMI^.IsWeighted := True;
     ATMI^.Error := Result;
-    ATMI^.Attrs.BlendWeight := bestWeight;
+    ATMI^.Attrs.Weight := bestWeight;
+    ATMI^.Attrs.WeightBackBufferOffset := ABackBufferOffset;
   end
   else
   begin
@@ -1553,7 +1534,7 @@ begin
   if not ATMI^.IsPredicted or (state.Error < ATMI^.Error) then
   begin
     ATMI^.IsPredicted := True;
-    ATMI^.IsBlended := False;
+    ATMI^.IsWeighted := False;
     ATMI^.Error := state.Error;
     ATMI^.Attrs.MotionY := state.Y - ADY;
     ATMI^.Attrs.MotionX := state.X - ADX;
@@ -1609,7 +1590,7 @@ begin
   end;
 
   ATMI^.IsPredicted := True;
-  ATMI^.IsBlended := False;
+  ATMI^.IsWeighted := False;
   ATMI^.Error := PSNRToEuclidean(PSNRAcc / PSNRCnt);
   ATMI^.Attrs.MotionY := bestY - ADY;
   ATMI^.Attrs.MotionX := bestX - ADX;
@@ -1644,8 +1625,7 @@ var
     end
     else
     begin
-      if ABackBufferOffset = 1 then
-        PredictTileBlending(dy, dx, TMI, CurDCT, AFrameBuffer.GetBuffer(-1));
+      PredictTileWeight(ABackBufferOffset, dy, dx, TMI, CurDCT, AFrameBuffer.GetBuffer(-ABackBufferOffset));
       PredictTileMotion(ARadius, ABackBufferOffset, dy, dx, TMI, CurDCT, ADCTBuffer.GetBuffer(-ABackBufferOffset), PenaltyLUT);
     end;
   end;
@@ -1985,6 +1965,7 @@ var
     TMI^.TileIdx := ann_kdtree_short_search(DS^.ANN, @FTDCT[0], 0, @knnErr);
     if InRange(TMI^.TileIdx, 0, DS^.KNNSize - 1) then
     begin
+      TMI^.PalIdx := Encoder.FTiles[TMI^.TileIdx]^.PalIdx_Initial;
       knnPSNR := EuclideanToPSNR(knnErr);
     end
     else
@@ -2010,6 +1991,7 @@ var
 
         TMI^.IsPredicted := True;
         TMI^.TileIdx := -1;
+        TMI^.PalIdx := -1;
       end;
     end;
 
@@ -2018,14 +2000,14 @@ var
       // draw fb (motion predicted tile)
 
       FrontBuf := AFrameBuffer.GetBuffer;
-      if TMI^.IsBlended then
+      if TMI^.IsWeighted then
       begin
-        M1Buf := AFrameBuffer.GetBuffer(-1);
+        M1Buf := AFrameBuffer.GetBuffer(-TMI^.Attrs.WeightBackBufferOffset);
         for ty := 0 to cTileWidth - 1 do
         begin
           for tx := 0 to cTileWidth - 1 do
           begin
-            FrontBuf[dy, dx] := BlendRGB(M1Buf[dy, dx], TMI^.Attrs.BlendWeight, CGTMBlendWeightBaseShift);
+            FrontBuf[dy, dx] := WeightRGB(M1Buf[dy, dx], TMI^.Attrs.Weight, CGTMBlendWeightBaseShift);
             Inc(dx);
           end;
           Dec(dx, cTileWidth);
@@ -2048,7 +2030,7 @@ var
       // draw fb (pal tile)
 
       Tile := Encoder.FTiles[TMI^.TileIdx];
-      Tile^.BlitPalPixels(AFrameBuffer.GetBuffer, Encoder.FPalettes[Tile^.PalIdx].PaletteRGB, TMI^.VMirror, TMI^.HMirror, dy, dx);
+      Tile^.BlitPalPixels(AFrameBuffer.GetBuffer, Encoder.FPalettes[Tile^.PalIdx_Initial].PaletteRGB, TMI^.VMirror, TMI^.HMirror, dy, dx);
     end;
 
     SpinEnter(@PKeyFrame.ReconstructLock);
@@ -2266,7 +2248,7 @@ procedure TTilingEncoder.Dither;
     if not Tile^.Active then
       Exit;
 
-    DitherTile(Tile^, FPalettes[Tile^.PalIdx].MixingPlan);
+    DitherTile(Tile^, FPalettes[Tile^.PalIdx_Initial].MixingPlan);
   end;
 
 var
@@ -3554,6 +3536,8 @@ begin
 end;
 
 procedure TTilingEncoder.RenderFrame(AFrameIndex: Integer; APage: TRenderPage);
+const
+  CDrawPredictBaseLuma = $c0;
 
   procedure DrawTile(const ABuffer: TIntegerDynArray2; const APal: TIntegerDynArray; ATilePtr: PTile; ASY, ASX: Integer; AHmirror, AVmirror, AForceActive: Boolean); inline;
   var
@@ -3740,11 +3724,11 @@ begin
 
           if TMI^.IsPredicted and FRenderPredicted then
           begin
-            if TMI^.IsBlended then
-              TempTile^.BlendRGBPixels(
-                FRenderFrameBuffer.GetBuffer(-1), FRenderFrameBuffer.GetBuffer(-2),
+            if TMI^.IsWeighted then
+              TempTile^.WeightRGBPixels(
+                FRenderFrameBuffer.GetBuffer(-TMI^.Attrs.WeightBackBufferOffset),
                 sy shl cTileWidthBits, sx shl cTileWidthBits,
-                TMI^.Attrs.BlendAlpha, TMI^.Attrs.BlendWeight)
+                TMI^.Attrs.Weight)
             else
               TempTile^.CopyRGBPixels(
                 FRenderFrameBuffer.GetBuffer(-TMI^.Attrs.MotionBackBufferOffset),
@@ -3760,16 +3744,16 @@ begin
             if FRenderOutputDithered then
               if FRenderPaletteIndex < 0 then
               begin
-                if not InRange(tilePtr^.PalIdx, 0, High(FPalettes)) then
+                if not InRange(tilePtr^.PalIdx_Initial, 0, High(FPalettes)) then
                 begin
                   DrawDummyTile(FRenderFrameBuffer.GetBuffer, sy, sx);
                   Continue;
                 end;
-                pal := FPalettes[tilePtr^.PalIdx].PaletteRGB;
+                pal := FPalettes[tilePtr^.PalIdx_Initial].PaletteRGB;
               end
               else
               begin
-                if FRenderPaletteIndex <> tilePtr^.PalIdx then
+                if FRenderPaletteIndex <> tilePtr^.PalIdx_Initial then
                 begin
                   DrawDummyTile(FRenderFrameBuffer.GetBuffer, sy, sx);
                   Continue;
@@ -3819,10 +3803,10 @@ begin
 
             if TMI^.IsPredicted then
             begin
-              if TMI^.IsBlended then
+              if TMI^.IsWeighted then
               begin
                 siz := 0;
-                col := $ff - (Abs(TMI^.Attrs.BlendWeight) * 7);
+                col := CDrawPredictBaseLuma - (Abs(TMI^.Attrs.Weight) shr 2);
                 col := ToRGB(col, $ff, col);
 
                 canvas.Brush.Color := col;
@@ -3833,17 +3817,12 @@ begin
               else
               begin
                 siz := Abs(TMI^.Attrs.MotionX) + Abs(TMI^.Attrs.MotionY);
+                col := Max(0, CDrawPredictBaseLuma - siz);
 
                 if TMI^.Attrs.MotionBackBufferOffset > 1 then
-                begin
-                  col := Max(0, $c0 - siz);
-                  col := ToRGB(col, col, $ff);
-                end
+                  col := ToRGB(col, col, $ff)
                 else
-                begin
-                  col := Max(0, $ff - siz);
                   col := ToRGB($ff, col, col);
-                end;
 
                 if siz = 0 then
                 begin
@@ -3910,7 +3889,7 @@ begin
               tilePtr := Tiles[tidx];
               pal := nil;
               if FRenderOutputDithered and (Length(FPalettes) > 0) then
-                pal := FPalettes[IfThen(FRenderPaletteIndex < 0, Max(0, tilePtr^.PalIdx), FRenderPaletteIndex)].PaletteRGB;
+                pal := FPalettes[IfThen(FRenderPaletteIndex < 0, Max(0, tilePtr^.PalIdx_Initial), FRenderPaletteIndex)].PaletteRGB;
 
               hmir := tilePtr^.HMirror_Initial;
               vmir := tilePtr^.VMirror_Initial;
@@ -4503,7 +4482,7 @@ begin
     Tile := FTiles[tIdx];
     Assert(Tile^.Active);
 
-    Tile^.PalIdx := PalIdxLUT[YakmoClusters[tIdx]];
+    Tile^.PalIdx_Initial := PalIdxLUT[YakmoClusters[tIdx]];
   end;
 end;
 
@@ -4716,7 +4695,7 @@ begin
 
   DSLen := 0;
   for tIdx := 0 to High(FTiles) do
-    Inc(DSLen, sqr(cTileWidth) * Ord(FTiles[tIdx]^.PalIdx = APalIdx));
+    Inc(DSLen, sqr(cTileWidth) * Ord(FTiles[tIdx]^.PalIdx_Initial = APalIdx));
 
   if DSLen <= 0 then
     Exit;
@@ -4734,7 +4713,7 @@ begin
   begin
     Tile := FTiles[tIdx];
 
-    if Tile^.Active and (Tile^.PalIdx = APalIdx) then
+    if Tile^.Active and (Tile^.PalIdx_Initial = APalIdx) then
       for ty := 0 to cTileWidth - 1 do
         for tx := 0 to cTileWidth - 1 do
         begin
@@ -4837,7 +4816,7 @@ var
     T := Tiles[AIndex];
     Assert(T^.Active);
 
-    ConvertToCpnPixels(T^, True, False, False, False, FPalettes[T^.PalIdx].PaletteRGB, CpnPixels);
+    ConvertToCpnPixels(T^, True, False, False, False, FPalettes[T^.PalIdx_Initial].PaletteRGB, CpnPixels);
     ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsWeightedDCT, cColorCpns, @DS^.Dataset[AIndex, 0]);
   end;
 
@@ -5151,7 +5130,7 @@ procedure TTilingEncoder.LoadStream(AStream: TStream);
 var
   KFStream: TMemoryStream;
   frmIdx, frmCount: Integer;
-  rawTileIdxToTileIdx: array[Boolean{is kf?}] of TIntegerDynArray;
+  rawTileIdxToTileIdx: TIntegerDynArray;
 
   function ReadDWord: Cardinal;
   begin
@@ -5184,7 +5163,7 @@ var
     settings := KFStream.ReadAnsiString;
   end;
 
-  procedure ReadTiles(isKF: Boolean);
+  procedure ReadTiles(PaletteSize: Integer);
   var
     iRawTile, rawStartIdx, rawEndIdx, baseTileIdx, tileIdx, tileCnt: Integer;
   begin
@@ -5203,38 +5182,30 @@ var
     begin
       tileIdx := baseTileIdx + iRawTile - rawStartIdx;
 
-      FTiles[tileIdx]^.PalIdx := ReadWord;
-      FTiles[tileIdx]^.Active := True;
-      rawTileIdxToTileIdx[isKF, iRawTile] := tileIdx;
-    end;
-
-    for iRawTile := rawStartIdx to rawEndIdx do
-    begin
-      tileIdx := baseTileIdx + iRawTile - rawStartIdx;
-
       KFStream.Read(FTiles[tileIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
+      FTiles[tileIdx]^.Active := True;
+      rawTileIdxToTileIdx[iRawTile] := tileIdx;
     end;
+
+    FPaletteSize := PaletteSize;
   end;
 
   procedure ReadDimensions;
   var
     w, h, frmLen, tileCount: Integer;
   begin
-    w := ReadDWord; // frame tilemap width
-    h := ReadDWord; // frame tilemap height
+    w := ReadWord; // frame tilemap width
+    h := ReadWord; // frame tilemap height
     ReframeUI(w, h);
 
     frmLen := ReadDWord; // frame length in nanoseconds
     FFramesPerSecond := 1000*1000*1000 / frmLen;
 
-    tileCount := ReadDWord; // global tile count
-    SetLength(rawTileIdxToTileIdx[False], tileCount);
-
-    tileCount := ReadDWord; // maximum key frame tile count
-    SetLength(rawTileIdxToTileIdx[True], tileCount);
+    tileCount := ReadDWord; // maximum tile count
+    SetLength(rawTileIdxToTileIdx, tileCount);
   end;
 
-  procedure ReadPalette(palSize: Integer);
+  procedure ReadPalette;
   var
     i, palIdx: Integer;
   begin
@@ -5244,25 +5215,24 @@ var
     begin
       SetLength(FPalettes, palIdx + 1);
       for i := 0 to palIdx do
-        SetLength(FPalettes[i].PaletteRGB, palSize);
+        SetLength(FPalettes[i].PaletteRGB, FPaletteSize);
 
       FPaletteCount := Length(FPalettes);
     end;
 
-    for i := 0 to palSize - 1 do
+    for i := 0 to FPaletteSize - 1 do
       FPalettes[palIdx].PaletteRGB[i] := ReadDWord and $ffffff;
-
-    FPaletteSize := palSize;
   end;
 
-  procedure SetTMI(tileIdx: Integer; attrs: Integer; var TMI: TTileMapItem);
+  procedure SetTMI(tileIdx, palIdx: Integer; attrs: Integer; var TMI: TTileMapItem);
   begin
     TMI.TileIdx := tileIdx;
+    TMI.PalIdx := palIdx;
     TMI.HMirror := attrs and 1 <> 0;
     TMI.VMirror := attrs and 2 <> 0;
 
     TMI.IsPredicted := False;
-    TMI.IsBlended := False;
+    TMI.IsWeighted := False;
   end;
 
   function NextFrame(KF: TKeyFrame): TFrame;
@@ -5301,9 +5271,9 @@ var
   Header: TGTMHeader;
   Command, prevCommand: TGTMCommand;
   CommandData: Word;
-  b: Byte;
   loadedFrmCount, tmPos: Integer;
   tileIdx: Cardinal;
+  palIdx: Word;
   frm: TFrame;
   kf: TKeyFrame;
   TMI: PTileMapItem;
@@ -5317,8 +5287,6 @@ begin
   if Header.FourCC = 'GTMv' then
   begin
     AStream.ReadBuffer(Header, SizeOf(Header));
-    if Header.EncoderVersion <> 5 then
-      raise ETilingEncoderGTMReloadError.Create('Can only reload GTM files made with current version!');
     AStream.Seek(Header.WholeHeaderSize, soBeginning);
     frmCount := Header.FrameCount;
   end;
@@ -5359,11 +5327,11 @@ begin
           end;
           gtTileSet:
           begin
-            ReadTiles((CommandData and 1) <> 0);
+            ReadTiles(CommandData);
           end;
           gtLoadPalette:
           begin
-            ReadPalette((CommandData and 63) + 1);
+            ReadPalette;
           end;
           gtFrameEnd:
           begin
@@ -5377,7 +5345,7 @@ begin
             if (CommandData and 1) <> 0 then // keyframe end?
               Break;
           end;
-          gtPredictedOffsetBlock0x0:
+          gtSkipBlock:
           begin
             // next frame if needed
             if frm = nil then
@@ -5385,12 +5353,14 @@ begin
 
             SkipBlock(frm, CommandData + 1, tmPos);
           end;
-          gtGlobalTile10, gtGlobalTile16, gtGlobalTile32,
-          gtKeyFrmTile10, gtKeyFrmTile16, gtKeyFrmTile32:
+          gtShortTileIdxShortPalIdx, gtLongTileIdxShortPalIdx, gtLongTileIdxLongPalIdx:
           begin
-            if Command in [gtGlobalTile10, gtKeyFrmTile10] then
-              tileIdx := (CommandData shr 2) and (1 shl (CGTMCommandBits - 2) - 1)
-            else if Command in [gtGlobalTile16, gtKeyFrmTile16] then
+            if Command in [gtLongTileIdxLongPalIdx] then
+              palIdx := ReadWord
+            else
+              palIdx := (CommandData shr 2) and ((1 shl (CGTMCommandBits - 2)) - 1);
+
+            if Command in [gtShortTileIdxShortPalIdx] then
               tileIdx := ReadWord
             else
               tileIdx := ReadDWord;
@@ -5399,12 +5369,12 @@ begin
             if frm = nil then
               frm := NextFrame(kf);
 
-            tileIdx := rawTileIdxToTileIdx[Command in [gtKeyFrmTile10, gtKeyFrmTile16, gtKeyFrmTile32], tileIdx];
+            tileIdx := rawTileIdxToTileIdx[tileIdx];
 
-            SetTMI(tileIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
+            SetTMI(tileIdx, palIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
             Inc(tmPos);
           end;
-          gtPredictedTileOffsets6x6:
+          gtPredictedTileShortOffsets:
           begin
             // next frame if needed
             if frm = nil then
@@ -5412,15 +5382,14 @@ begin
 
             TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
 
-            TMI^.Attrs.MotionY := ((CommandData shr 6) and 31) - ((CommandData shr 6) and 32);
             TMI^.Attrs.MotionX := (CommandData and 31) - (CommandData and 32);
+            TMI^.Attrs.MotionY := ((CommandData shr 6) and 31) - ((CommandData shr 6) and 32);
             TMI^.Attrs.MotionBackBufferOffset := 1;
             TMI^.IsPredicted := True;
-            TMI^.IsBlended := False;
 
             Inc(tmPos);
           end;
-          gtPredictedTileOffsets8x8:
+          gtPredictedTileLongOffsets:
           begin
             // next frame if needed
             if frm = nil then
@@ -5428,32 +5397,30 @@ begin
 
             TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
 
-            b := ReadByte;
-            TMI^.Attrs.MotionY := (b and 127) - (b and 128);
-            b := ReadByte;
-            TMI^.Attrs.MotionX := (b and 127) - (b and 128);
-            TMI^.Attrs.MotionBackBufferOffset := (CommandData and 3) + 1;
+            TMI^.Attrs.MotionX := ShortInt(ReadByte);
+            TMI^.Attrs.MotionY := ShortInt(ReadByte);
+            TMI^.Attrs.MotionBackBufferOffset := CommandData + 1;
             TMI^.IsPredicted := True;
-            TMI^.IsBlended := False;
 
             Inc(tmPos);
           end;
-          gtPredictedFm1Fm2Blend6x6:
+          gtIntraTile:
           begin
+            palIdx := ReadWord;
+
+            tileIdx := Length(FTiles);
+            TTile.Array1DRealloc(FTiles, tileIdx + 1);
+
+            KFStream.Read(FTiles[tileIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
+            FTiles[tileIdx]^.Active := True;
+
             // next frame if needed
             if frm = nil then
               frm := NextFrame(kf);
 
-            TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
-
-            TMI^.Attrs.BlendWeight := ((CommandData shr CGTMBlendAlphaShift) and 31) - ((CommandData shr CGTMBlendAlphaShift) and 32);
-            TMI^.Attrs.BlendAlpha := CommandData and CGTMBlendAlphaMax;
-            TMI^.Attrs.Dummy := 0;
-            TMI^.IsPredicted := True;
-            TMI^.IsBlended := True;
-
+            SetTMI(tileIdx, palIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
             Inc(tmPos);
-          end;
+          end
 
           else
             Assert(False, 'Unknown command: ' + IntToStr(Ord(Command)) + ', commandData: ' + IntToStr(CommandData) + ', prevCommand: '+ IntToStr(Ord(prevCommand)));
@@ -5506,25 +5473,17 @@ var
     DoWord((Data shl CGTMCommandCodeBits) or Ord(Cmd));
   end;
 
-  procedure DoAltCmd(Cmd: TGTMCommand; AltCmd: TGTMCommand; IsAlt: Boolean; Data: Cardinal);
-  begin
-    if IsAlt then
-      DoCmd(AltCmd, Data)
-    else
-      DoCmd(Cmd, Data);
-  end;
-
   procedure DoTMI(const TMI: TTileMapItem);
   var
-    tileIdx, finalTileIdx: Integer;
-    attrs: Word;
-    isKeyFrameTile, isTile16, isTile32, isLongOffsets: Boolean;
+    tileIdx, finalTileIdx: Cardinal;
+    palIdx, attrs: Word;
+    isLongTile, isLongPal, isLongOffsets: Boolean;
   begin
     if TMI.IsPredicted then
     begin
-      if TMI.IsBlended then
+      if TMI.IsWeighted then
       begin
-        DoCmd(gtPredictedFm1Fm2Blend6x6, ((PByte(@TMI.Attrs.BlendWeight)^ and ((1 shl (CGTMCommandBits - CGTMBlendAlphaShift)) - 1)) shl CGTMBlendAlphaShift) or TMI.Attrs.BlendAlpha);
+        DoCmd(gtWeight, ((PWORD(@TMI.Attrs.Weight)^ and ((1 shl CGTMBlendWeightBaseShift) - 1)) shl 2) or (TMI.Attrs.WeightBackBufferOffset - 1));
       end
       else
       begin
@@ -5532,46 +5491,43 @@ var
 
         if isLongOffsets then
         begin
-          DoCmd(gtPredictedTileOffsets8x8, TMI.Attrs.MotionBackBufferOffset - 1);
-          DoByte(PByte(@TMI.Attrs.MotionY)^);
+          DoCmd(gtPredictedTileLongOffsets, TMI.Attrs.MotionBackBufferOffset - 1);
           DoByte(PByte(@TMI.Attrs.MotionX)^);
+          DoByte(PByte(@TMI.Attrs.MotionY)^);
         end
         else
         begin
-          attrs := ((PByte(@TMI.Attrs.MotionY)^ and 63) shl 6) or (PByte(@TMI.Attrs.MotionX)^ and 63);
+          attrs := (PByte(@TMI.Attrs.MotionX)^ and 63) or ((PByte(@TMI.Attrs.MotionY)^ and 63) shl 6);
 
-          DoCmd(gtPredictedTileOffsets6x6, attrs);
+          DoCmd(gtPredictedTileShortOffsets, attrs);
         end;
       end;
     end
     else
     begin
-      attrs := (Ord(TMI.VMirror) shl 1) or Ord(TMI.HMirror);
       tileIdx := Max(0, TMI.TileIdx);
+      palIdx := Max(0, TMI.PalIdx);
       finalTileIdx := Max(0, FTiles[tileIdx]^.TmpIndex);
 
-      isKeyFrameTile := finalTileIdx >= Length(globalTiles);
-      if isKeyFrameTile then
-      begin
-        finalTileIdx -= Length(globalTiles);
-        Assert(finalTileIdx >= 0);
-      end;
+      isLongTile := finalTileIdx > High(Word);
+      isLongPal := palIdx >= (1 shl (CGTMCommandBits - 2));
 
-      isTile16 := InRange(finalTileIdx, 1 shl (CGTMCommandBits - 2), High(Word));
-      isTile32 := finalTileIdx > High(Word);
+      attrs := (Ord(TMI.VMirror) shl 1) or Ord(TMI.HMirror);
 
-      if not isTile32 and not isTile16 then
+      if not isLongTile and not isLongPal then
       begin
-        DoAltCmd(gtGlobalTile10, gtKeyFrmTile10, isKeyFrameTile, attrs or (finalTileIdx shl 2));
-      end
-      else if not isTile32 then
-      begin
-        DoAltCmd(gtGlobalTile16, gtKeyFrmTile16, isKeyFrameTile, attrs);
+        DoCmd(gtShortTileIdxShortPalIdx, attrs or (palIdx shl 2));
         DoWord(finalTileIdx);
+      end
+      else if not isLongPal then
+      begin
+        DoCmd(gtLongTileIdxShortPalIdx, attrs or (palIdx shl 2));
+        DoDWord(finalTileIdx);
       end
       else
       begin
-        DoAltCmd(gtGlobalTile32, gtKeyFrmTile32, isKeyFrameTile, attrs);
+        DoCmd(gtLongTileIdxLongPalIdx, attrs);
+        DoWord(palIdx);
         DoDWord(finalTileIdx);
       end;
     end;
@@ -5583,7 +5539,7 @@ var
   begin
     for palIdx := 0 to FPaletteCount - 1 do
     begin
-      DoCmd(gtLoadPalette, (0 shl 6) or (FPaletteSize - 1));
+      DoCmd(gtLoadPalette, 0);
       DoWord(palIdx);
       for colIdx := 0 to FPaletteSize - 1 do
       begin
@@ -5599,18 +5555,15 @@ var
     end;
   end;
 
-  procedure WriteTiles(const AList: TIntegerDynArray; IsKF: Boolean; AStart: Integer = 0);
+  procedure WriteTiles(const AList: TIntegerDynArray; AStart: Integer = 0);
   var
     tlIdx: Integer;
   begin
     if Length(AList) > 0 then
     begin
-      DoCmd(gtTileSet, Ord(IsKF));
+      DoCmd(gtTileSet, FPaletteSize);
       DoDWord(AStart); // start tile
       DoDWord(AStart + High(AList)); // end tile
-
-      for tlIdx := 0 to High(AList) do
-        DoWord(Tiles[AList[tlIdx]]^.PalIdx);
 
       for tlIdx := 0 to High(AList) do
         ZStream.Write(Tiles[AList[tlIdx]]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
@@ -5623,13 +5576,12 @@ var
   begin
     maxTileCount := 0;
     for kfIdx := 0 to High(perKfTiles) do
-      maxTileCount := max(maxTileCount, Length(perKfTiles[kfIdx]));
+      maxTileCount := max(maxTileCount, Length(globalTiles) + Length(perKfTiles[kfIdx]));
 
     DoCmd(gtSetDimensions, 0);
     DoDWord(FTileMapWidth); // frame tilemap width
     DoDWord(FTileMapHeight); // frame tilemap height
     DoDWord(round(1000*1000*1000 / FFramesPerSecond)); // frame length in nanoseconds
-    DoDWord(Length(globalTiles)); // global tile count
     DoDWord(maxTileCount); // maximum keyframe tile count
   end;
 
@@ -5746,7 +5698,7 @@ begin
   FillChar(Header, SizeOf(Header), 0);
   Header.FourCC := 'GTMv';
   Header.RIFFSize := SizeOf(Header) - SizeOf(Header.FourCC) - SizeOf(Header.RIFFSize);
-  Header.EncoderVersion := 5; // 2 -> fixed blending extents; 3 -> *AddlBlendTileIdx; 4 -> PredictMotion; 5 -> Blend,Glob/KF,TilePalIdxs
+  Header.EncoderVersion := 5; // 2 -> fixed blending extents; 3 -> *AddlBlendTileIdx; 4 -> PredictMotion; 5 -> Weight
   Header.FramePixelWidth := FScreenWidth;
   Header.FramePixelHeight := FScreenHeight;
   Header.KFCount := Length(FKeyFrames);
@@ -5779,16 +5731,18 @@ begin
 
     WriteSettings;
     WriteDimensions;
-    WritePalettes;
-    WriteTiles(globalTiles, False);
+    WriteTiles(globalTiles);
 
-    bpsAcc := 0;
     LastKF := 0;
     for kfIdx := 0 to High(FKeyFrames) do
     begin
       KeyFrame := FKeyFrames[kfIdx];
 
-      WriteTiles(perKfTiles[kfIdx], True);
+      WriteTiles(perKfTiles[kfIdx], Length(globalTiles));
+
+      // paletes must always be written after at least one tileset
+      if kfIdx = 0 then
+        WritePalettes;
 
       for frmIdx := KeyFrame.StartFrame to KeyFrame.EndFrame do
       begin
@@ -5824,7 +5778,7 @@ begin
             begin
               //writeln('blk ', BlkSkipCount);
 
-              DoCmd(gtPredictedOffsetBlock0x0, BlkSkipCount - 1);
+              DoCmd(gtSkipBlock, BlkSkipCount - 1);
               Inc(cs, BlkSkipCount);
               Dec(BlkSkipCount);
             end
