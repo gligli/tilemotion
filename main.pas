@@ -56,6 +56,7 @@ type
     Label22: TLabel;
     Label4: TLabel;
     Label6: TLabel;
+    lblMaxCores1: TLabel;
     lblPct: TLabel;
     llPalTileDesc: TPanel;
     miGeneratePNGsOutput: TMenuItem;
@@ -81,6 +82,7 @@ type
     sdGTM: TSaveDialog;
     sdSettings: TSaveDialog;
     seMaxCores: TSpinEdit;
+    seReuse: TSpinEdit;
     Separator1: TMenuItem;
     Separator3: TMenuItem;
     sePSNR: TFloatSpinEdit;
@@ -93,6 +95,7 @@ type
     sePage: TSpinEdit;
     seStartFrame: TSpinEdit;
     seShotTransMinSecondsPerKF: TFloatSpinEdit;
+    tiTrackbar: TTimer;
     tsTilesPal: TTabSheet;
     To1: TLabel;
     tsSettings: TTabSheet;
@@ -151,12 +154,15 @@ type
     procedure miSaveSettingsClick(Sender: TObject);
     procedure seMaxTilesEditingDone(Sender: TObject);
     procedure seQbTilesEditingDone(Sender: TObject);
+    procedure tbFrameChange(Sender: TObject);
+    procedure tiTrackbarTimer(Sender: TObject);
     procedure UpdateVideo(Sender: TObject);
     procedure UpdateGUI(Sender: TObject);
   private
     FLastIOTabSheet: TTabSheet;
     FTilingEncoder: TTilingEncoder;
     FLockChanges: Boolean;
+    FTrackbarTickCount: Integer;
 
     procedure TilingEncoderProgress(ASender: TTilingEncoder; APosition, AMax: Integer; AHourGlass: Boolean);
     procedure LoadGUISettings;
@@ -222,16 +228,6 @@ var
   i: Integer;
 begin
   FTilingEncoder.Run(esLoad);
-  seMaxTiles.Value := FTilingEncoder.GlobalTilingTileCount;
-
-  tbFrame.HandleNeeded;
-  tbFrame.TickStyle := tsNone;
-  tbFrame.TickStyle := tsManual;
-  for i := 0 to FTilingEncoder.FrameCount - 1 do
-    if Assigned(FTilingEncoder.Frames[i]) and Assigned(FTilingEncoder.Frames[i].PKeyFrame) and
-        (FTilingEncoder.Frames[i].Index = FTilingEncoder.Frames[i].PKeyFrame.StartFrame) then
-      tbFrame.SetTick(i);
-
   UpdateVideo(nil);
 end;
 
@@ -435,8 +431,9 @@ procedure TMainForm.btnRunAllClick(Sender: TObject);
 var
   firstStep: TEncoderStep;
   lastStep: TEncoderStep;
-
 begin
+  btnRunAll.SetFocus;
+
   firstStep := TEncoderStep(cbxStartStep.ItemIndex);
   lastStep := TEncoderStep(cbxEndStep.ItemIndex);
 
@@ -567,7 +564,14 @@ begin
       Exit;
     end;
 
-    tbFrame.Position := tbFrame.Position + 1;
+    FLockChanges := True;
+    try
+      tbFrame.Position := tbFrame.Position + 1;
+    finally
+      FLockChanges := False;
+    end;
+
+    UpdateVideo(nil);
   end;
 end;
 
@@ -608,6 +612,21 @@ begin
   UpdateGUI(Sender);
 end;
 
+procedure TMainForm.tbFrameChange(Sender: TObject);
+begin
+  if FLockChanges then
+    Exit;
+
+  tiTrackbar.Enabled := False;
+  tiTrackbar.Enabled := True;
+end;
+
+procedure TMainForm.tiTrackbarTimer(Sender: TObject);
+begin
+  tiTrackbar.Enabled := False;
+  UpdateVideo(nil);
+end;
+
 procedure TMainForm.UpdateVideo(Sender: TObject);
 begin
   UpdateGUI(Sender);
@@ -625,6 +644,7 @@ end;
 
 procedure TMainForm.UpdateGUI(Sender: TObject);
 var
+  i: Integer;
   prevCursor: TCursor;
 begin
   if FLockChanges then
@@ -692,6 +712,8 @@ begin
       FTilingEncoder.RenderPage := rpNone;
     end;
 
+    FTilingEncoder.ReconstructReuseMinUseCount := seReuse.Value;
+
     FTilingEncoder.MaxThreadCount := seMaxCores.Value;
 
     sedPalIdx.MaxValue := FTilingEncoder.PaletteCount - 1;
@@ -704,6 +726,17 @@ begin
     seQbTiles.Enabled := rbTileLimit.Checked;
     seMaxTiles.Enabled := rbTileLimit.Checked;
     tbFrame.PageSize := Round(FTilingEncoder.FramesPerSecond);
+
+    if FTrackbarTickCount <> FTilingEncoder.KeyFrameCount then
+    begin
+      tbFrame.HandleNeeded;
+      tbFrame.TickStyle := tsNone;
+      tbFrame.TickStyle := tsManual;
+      for i := 0 to FTilingEncoder.KeyFrameCount - 1 do
+          tbFrame.SetTick(FTilingEncoder.KeyFrames[i].StartFrame);
+      FTrackbarTickCount := FTilingEncoder.KeyFrameCount;
+    end;
+
   finally
     Screen.Cursor := prevCursor;
   end;
@@ -756,6 +789,8 @@ begin
    seShotTransMinSecondsPerKF.Value := FTilingEncoder.ShotTransMinSecondsPerKF;
    seShotTransMaxSecondsPerKF.Value := FTilingEncoder.ShotTransMaxSecondsPerKF;
    seShotTransCorrelLoThres.Value := FTilingEncoder.ShotTransCorrelLoThres;
+
+   seReuse.Value := FTilingEncoder.ReconstructReuseMinUseCount;
   finally
     FLockChanges := False;
   end;
@@ -781,6 +816,8 @@ begin
   Constraints.MinHeight := Height;
   Constraints.MinWidth := Width;
   pcPages.ActivePage := tsSettings;
+
+  FTrackbarTickCount := -1;
 
   FLockChanges := True;
   try
