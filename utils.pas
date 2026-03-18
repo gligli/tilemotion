@@ -21,6 +21,7 @@ const
   cBlueMul = 114;
 
   cChromaWeight = 1.0;
+  cDCTDeviationWeight = 0.5;
 
   CRandomSeed = $42381337;
 
@@ -206,6 +207,7 @@ function ComparePaletteUseCount(Item1,Item2,UserParameter:Pointer):Integer;
 function QuickTestEuclideanDCTPtr(pa, pb: PDCTScalar; min_dist: Cardinal): Boolean;
 function QuickTestEuclideanDCTPtr_asm(pa_rcx, pb_rdx: PDCTScalar; min_dist_r8: Cardinal): Boolean; register; assembler;
 function ApplyMotionPredictionPenalty(ox, oy, dx, dy, backBufOff: Integer): Cardinal;
+function ApplyWeightPredictionPenalty(weight, backBufOff: Integer): Cardinal;
 procedure CribbleEuclideanDCTPtr(cur: PDCTScalar; prev: PDCTScalar; state: PDCTCribbleState; oy: Integer);
 procedure CribbleEuclideanDCTPtr_asm(cur_rcx: PDCTScalar; prev_rdx: PDCTScalar; state_r8: PDCTCribbleState; oy_r9: Integer); register; assembler;
 generic function DCTInner<T>(pCpn, pLut: T; count: Integer): Double;
@@ -816,6 +818,11 @@ begin
   // apply a penalty of the euclidean distance to the center
   // rationale: slightly favoring the center in case of ties improves compressibility
   Result := (Sqr(ox - dx) + Sqr(oy - dy)) * backBufOff;
+end;
+
+function ApplyWeightPredictionPenalty(weight, backBufOff: Integer): Cardinal;
+begin
+  Result := Sqr(weight) * backBufOff;
 end;
 
 procedure CribbleEuclideanDCTPtr(cur: PDCTScalar; prev: PDCTScalar; state: PDCTCribbleState; oy: Integer);

@@ -1419,6 +1419,7 @@ end;
 type
   TPowellBlendData = record
     DX, DY: Integer;
+    BackBufferOffset: Integer;
     DCT: TDCT;
     FrameBuffer: TIntegerDynArray2;
   end;
@@ -1452,6 +1453,8 @@ begin
   Encoder.ComputeCpnPixelsPsyVisFeatures(BlendCpnPixels, pvsWeightedDCT, cColorCpns, BlendDCT);
 
   Result := CompareEuclideanDCTPtr_asm(pbData^.DCT, BlendDCT);
+
+  Result += ApplyWeightPredictionPenalty(weight, pbData^.BackBufferOffset);
 end;
 
 procedure TFrame.GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
@@ -1501,9 +1504,10 @@ var
 begin
   Assert(InRange(ABackBufferOffset, 1, Encoder.MotionPredictMaxBufferedFrames));
 
-  pbData.DCT := ADCT;
   pbData.DX := ADX;
   pbData.DY := ADY;
+  pbData.BackBufferOffset := ABackBufferOffset;
+  pbData.DCT := ADCT;
   pbData.FrameBuffer := ABuffer;
 
   X := [0.0];
@@ -2012,6 +2016,7 @@ var
 
         TMI^.Error := knnErr;
         TMI^.IsPredicted := False;
+        FillChar(TMI^.Attrs, SizeOf(TMI^.Attrs), 0);
       end;
       EqualsValue, // motion prediction has priority in case of ties (less bitrate)
       LessThanValue:
@@ -3281,7 +3286,7 @@ begin
         z := Abs(zMean[cpn] - pDCT[pSnake^ * ColorCpns]);
 
         if Mode in [pvsWeightedDCT, pvsWeightedSpeDCT] then
-           z *= cDCTWeights[cpn, v, u];
+           z *= cDCTWeights[cpn, v, u] * cDCTDeviationWeight;
 
         pDCT[pSnake^ * ColorCpns] := Round(z);
         Inc(pSnake);
@@ -3566,7 +3571,7 @@ end;
 
 procedure TTilingEncoder.RenderFrame(AFrameIndex: Integer; APage: TRenderPage);
 const
-  CDrawPredictBaseLuma = $c0;
+  CDrawPredictBaseLuma = $ff;
 
   procedure DrawTile(const ABuffer: TIntegerDynArray2; const APal: TIntegerDynArray; ATilePtr: PTile; ASY, ASX: Integer; AHmirror, AVmirror, AForceActive: Boolean); inline;
   var
@@ -3832,7 +3837,14 @@ begin
 
             if TMI^.IsPredicted then
             begin
-              if TMI^.IsWeighted then
+              if TMI^.IsSmoothed then
+              begin
+                canvas.Brush.Color := clWhite;
+                canvas.FrameRect(
+                  (sx shl cTileWidthBits) - 3 + off, (sy shl cTileWidthBits) - 3 + off,
+                  (sx shl cTileWidthBits) + 3 + off, (sy shl cTileWidthBits) + 3 + off);
+              end
+              else if TMI^.IsWeighted then
               begin
                 siz := 0;
                 col := CDrawPredictBaseLuma - (Abs(TMI^.Attrs.Weight) shr 2);
