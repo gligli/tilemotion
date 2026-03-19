@@ -59,7 +59,7 @@ type
   // LongTileIdxLongPalIdx:            data -> palette index (16 bits); tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
   // IntraTile:                        data -> palette index (16 bits); indexes per pixel (64 bytes); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
   // SkipBlock:                        data -> none; commandBits -> skip count - 1 (12 bits)
-  // Weight:                           data -> none; commandBits -> alpha additive weight (1024 + w) (10 bits); backbuffer offset - 1 (2 bits)
+  // PredictedWeight:                  data -> none; commandBits -> alpha additive weight (1024 + w) (10 bits); backbuffer offset - 1 (2 bits)
   //
   // (insert new commands here...)
   //
@@ -77,7 +77,7 @@ type
     gtLongTileIdxLongPalIdx = 4,
     gtIntraTile = 5,
     gtSkipBlock = 6,
-    gtWeight = 7,
+    gtPredictedWeight = 7,
 
     gtFrameEnd = 11,
     gtLoadPalette = 12,
@@ -665,8 +665,8 @@ const
   CGTMCommandCodeBits = round(ln(CGTMCommandsCount) / ln(2));
   CGTMCommandBits = 16 - CGTMCommandCodeBits;
   CGTMBlendWeightBaseShift = 10;
-  CGTMBlendWeightMin = -512;
   CGTMBlendWeightMax = 511;
+  CGTMBlendWeightMin = -CGTMBlendWeightMax - 1;
 
   function CompareTileUseCountRev(Item1, Item2, UserParameter:Pointer):Integer;
   var
@@ -5220,7 +5220,7 @@ end;
 procedure TTilingEncoder.LoadStream(AStream: TStream);
 var
   KFStream: TMemoryStream;
-  frmIdx, frmCount: Integer;
+  frmIdx, kfIdx, loadedFrmCount: Integer;
   rawTileIdxToTileIdx: TIntegerDynArray;
 
   function ReadDWord: Cardinal;
@@ -5335,10 +5335,21 @@ var
     Result.FrameTiles := TTile.Array1DNew(FTileMapSize, True, False);
     Result.CompressFrameTiles;
 
-    SetLength(FFrames, frmIdx + 1);
+    if frmIdx >= Length(FFrames) then
+      SetLength(FFrames, frmIdx + 1);
     FFrames[frmIdx] := Result;
 
-    Write(Length(FFrames):8, ' / ', frmCount:8, #13);
+    Write(frmIdx + 1:8, ' / ', Length(FFrames):8, #13);
+  end;
+
+  function NextKeyFrame: TKeyFrame;
+  begin
+    Inc(kfIdx);
+    Result := TKeyFrame.Create(Self, kfIdx, loadedFrmCount, -1);
+
+    if kfIdx >= Length(FKeyFrames) then
+      SetLength(FKeyFrames, kfIdx + 1);
+    FKeyFrames[kfIdx] := Result;
   end;
 
   procedure SkipBlock(frm: TFrame; SkipCount: Integer; var tmPos: Integer);
@@ -5362,7 +5373,7 @@ var
   Header: TGTMHeader;
   Command, prevCommand: TGTMCommand;
   CommandData: Word;
-  loadedFrmCount, tmPos: Integer;
+  tmPos: Integer;
   tileIdx: Cardinal;
   palIdx: Word;
   frm: TFrame;
@@ -5374,18 +5385,21 @@ begin
   AStream.ReadBuffer(Header, SizeOf(Header.FourCC));
   AStream.Seek(0, soBeginning);
 
-  frmCount := -1;
   if Header.FourCC = 'GTMv' then
   begin
     AStream.ReadBuffer(Header, SizeOf(Header));
     AStream.Seek(Header.WholeHeaderSize, soBeginning);
-    frmCount := Header.FrameCount;
+
+    SetLength(FKeyFrames, Header.KFCount);
+    SetLength(FFrames, Header.FrameCount);
   end;
 
   ClearAll(True);
 
+  kf := nil;
   frm := nil;
   frmIdx := -1;
+  kfIdx := -1;
   loadedFrmCount := 0;
   KFStream := TMemoryStream.Create;
   try
@@ -5394,10 +5408,7 @@ begin
       LZDecompress(AStream, KFStream);
       KFStream.Seek(0,soBeginning);
 
-      // add a keyframe
-      SetLength(FKeyFrames, Length(FKeyFrames) + 1);
-      kf := TKeyFrame.Create(Self, High(FKeyFrames), loadedFrmCount, -1);
-      FKeyFrames[High(FKeyFrames)] := kf;
+      kf := NextKeyFrame;
 
       prevCommand := gtExtendedCommand;
       tmPos := 0;
@@ -5490,7 +5501,7 @@ begin
 
             TMI^.Attrs.MotionX := ShortInt(ReadByte);
             TMI^.Attrs.MotionY := ShortInt(ReadByte);
-            TMI^.Attrs.MotionBackBufferOffset := CommandData + 1;
+            TMI^.Attrs.MotionBackBufferOffset := (CommandData and 3) + 1;
             TMI^.IsPredicted := True;
 
             Inc(tmPos);
@@ -5511,7 +5522,22 @@ begin
 
             SetTMI(tileIdx, palIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
             Inc(tmPos);
-          end
+          end;
+          gtPredictedWeight:
+          begin
+            // next frame if needed
+            if frm = nil then
+              frm := NextFrame(kf);
+
+            TMI := @frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth];
+
+            TMI^.Attrs.Weight := ((CommandData shr 2) and CGTMBlendWeightMax) - ((CommandData shr 2) and -CGTMBlendWeightMin);
+            TMI^.Attrs.WeightBackBufferOffset := (CommandData and 3) + 1;
+            TMI^.IsPredicted := True;
+            TMI^.IsWeighted := True;
+
+            Inc(tmPos);
+          end;
 
           else
             Assert(False, 'Unknown command: ' + IntToStr(Ord(Command)) + ', commandData: ' + IntToStr(CommandData) + ', prevCommand: '+ IntToStr(Ord(prevCommand)));
@@ -5574,7 +5600,7 @@ var
     begin
       if TMI.IsWeighted then
       begin
-        DoCmd(gtWeight, ((PWORD(@TMI.Attrs.Weight)^ and ((1 shl CGTMBlendWeightBaseShift) - 1)) shl 2) or (TMI.Attrs.WeightBackBufferOffset - 1));
+        DoCmd(gtPredictedWeight, ((PWORD(@TMI.Attrs.Weight)^ and ((1 shl CGTMBlendWeightBaseShift) - 1)) shl 2) or (TMI.Attrs.WeightBackBufferOffset - 1));
       end
       else
       begin
@@ -5670,8 +5696,8 @@ var
       maxTileCount := max(maxTileCount, Length(globalTiles) + Length(perKfTiles[kfIdx]));
 
     DoCmd(gtSetDimensions, 0);
-    DoDWord(FTileMapWidth); // frame tilemap width
-    DoDWord(FTileMapHeight); // frame tilemap height
+    DoWord(FTileMapWidth); // frame tilemap width
+    DoWord(FTileMapHeight); // frame tilemap height
     DoDWord(round(1000*1000*1000 / FFramesPerSecond)); // frame length in nanoseconds
     DoDWord(maxTileCount); // maximum keyframe tile count
   end;
