@@ -13,7 +13,8 @@ uses
 const
   // tweakable constants
 
-  cPsyVEpsilon = 1e-6;
+  cPSNRPrecision = 1e-6;
+  cPSNREpsilon = 0.1;
   cYakmoMaxIterations = 1000;
 
   cRedMul = 299;

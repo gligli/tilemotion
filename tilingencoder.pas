@@ -1958,8 +1958,6 @@ begin
 end;
 
 procedure TFrame.Reconstruct(AMTPool: TMTPool; ARadius: Integer; AFrameBuffer: TFrameBuffer);
-const
-  cPSNREpsilon = 0.1;
 var
   DS: PTilingDataset;
 
@@ -4158,7 +4156,7 @@ begin
       assert(YUVToRGB(y, u, v, 1.0) <> YUVToRGB(y, u, v, 2.0), 'YUVToRGB scale failure');
     end;
 
-    assert(SameValue(i, PSNRToEuclidean(EuclideanToPSNR(i)), PSNRToEuclidean(cBestPSNR - cPsyVEpsilon)), 'EuclideanToPSNR/PSNRToEuclidean mismatch');
+    assert(SameValue(i, PSNRToEuclidean(EuclideanToPSNR(i)), PSNRToEuclidean(cBestPSNR - cPSNRPrecision)), 'EuclideanToPSNR/PSNRToEuclidean mismatch');
   end;
 
   T := TTile.New(True, False);
@@ -4328,7 +4326,7 @@ begin
       end;
   end;
 
-  meanErr := meanErr div (Length(FFrames) * FTileMapSize);
+  meanErr := iDivDef(meanErr, Length(FFrames) * FTileMapSize - GRData^.UnpredictedTileCount, 0);
   GRData^.MeanPSNR := EuclideanToPSNR(meanErr);
 
   WriteLn('Threshold: ', x:9:3, ', Mean PSNR: ', GRData^.MeanPSNR:9:3, ', TileCount: ', GRData^.UnpredictedTileCount:8);
@@ -4346,7 +4344,7 @@ begin
   GRData.OnTileCount := True;
   GRData.MeanPSNR := 0;
   GRData.UnpredictedTileCount := 0;
-  GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, ATileCount, cPsyVEpsilon, 0.5, @GRData);
+  GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, ATileCount, cPSNRPrecision, 0.5, @GRData);
   Result := GRData.UnpredictedTileCount;
 end;
 
@@ -4357,7 +4355,7 @@ begin
   GRData.OnTileCount := False;
   GRData.MeanPSNR := 0;
   GRData.UnpredictedTileCount := 0;
-  GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, AAvgPSNR, cPsyVEpsilon, 0.01, @GRData);
+  GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, AAvgPSNR, cPSNRPrecision, 0.01, @GRData);
   Result := GRData.UnpredictedTileCount;
 end;
 
