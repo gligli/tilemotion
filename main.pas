@@ -224,8 +224,6 @@ begin
 end;
 
 procedure TMainForm.btnGlobalLoadClick(Sender: TObject);
-var
-  i: Integer;
 begin
   FTilingEncoder.Run(esLoad);
   UpdateVideo(nil);

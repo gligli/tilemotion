@@ -4104,7 +4104,7 @@ begin
   DitheringUseThomasKnoll := True;
   DitheringYliluoma2MixedColors := 4;
 
-  ReconstructReuseMinUseCount := 2;
+  ReconstructReuseMinUseCount := 4;
 
   ShotTransMaxSecondsPerKF := 15.0;  // maximum seconds between keyframes
   ShotTransMinSecondsPerKF := 1.0;  // minimum seconds between keyframes
@@ -4920,7 +4920,7 @@ begin
   TMTPool.DoStandaloneLocalProc(@DoPsyV, 0, High(FTiles), MaxThreadCount);
   Assert(dsIterator + 1 = DS^.KNNSize);
 
-  WriteLn('Dataset size: ', DS^.KNNSize:8, ' , (', DS^.KNNSize / Length(FTiles):4:3, 'x)');
+  WriteLn('Dataset size: ', DS^.KNNSize:8, ', (', DS^.KNNSize / Length(FTiles):4:3, 'x)');
 
   // Build KNN
 
@@ -5004,7 +5004,7 @@ begin
 
   // sort tiles
 
-  QuickSort(Tiles[0], 0, High(Tiles), SizeOf(PTile), @CompareTileUseCountRev, Pointer(Ord(OnRGBPixels)));
+  QuickSort(Tiles[0], 0, High(Tiles), SizeOf(PTile), @CompareTileUseCountRev, Pointer(PtrInt(OnRGBPixels)));
 
   for tidx := 0 to High(Tiles) do
     IdxMap[Tiles[tidx]^.TmpIndex] := tidx;
@@ -5246,10 +5246,8 @@ var
   end;
 
   procedure ReadSettings;
-  var
-    settings: AnsiString;
   begin
-    settings := KFStream.ReadAnsiString;
+    KFStream.ReadAnsiString;
   end;
 
   procedure ReadTiles(PaletteSize: Integer);
@@ -5848,6 +5846,7 @@ begin
     WriteDimensions;
     WriteTiles(globalTiles);
 
+    bpsAcc := 0;
     LastKF := 0;
     for kfIdx := 0 to High(FKeyFrames) do
     begin

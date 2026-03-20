@@ -63,6 +63,9 @@
             <LinkSmart Value="True"/>
           </Linking>
           <Other>
+            <Verbosity>
+              <ShowHints Value="False"/>
+            </Verbosity>
             <CompilerMessages>
               <IgnoredMessages idx7122="True" idx7121="True" idx6058="True" idx5044="True" idx5024="True"/>
             </CompilerMessages>
@@ -108,6 +111,7 @@
           </Linking>
           <Other>
             <Verbosity>
+              <ShowHints Value="False"/>
               <ShowAll Value="True"/>
             </Verbosity>
             <CompilerMessages>
@@ -166,6 +170,7 @@
           </Linking>
           <Other>
             <Verbosity>
+              <ShowHints Value="False"/>
               <ShowAll Value="True"/>
             </Verbosity>
             <CompilerMessages>
@@ -278,6 +283,9 @@
       </Debugging>
     </Linking>
     <Other>
+      <Verbosity>
+        <ShowHints Value="False"/>
+      </Verbosity>
       <CompilerMessages>
         <IgnoredMessages idx7122="True" idx7121="True" idx6058="True" idx5044="True" idx5024="True"/>
       </CompilerMessages>
