@@ -19,7 +19,7 @@ type
   TPsyVisMode = (pvsDCT, pvsWeightedDCT, pvsSpeDCT, pvsWeightedSpeDCT);
 
 const
-  cEncoderStepLen: array[TEncoderStep] of Integer = ({esAll} -1, {esLoad} 5, {esPredict} 1, {esReduce} 3, {esPreparePalettes} 4, {esDither} 2, {esReindex1} 3, {esReconstruct} 2, {esReindex2} 3, {esSave} 1);
+  cEncoderStepLen: array[TEncoderStep] of Integer = ({esAll} -1, {esLoad} 5, {esPredict} 1, {esReduce} 3, {esPreparePalettes} 3, {esDither} 2, {esReindex1} 3, {esReconstruct} 2, {esReindex2} 3, {esSave} 1);
 
 type
   // GliGli's TileMotion header structs and commands
@@ -548,7 +548,7 @@ type
     procedure MakeTilesUnique(OnRGBPixels: Boolean);
     procedure InitMergeTiles;
     procedure FinishMergeTiles;
-    procedure MergeTiles(const TileIndexes: array of Int64; TileCount: Integer; BestIdx: Int64; NewTile: PPalPixels; NewTileRGB: PRGBPixels);
+    procedure MergeTiles(const TileIndexes: TIntegerDynArray; TileCount: Integer; BestTileIdx: Int64);
 
     procedure RenderFrame(AFrameIndex: Integer; APage: TRenderPage);
 
@@ -4495,7 +4495,7 @@ begin
         yakmo_set_num_threads(MaxThreadCount);
 
         yakmo_load_train_data_weighted(Yakmo, Length(YakmoDataset), cTileDCTSize, PPDouble(@YakmoDataset[0]), @YakmoWeights[0]);
-        SetLength(YakmoDataset, 0); // free up some memmory
+        SetLength(YakmoDataset, 0); // free up some memory
         yakmo_train_on_data(Yakmo, @YakmoClusters[0]);
       finally
         yakmo_destroy(Yakmo);
@@ -5053,7 +5053,7 @@ procedure TTilingEncoder.MakeTilesUnique(OnRGBPixels: Boolean);
 var
   sortIdx, pos, firstSameIdx: Int64;
   sortList: TFPList;
-  sameIdx: array of Int64;
+  sameIdx: TIntegerDynArray;
 
   procedure DoOneMerge;
   var
@@ -5063,7 +5063,7 @@ var
     begin
       for j := firstSameIdx to sortIdx - 1 do
         sameIdx[j - firstSameIdx] := PTile(sortList[j])^.TmpIndex;
-      MergeTiles(sameIdx, sortIdx - firstSameIdx, sameIdx[0], nil, nil);
+      MergeTiles(sameIdx, sortIdx - firstSameIdx, sameIdx[0]);
     end;
     firstSameIdx := sortIdx;
   end;
@@ -5118,33 +5118,23 @@ begin
   end;
 end;
 
-procedure TTilingEncoder.MergeTiles(const TileIndexes: array of Int64; TileCount: Integer; BestIdx: Int64;
-  NewTile: PPalPixels; NewTileRGB: PRGBPixels);
+procedure TTilingEncoder.MergeTiles(const TileIndexes: TIntegerDynArray; TileCount: Integer; BestTileIdx: Int64);
 var
   i: Integer;
-  tidx: Int64;
+  tidx: Integer;
 begin
-  if TileCount <= 0 then
-    Exit;
-
-  if Assigned(NewTile) then
-    FTiles[BestIdx]^.CopyPalPixels(NewTile^);
-
-  if Assigned(NewTileRGB) then
-    FTiles[BestIdx]^.CopyRGBPixels(NewTileRGB^);
-
   for i := 0 to TileCount - 1 do
   begin
     tidx := TileIndexes[i];
 
-    if tidx = BestIdx then
+    if tidx = BestTileIdx then
       Continue;
 
-    Inc(FTiles[BestIdx]^.UseCount, FTiles[tidx]^.UseCount);
+    Inc(FTiles[BestTileIdx]^.UseCount, FTiles[tidx]^.UseCount);
 
     FTiles[tidx]^.Active := False;
     FTiles[tidx]^.UseCount := 0;
-    FTiles[tidx]^.MergeIndex := BestIdx;
+    FTiles[tidx]^.MergeIndex := BestTileIdx;
 
     FTiles[tidx]^.ClearPixels;
   end;
