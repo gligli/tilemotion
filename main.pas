@@ -796,6 +796,7 @@ end;
 
 procedure TMainForm.FormCreate(Sender: TObject);
 var
+  pvs: TPsyVisMode;
   es: TEncoderStep;
   ver: TFileVersionInfo;
 begin
@@ -826,6 +827,9 @@ begin
     end;
     cbxStartStep.ItemIndex := Ord(Succ(Low(TEncoderStep)));
     cbxEndStep.ItemIndex := Ord(High(TEncoderStep));
+
+    for pvs := Low(TPsyVisMode) to High(TPsyVisMode) do
+      cbxDitheringMode.AddItem(Copy(GetEnumName(TypeInfo(TPsyVisMode), Ord(pvs)), 4), TObject(PtrInt(Ord(pvs))));
 
     seMaxCores.MaxValue := NumberOfProcessors + QuarterNumberOfProcessors;
   finally

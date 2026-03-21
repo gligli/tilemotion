@@ -444,12 +444,6 @@ object MainForm: TMainForm
         Width = 129
         DropDownCount = 20
         ItemHeight = 15
-        Items.Strings = (
-          'DCT'
-          'Weighted DCT'
-          'Special DCT'
-          'Spe. Wgt. DCT'
-        )
         Style = csDropDownList
         TabOrder = 19
         OnChange = UpdateGUI

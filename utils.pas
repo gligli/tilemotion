@@ -22,7 +22,6 @@ const
   cBlueMul = 114;
 
   cChromaWeight = 1.0;
-  cDCTDeviationWeight = 0.5;
 
   CRandomSeed = $42381337;
 
@@ -36,8 +35,8 @@ const
   cTileWidthBits = 3;
   cTileWidth = 1 shl cTileWidthBits;
   cColorCpns = 3;
-  cTileDCTSize = cColorCpns * sqr(cTileWidth) * 2;
-  cUnrolledDCTSize = sqr(sqr(cTileWidth));
+  cTileDCTSize = cColorCpns * sqr(cTileWidth);
+  cUnrolledDCTSize = cTileDCTSize * sqr(cTileWidth);
   cPhi = (1 + sqrt(5)) / 2;
   cInvPhi = 1 / cPhi;
 
@@ -70,7 +69,7 @@ const
   // from: https://gitlab.xiph.org/xiph/daala/-/blob/gitlab-ci/tools/dump_psnrhvs.c?ref_type=heads
   lw = cColorCpns - cChromaWeight * 2.0;
   cw = cChromaWeight;
-  cDCTWeights: array[0..cColorCpns-1{YUV}, 0..7, 0..7] of Double = (
+  cPSNRWeights: array[0..cColorCpns-1{YUV}, 0..7, 0..7] of Double = (
     ((1.6193873005 * lw, 2.2901594831 * lw, 2.08509755623 * lw, 1.48366094411 * lw, 1.00227514334 * lw, 0.678296995242 * lw, 0.466224900598 * lw, 0.3265091542 * lw),
      (2.2901594831 * lw, 1.94321815382 * lw, 2.04793073064 * lw, 1.68731108984 * lw, 1.2305666963 * lw, 0.868920337363 * lw, 0.61280991668 * lw, 0.436405793551 * lw),
      (2.08509755623 * lw, 2.04793073064 * lw, 1.34329019223 * lw, 1.09205635862 * lw, 0.875748795257 * lw, 0.670882927016 * lw, 0.501731932449 * lw, 0.372504254596 * lw),
@@ -97,6 +96,43 @@ const
      (0.593906509971 * cw, 0.802254508198 * cw, 0.706020324706 * cw, 0.587716619023 * cw, 0.478717061273 * cw, 0.393021669543 * cw, 0.330555063063 * cw, 0.285345396658 * cw))
   );
 
+
+  cQ = 16;
+  cJPEGWeights: array[0..cColorCpns-1{YUV}, 0..7, 0..7] of Double = (
+    (
+      // Luma
+      (cQ / 16, cQ /  11, cQ /  10, cQ /  16, cQ /  24, cQ /  40, cQ /  51, cQ /  61),
+      (cQ / 12, cQ /  12, cQ /  14, cQ /  19, cQ /  26, cQ /  58, cQ /  60, cQ /  55),
+      (cQ / 14, cQ /  13, cQ /  16, cQ /  24, cQ /  40, cQ /  57, cQ /  69, cQ /  56),
+      (cQ / 14, cQ /  17, cQ /  22, cQ /  29, cQ /  51, cQ /  87, cQ /  80, cQ /  62),
+      (cQ / 18, cQ /  22, cQ /  37, cQ /  56, cQ /  68, cQ / 109, cQ / 103, cQ /  77),
+      (cQ / 24, cQ /  35, cQ /  55, cQ /  64, cQ /  81, cQ / 104, cQ / 113, cQ /  92),
+      (cQ / 49, cQ /  64, cQ /  78, cQ /  87, cQ / 103, cQ / 121, cQ / 120, cQ / 101),
+      (cQ / 72, cQ /  92, cQ /  95, cQ /  98, cQ / 112, cQ / 100, cQ / 103, cQ /  99)
+    ),
+    (
+      // U, weighted by luma importance
+      (cQ / 17, cQ /  18, cQ /  24, cQ /  47, cQ /  99, cQ /  99, cQ /  99, cQ /  99),
+      (cQ / 18, cQ /  21, cQ /  26, cQ /  66, cQ /  99, cQ /  99, cQ /  99, cQ / 112),
+      (cQ / 24, cQ /  26, cQ /  56, cQ /  99, cQ /  99, cQ /  99, cQ / 112, cQ / 128),
+      (cQ / 47, cQ /  66, cQ /  99, cQ /  99, cQ /  99, cQ / 112, cQ / 128, cQ / 144),
+      (cQ / 99, cQ /  99, cQ /  99, cQ /  99, cQ / 112, cQ / 128, cQ / 144, cQ / 160),
+      (cQ / 99, cQ /  99, cQ /  99, cQ / 112, cQ / 128, cQ / 144, cQ / 160, cQ / 176),
+      (cQ / 99, cQ /  99, cQ / 112, cQ / 128, cQ / 144, cQ / 160, cQ / 176, cQ / 192),
+      (cQ / 99, cQ / 112, cQ / 128, cQ / 144, cQ / 160, cQ / 176, cQ / 192, cQ / 208)
+    ),
+    (
+      // V, weighted by luma importance
+      (cQ / 17, cQ /  18, cQ /  24, cQ /  47, cQ /  99, cQ /  99, cQ /  99, cQ /  99),
+      (cQ / 18, cQ /  21, cQ /  26, cQ /  66, cQ /  99, cQ /  99, cQ /  99, cQ / 112),
+      (cQ / 24, cQ /  26, cQ /  56, cQ /  99, cQ /  99, cQ /  99, cQ / 112, cQ / 128),
+      (cQ / 47, cQ /  66, cQ /  99, cQ /  99, cQ /  99, cQ / 112, cQ / 128, cQ / 144),
+      (cQ / 99, cQ /  99, cQ /  99, cQ /  99, cQ / 112, cQ / 128, cQ / 144, cQ / 160),
+      (cQ / 99, cQ /  99, cQ /  99, cQ / 112, cQ / 128, cQ / 144, cQ / 160, cQ / 176),
+      (cQ / 99, cQ /  99, cQ / 112, cQ / 128, cQ / 144, cQ / 160, cQ / 176, cQ / 192),
+      (cQ / 99, cQ / 112, cQ / 128, cQ / 144, cQ / 160, cQ / 176, cQ / 192, cQ / 208)
+    )
+  );
 
   cDCTUVRatio: array[0..7,0..7] of TFloat = (
     (0.5, sqrt(0.5), sqrt(0.5), sqrt(0.5), sqrt(0.5), sqrt(0.5), sqrt(0.5), sqrt(0.5)),
