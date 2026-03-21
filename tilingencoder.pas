@@ -427,7 +427,7 @@ type
     FGlobalTilingTargetPSNR: Double;
     FGlobalTilingTileCount: Integer;
     FGlobalTilingQualityBasedTileCount: Double;
-    FReconstructReuseMinUseCount: Double;
+    FReconstructReuseMultiplier: Double;
     FMaxThreadCount: Integer;
     FShotTransMaxSecondsPerKF: Double;
     FShotTransMinSecondsPerKF: Double;
@@ -467,7 +467,7 @@ type
     procedure SetDitheringYliluoma2MixedColors(AValue: Integer);
     procedure SetFrameCountSetting(AValue: Integer);
     procedure SetFramesPerSecond(AValue: Double);
-    procedure SetReconstructReuseMinUseCount(AValue: Double);
+    procedure SetReconstructReuseMultiplier(AValue: Double);
     procedure SetGlobalTilingQualityBasedTileCount(AValue: Double);
     procedure SetMaxThreadCount(AValue: Integer);
     procedure SetPaletteCount(AValue: Integer);
@@ -623,7 +623,7 @@ type
     property GlobalTilingTargetPSNR: Double read FGlobalTilingTargetPSNR write SetGlobalTilingTargetPSNR;
     property GlobalTilingTileCount: Integer read FGlobalTilingTileCount write SetGlobalTilingTileCount;
     property GlobalTilingQualityBasedTileCount: Double read FGlobalTilingQualityBasedTileCount write SetGlobalTilingQualityBasedTileCount;
-    property ReconstructReuseMinUseCount: Double read FReconstructReuseMinUseCount write SetReconstructReuseMinUseCount;
+    property ReconstructReuseMultiplier: Double read FReconstructReuseMultiplier write SetReconstructReuseMultiplier;
     property MaxThreadCount: Integer read FMaxThreadCount write SetMaxThreadCount;
     property ShotTransMaxSecondsPerKF: Double read FShotTransMaxSecondsPerKF write SetShotTransMaxSecondsPerKF;
     property ShotTransMinSecondsPerKF: Double read FShotTransMinSecondsPerKF write SetShotTransMinSecondsPerKF;
@@ -3056,10 +3056,10 @@ begin
   FFramesPerSecond := Max(0.0, AValue);
 end;
 
-procedure TTilingEncoder.SetReconstructReuseMinUseCount(AValue: Double);
+procedure TTilingEncoder.SetReconstructReuseMultiplier(AValue: Double);
 begin
-  if FReconstructReuseMinUseCount = AValue then Exit;
-  FReconstructReuseMinUseCount := Max(1, AValue);
+  if FReconstructReuseMultiplier = AValue then Exit;
+  FReconstructReuseMultiplier := Max(1.0, AValue);
 end;
 
 procedure TTilingEncoder.SetGlobalTilingQualityBasedTileCount(AValue: Double);
@@ -4008,7 +4008,7 @@ begin
     ini.WriteBool('Dither', 'DitheringUseThomasKnoll', DitheringUseThomasKnoll);
     ini.WriteInteger('Dither', 'DitheringYliluoma2MixedColors', DitheringYliluoma2MixedColors);
 
-    ini.WriteFloat('Reconstruct', 'ReconstructReuseMinUseCount', ReconstructReuseMinUseCount);
+    ini.WriteFloat('Reconstruct', 'ReconstructReuseMultiplier', ReconstructReuseMultiplier);
 
     ini.WriteInteger('Misc', 'MaxThreadCount', MaxThreadCount);
 
@@ -4049,7 +4049,7 @@ begin
     DitheringUseThomasKnoll := ini.ReadBool('Dither', 'DitheringUseThomasKnoll', DitheringUseThomasKnoll);
     DitheringYliluoma2MixedColors := ini.ReadInteger('Dither', 'DitheringYliluoma2MixedColors', DitheringYliluoma2MixedColors);
 
-    ReconstructReuseMinUseCount := ini.ReadFloat('Reconstruct', 'ReconstructReuseMinUseCount', ReconstructReuseMinUseCount);
+    ReconstructReuseMultiplier := ini.ReadFloat('Reconstruct', 'ReconstructReuseMultiplier', ReconstructReuseMultiplier);
 
     MaxThreadCount := ini.ReadInteger('Misc', 'MaxThreadCount', MaxThreadCount);
 
@@ -4092,7 +4092,7 @@ begin
   DitheringUseThomasKnoll := True;
   DitheringYliluoma2MixedColors := 4;
 
-  ReconstructReuseMinUseCount := 4;
+  ReconstructReuseMultiplier := 3.0;
 
   ShotTransMaxSecondsPerKF := 15.0;  // maximum seconds between keyframes
   ShotTransMinSecondsPerKF := 1.0;  // minimum seconds between keyframes
@@ -4879,18 +4879,25 @@ var
   end;
 
 var
-  tIdx, kfIdx, dsIdx: Integer;
+  tIdx, kfIdx, dsIdx, uc: Integer;
   pDS: PDCTScalar;
 begin
   // Compute psycho visual model for all tiles in their inital palettes, and some tiles in all palettes
 
-  reusableTileCount := Length(FTiles);
-  for tIdx := 0 to High(FTiles) do
-    if FTiles[tIdx]^.UseCount < FReconstructReuseMinUseCount then
-    begin
-      reusableTileCount := tIdx;
-      Break;
-    end;
+  uc := -1;
+  reusableTileCount := Min(Round((FReconstructReuseMultiplier - 1.0) * Length(FTiles) / FPaletteCount), Length(FTiles));
+  if reusableTileCount > 0 then
+  begin
+    if reusableTileCount < Length(FTiles) then
+      uc := FTiles[reusableTileCount]^.UseCount;
+    for tIdx := reusableTileCount - 1 downto 0 do
+      if FTiles[tIdx]^.UseCount <> uc then
+      begin
+        reusableTileCount := tIdx + 1;
+        Break;
+      end;
+    uc := FTiles[reusableTileCount - 1]^.UseCount;
+  end;
 
   DS := New(PTilingDataset);
   FillChar(DS^, SizeOf(TTilingDataset), 0);
@@ -4911,7 +4918,7 @@ begin
   TMTPool.DoStandaloneLocalProc(@DoPsyV, 0, High(FTiles), MaxThreadCount);
   Assert(dsIterator + 1 = DS^.KNNSize);
 
-  WriteLn('Dataset size: ', DS^.KNNSize:8, ', (', DS^.KNNSize / Length(FTiles):4:3, 'x)');
+  WriteLn('Dataset size: ', DS^.KNNSize:8, ', (', DS^.KNNSize / Length(FTiles):4:3, 'x), lowest reusable UseCount: ', uc:8);
 
   // Build KNN
 

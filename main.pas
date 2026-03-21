@@ -82,10 +82,10 @@ type
     sdGTM: TSaveDialog;
     sdSettings: TSaveDialog;
     seMaxCores: TSpinEdit;
-    seReuse: TSpinEdit;
     Separator1: TMenuItem;
     Separator3: TMenuItem;
     sePSNR: TFloatSpinEdit;
+    seReuse: TFloatSpinEdit;
     seShotTransMaxSecondsPerKF: TFloatSpinEdit;
     seShotTransCorrelLoThres: TFloatSpinEdit;
     seQbTiles: TFloatSpinEdit;
@@ -710,7 +710,7 @@ begin
       FTilingEncoder.RenderPage := rpNone;
     end;
 
-    FTilingEncoder.ReconstructReuseMinUseCount := seReuse.Value;
+    FTilingEncoder.ReconstructReuseMultiplier := seReuse.Value;
 
     FTilingEncoder.MaxThreadCount := seMaxCores.Value;
 
@@ -788,7 +788,7 @@ begin
    seShotTransMaxSecondsPerKF.Value := FTilingEncoder.ShotTransMaxSecondsPerKF;
    seShotTransCorrelLoThres.Value := FTilingEncoder.ShotTransCorrelLoThres;
 
-   seReuse.Value := FTilingEncoder.ReconstructReuseMinUseCount;
+   seReuse.Value := FTilingEncoder.ReconstructReuseMultiplier;
   finally
     FLockChanges := False;
   end;

@@ -263,7 +263,7 @@ object MainForm: TMainForm
         Increment = 0.1
         MaxValue = 10
         MinValue = 0.1
-        TabOrder = 23
+        TabOrder = 22
         Value = 1
         OnChange = UpdateVideo
       end
@@ -504,7 +504,7 @@ object MainForm: TMainForm
         Width = 64
         MaxValue = 1000000
         MinValue = 1
-        TabOrder = 24
+        TabOrder = 23
         Value = 1
         OnChange = UpdateGUI
       end
@@ -557,18 +557,18 @@ object MainForm: TMainForm
         Left = 8
         Height = 15
         Top = 393
-        Width = 349
-        Caption = 'Minimum tile UseCount for reuse across palettes (higher -> faster)'
+        Width = 240
+        Caption = 'Tile reuse dataset mutiplier (higher -> slower)'
         ParentColor = False
       end
-      object seReuse: TSpinEdit
+      object seReuse: TFloatSpinEdit
         Left = 396
         Height = 23
         Top = 389
         Width = 64
-        MaxValue = 1000000
+        MaxValue = 100
         MinValue = 1
-        TabOrder = 22
+        TabOrder = 24
         Value = 1
         OnChange = UpdateGUI
       end
