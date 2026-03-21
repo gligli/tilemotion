@@ -4096,7 +4096,7 @@ begin
 
   ShotTransMaxSecondsPerKF := 15.0;  // maximum seconds between keyframes
   ShotTransMinSecondsPerKF := 1.0;  // minimum seconds between keyframes
-  ShotTransCorrelLoThres := 0.8;   // interframe pearson correlation low limit
+  ShotTransCorrelLoThres := 0.9;   // interframe pearson correlation low limit
 end;
 
 procedure TTilingEncoder.Test;
