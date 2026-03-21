@@ -2560,7 +2560,7 @@ begin
     fs.Free;
   end;
 
-  ProgressRedraw(3, 'ReloadGTM');
+  ProgressRedraw(cEncoderStepLen[esLoad], 'ReloadGTM');
 end;
 
 procedure TTilingEncoder.GeneratePNGs(AInput: Boolean);
@@ -5979,13 +5979,10 @@ begin
 end;
 
 procedure TTilingEncoder.Run(AStep: TEncoderStep);
-var
-  step: TEncoderStep;
 begin
   case AStep of
     esAll:
-      for step := Succ(esAll) to High(step) do
-        Run(step);
+      RunRange(esLoad, esSave);
     esLoad:
       Load;
     esReduce:
