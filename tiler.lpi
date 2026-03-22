@@ -52,8 +52,12 @@
             <SmartLinkUnit Value="True"/>
             <Checks>
               <IOChecks Value="True"/>
+              <RangeChecks Value="True"/>
+              <OverflowChecks Value="True"/>
+              <StackChecks Value="True"/>
             </Checks>
             <StackSize Value="16777216"/>
+            <VerifyObjMethodCallValidity Value="True"/>
             <TargetCPU Value="x86_64"/>
           </CodeGeneration>
           <Linking>
