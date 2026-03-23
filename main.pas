@@ -20,6 +20,7 @@ type
     btnGTM: TButton;
     btnRunAll: TButton;
     btnPM: TButton;
+    cbxBlendingMode: TComboBox;
     cbxMPRadius: TComboBox;
     cbxDitheringMode: TComboBox;
     cbxMPMBF: TComboBox;
@@ -50,6 +51,7 @@ type
     Label13: TLabel;
     Label18: TLabel;
     Label15: TLabel;
+    Label19: TLabel;
     lblMaxCores: TLabel;
     Label17: TLabel;
     Label20: TLabel;
@@ -678,6 +680,7 @@ begin
 
     FTilingEncoder.MotionPredictRadius := StrToIntDef(cbxMPRadius.Text, 0);
     FTilingEncoder.MotionPredictMaxBufferedFrames := StrToIntDef(cbxMPMBF.Text, 0);
+    FTilingEncoder.MotionPredictBlendingMode := TBlendingMode(cbxBlendingMode.ItemIndex);
 
     FTilingEncoder.GlobalTilingUseTargetPSNR := rbPSNR.Checked;
     FTilingEncoder.GlobalTilingTargetPSNR := sePSNR.Value;
@@ -772,6 +775,7 @@ begin
 
    cbxMPRadius.Text := IntToStr(FTilingEncoder.MotionPredictRadius);
    cbxMPMBF.Text := IntToStr(FTilingEncoder.MotionPredictMaxBufferedFrames);
+   cbxBlendingMode.ItemIndex := Ord(FTilingEncoder.MotionPredictBlendingMode);
 
    rbPSNR.Checked := FTilingEncoder.GlobalTilingUseTargetPSNR;
    rbTileLimit.Checked := not FTilingEncoder.GlobalTilingUseTargetPSNR;

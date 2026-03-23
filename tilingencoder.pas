@@ -17,6 +17,7 @@ type
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
   TRenderPage = (rpNone, rpInput, rpOutput, rpTilesPalette);
   TPsyVisMode = (pvsDCT, pvsWeightedDCT, pvsSpeDCT, pvsWeightedSpeDCT, pvsPSNRHVS);
+  TBlendingMode = (bmNone, bmWeight, bmAlphaWeight);
 
 const
   cEncoderStepLen: array[TEncoderStep] of Integer = ({esAll} -1, {esLoad} 5, {esPredict} 1, {esReduce} 3, {esPreparePalettes} 3, {esDither} 2, {esReindex1} 3, {esReconstruct} 2, {esReindex2} 3, {esSave} 1);
@@ -423,6 +424,7 @@ type
     FPaletteCount: Integer;
     FMotionPredictRadius: Integer;
     FMotionPredictMaxBufferedFrames: Integer;
+    FMotionPredictBlendingMode: TBlendingMode;
     FDitheringMode: TPsyVisMode;
     FDitheringUseThomasKnoll: Boolean;
     FDitheringYliluoma2MixedColors: Integer;
@@ -619,6 +621,7 @@ type
     property PaletteCount: Integer read FPaletteCount write SetPaletteCount;
     property MotionPredictRadius: Integer read FMotionPredictRadius write SetMotionPredictRadius;
     property MotionPredictMaxBufferedFrames: Integer read FMotionPredictMaxBufferedFrames write SetMotionPredictMaxBufferedFrames;
+    property MotionPredictBlendingMode: TBlendingMode read FMotionPredictBlendingMode write FMotionPredictBlendingMode;
     property DitheringMode: TPsyVisMode read FDitheringMode write FDitheringMode;
     property DitheringUseThomasKnoll: Boolean read FDitheringUseThomasKnoll write FDitheringUseThomasKnoll;
     property DitheringYliluoma2MixedColors: Integer read FDitheringYliluoma2MixedColors write SetDitheringYliluoma2MixedColors;
@@ -1535,8 +1538,6 @@ var
   pbData: TPowellBlendData;
   X: TVector;
 begin
-  Assert(InRange(ABackBufferOffset, 1, Encoder.MotionPredictMaxBufferedFrames - 1));
-
   pbData.DX := ADX;
   pbData.DY := ADY;
   pbData.BackBufferOffset := ABackBufferOffset;
@@ -1545,6 +1546,8 @@ begin
 
   if AUnipolar then
   begin
+    Assert(InRange(ABackBufferOffset, 1, Encoder.MotionPredictMaxBufferedFrames));
+
     pbData.FrameM2 := nil;
 
     X := [0.0];
@@ -1554,6 +1557,8 @@ begin
   end
   else
   begin
+    Assert(InRange(ABackBufferOffset, 1, Encoder.MotionPredictMaxBufferedFrames - 1));
+
     pbData.FrameM2 := AFrameBuffer.GetBuffer(-ABackBufferOffset - 1);
 
     X := [(CGTMBlendAlphaMax + 1) * 0.25, 0.0];
@@ -1701,10 +1706,18 @@ var
     end
     else
     begin
-      if ABackBufferOffset >= 2 then
-        PredictTileBlending(False, ABackBufferOffset - 1, dy, dx, TMI, CurDCT, AFrameBuffer)
-      else if (ABackBufferOffset = 1) and (Index = PKeyFrame.StartFrame + 1) then
+      if Encoder.MotionPredictBlendingMode = bmAlphaWeight then
+      begin
+        if ABackBufferOffset >= 2 then
+          PredictTileBlending(False, ABackBufferOffset - 1, dy, dx, TMI, CurDCT, AFrameBuffer)
+        else if (ABackBufferOffset = 1) and (Index = PKeyFrame.StartFrame + 1) then
+          PredictTileBlending(True, ABackBufferOffset, dy, dx, TMI, CurDCT, AFrameBuffer);
+      end
+      else if Encoder.MotionPredictBlendingMode = bmWeight then
+      begin
         PredictTileBlending(True, ABackBufferOffset, dy, dx, TMI, CurDCT, AFrameBuffer);
+      end;
+
       PredictTileMotion(ARadius, ABackBufferOffset, dy, dx, TMI, CurDCT, ADCTBuffer.GetBuffer(-ABackBufferOffset), PenaltyLUT);
     end;
   end;
@@ -3838,25 +3851,17 @@ begin
           if TMI^.IsPredicted then
           begin
             if TMI^.IsBlended then
-            begin
-              Assert(InRange(TMI^.Attrs.BlendBackBufferOffset, 1, MotionPredictMaxBufferedFrames - 1));
-
               TempTile^.BlendRGBPixels(
                 FRenderFrameBuffer.GetBuffer(-TMI^.Attrs.BlendBackBufferOffset),
                 FRenderFrameBuffer.GetBuffer(-TMI^.Attrs.BlendBackBufferOffset - 1),
                 sy shl cTileWidthBits,
                 sx shl cTileWidthBits,
                 TMI^.Attrs.Alpha, TMI^.Attrs.Weight)
-            end
             else
-            begin
-              Assert(InRange(TMI^.Attrs.BlendBackBufferOffset, 1, MotionPredictMaxBufferedFrames));
-
               TempTile^.CopyRGBPixels(
                 FRenderFrameBuffer.GetBuffer(-TMI^.Attrs.MotionBackBufferOffset),
                 (sy shl cTileWidthBits) + TMI^.Attrs.MotionY,
                 (sx shl cTileWidthBits) + TMI^.Attrs.MotionX);
-            end;
 
             DrawTile(FRenderFrameBuffer.GetBuffer, nil, TempTile, sy, sx, False, False, True)
           end
@@ -4090,6 +4095,7 @@ begin
 
     ini.WriteInteger('MotionPredict', 'MotionPredictRadius', MotionPredictRadius);
     ini.WriteInteger('MotionPredict', 'MotionPredictMaxBufferedFrames', MotionPredictMaxBufferedFrames);
+    ini.WriteInteger('MotionPredict', 'MotionPredictBlendingMode', Ord(MotionPredictBlendingMode));
 
     ini.WriteBool('GlobalTiling', 'GlobalTilingUseTargetPSNR', GlobalTilingUseTargetPSNR);
     ini.WriteFloat('GlobalTiling', 'GlobalTilingTargetPSNR', GlobalTilingTargetPSNR);
@@ -4131,6 +4137,7 @@ begin
 
     MotionPredictRadius := ini.ReadInteger('MotionPredict', 'MotionPredictRadius', MotionPredictRadius);
     MotionPredictMaxBufferedFrames := ini.ReadInteger('MotionPredict', 'MotionPredictMaxBufferedFrames', MotionPredictMaxBufferedFrames);
+    MotionPredictBlendingMode := TBlendingMode(EnsureRange(ini.ReadInteger('MotionPredict', 'MotionPredictBlendingMode', Ord(MotionPredictBlendingMode)), Ord(Low(TBlendingMode)), Ord(High(TBlendingMode))));
 
     GlobalTilingUseTargetPSNR := ini.ReadBool('GlobalTiling', 'GlobalTilingUseTargetPSNR', GlobalTilingUseTargetPSNR);
     GlobalTilingTargetPSNR := ini.ReadFloat('GlobalTiling', 'GlobalTilingTargetPSNR', GlobalTilingTargetPSNR);
@@ -4176,6 +4183,7 @@ begin
 
   MotionPredictRadius := 32;
   MotionPredictMaxBufferedFrames := 3;
+  MotionPredictBlendingMode := bmAlphaWeight;
 
   GlobalTilingUseTargetPSNR := False;
   GlobalTilingTargetPSNR := 30.0;
