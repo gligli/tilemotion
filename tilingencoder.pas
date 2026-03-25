@@ -60,7 +60,7 @@ type
   // LongTileIdxLongPalIdx:            data -> palette index (16 bits); tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
   // IntraTile:                        data -> palette index (16 bits); indexes per pixel (64 bytes); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
   // SkipBlock:                        data -> none; commandBits -> skip count - 1 (12 bits)
-  // PredictedBlending:                data -> blending alpha (8 bits); blending additive weight (8 bits) (512 + w); commandBits -> none (10 bits); backbuffer offset - 1 (2 bits)
+  // PredictedBlending:                data -> blending alpha (8 bits); blending additive weight (8 bits) (256 + w); commandBits -> none (10 bits); backbuffer offset - 1 (2 bits)
   //
   // (insert new commands here...)
   //
@@ -670,7 +670,7 @@ const
   CGTMCommandsCount = Ord(High(TGTMCommand)) + 1;
   CGTMCommandCodeBits = round(ln(CGTMCommandsCount) / ln(2));
   CGTMCommandBits = 16 - CGTMCommandCodeBits;
-  CGTMBlendWeightBaseShift = 9;
+  CGTMBlendWeightBaseShift = 8;
   CGTMBlendWeightMax = 127;
   CGTMBlendWeightMin = -CGTMBlendWeightMax - 1;
   CGTMBlendAlphaShift = 8;
@@ -1428,6 +1428,44 @@ begin
 end;
 
 
+procedure TFrame.GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
+begin
+  oymn := Max(0, ADY - ARadius - 1);
+  oymx := Min(Encoder.FScreenHeight - cTileWidth, ADY + ARadius);
+  oxmn := Max(0, ADX - ARadius - 1);
+  oxmx := Min(Encoder.FScreenWidth - cTileWidth, ADX + ARadius);
+end;
+
+procedure TFrame.PrepareDCTs(AMTPool: TMTPool; const ADCTs: TDCTDynArray; const ABuffer: TIntegerDynArray2);
+
+  procedure DoDCTs(AIndex: PtrInt; AData: Pointer);
+  var
+    x, yx: Integer;
+    DCTTile: PTile;
+    CpnPixels: TCpnPixels;
+  begin
+    yx := AIndex * (Encoder.FScreenWidth - cTileWidth + 1);
+
+    DCTTile := TTile.New(True, False);
+    try
+      for x := 0 to Encoder.FScreenWidth - cTileWidth do
+      begin
+        DCTTile^.CopyRGBPixels(ABuffer, AIndex, x);
+
+        Encoder.ConvertToCpnPixels(DCTTile^, False, False, False, False, nil, CpnPixels);
+        Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsPSNRHVS, cColorCpns, ADCTs[yx]);
+
+        Inc(yx);
+      end;
+    finally
+      TTile.Dispose(DCTTile);
+    end;
+  end;
+
+begin
+  AMTPool.DoLocalProc(@DoDCTs, 0, Encoder.FScreenHeight - cTileWidth);
+end;
+
 type
   TPowellBlendData = record
     DX, DY: Integer;
@@ -1492,44 +1530,6 @@ begin
   Result += ApplyBlendPredictionPenalty(alpha, weight, pbData^.BackBufferOffset);
 end;
 
-procedure TFrame.GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
-begin
-  oymn := Max(0, ADY - ARadius - 1);
-  oymx := Min(Encoder.FScreenHeight - cTileWidth, ADY + ARadius);
-  oxmn := Max(0, ADX - ARadius - 1);
-  oxmx := Min(Encoder.FScreenWidth - cTileWidth, ADX + ARadius);
-end;
-
-procedure TFrame.PrepareDCTs(AMTPool: TMTPool; const ADCTs: TDCTDynArray; const ABuffer: TIntegerDynArray2);
-
-  procedure DoDCTs(AIndex: PtrInt; AData: Pointer);
-  var
-    x, yx: Integer;
-    DCTTile: PTile;
-    CpnPixels: TCpnPixels;
-  begin
-    yx := AIndex * (Encoder.FScreenWidth - cTileWidth + 1);
-
-    DCTTile := TTile.New(True, False);
-    try
-      for x := 0 to Encoder.FScreenWidth - cTileWidth do
-      begin
-        DCTTile^.CopyRGBPixels(ABuffer, AIndex, x);
-
-        Encoder.ConvertToCpnPixels(DCTTile^, False, False, False, False, nil, CpnPixels);
-        Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsPSNRHVS, cColorCpns, ADCTs[yx]);
-
-        Inc(yx);
-      end;
-    finally
-      TTile.Dispose(DCTTile);
-    end;
-  end;
-
-begin
-  AMTPool.DoLocalProc(@DoDCTs, 0, Encoder.FScreenHeight - cTileWidth);
-end;
-
 procedure TFrame.PredictTileBlending(AUnipolar: Boolean; ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT;
   AFrameBuffer: TFrameBuffer);
 var
@@ -1551,7 +1551,7 @@ begin
     pbData.FrameM2 := nil;
 
     X := [0.0];
-    bestErr := Round(PowellMinimize(@PowellBlending, X, (1 shl CGTMBlendWeightBaseShift) * 0.25, 0.5, 0.5, MaxInt, @pbData)[0]);
+    bestErr := Round(NelderMeadMinimize(@PowellBlending, X, [-CGTMBlendWeightMin], 0.5, @pbData));
     bestAlpha := 0;
     bestWeight := EnsureRange(Round(x[0]), CGTMBlendWeightMin, CGTMBlendWeightMax);
   end
@@ -1562,7 +1562,7 @@ begin
     pbData.FrameM2 := AFrameBuffer.GetBuffer(-ABackBufferOffset - 1);
 
     X := [(CGTMBlendAlphaMax + 1) * 0.25, 0.0];
-    bestErr := Round(PowellMinimize(@PowellBlending, X, (1 shl CGTMBlendAlphaShift) * 0.25, 0.5, 0.5, MaxInt, @pbData)[0]);
+    bestErr := Round(NelderMeadMinimize(@PowellBlending, X, [(CGTMBlendAlphaMax + 1) * 0.25, -CGTMBlendWeightMin], 0.5, @pbData));
     bestAlpha := EnsureRange(Round(x[0]), 0, CGTMBlendAlphaMax);
     bestWeight := EnsureRange(Round(x[1]), CGTMBlendWeightMin, CGTMBlendWeightMax);
   end;
@@ -3941,9 +3941,18 @@ begin
               end
               else if TMI^.IsBlended then
               begin
-                siz := 0;
-                col := CDrawPredictBaseLuma - ((TMI^.Attrs.Alpha + Abs(TMI^.Attrs.Weight)) shr 2);
-                col := ToRGB(col, $ff, col);
+                if TMI^.Attrs.Alpha <> 0 then
+                begin
+                  siz := TMI^.Attrs.Alpha + Abs(TMI^.Attrs.Weight);
+                  col := Max(0, CDrawPredictBaseLuma - siz);
+                  col := ToRGB($ff, $ff, col);
+                end
+                else
+                begin
+                  siz := Abs(TMI^.Attrs.Weight) shl 1;
+                  col := Max(0, CDrawPredictBaseLuma - siz);
+                  col := ToRGB(col, $ff, col);
+                end;
 
                 canvas.Brush.Color := col;
                 canvas.FillRect(

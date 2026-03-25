@@ -8,7 +8,7 @@ unit utils;
 interface
 
 uses
-  Classes, SysUtils, Types, math, fgl, extern;
+  Classes, SysUtils, Types, math, fgl, extern, usimplex;
 
 const
   // tweakable constants
@@ -250,6 +250,8 @@ generic function DCTInner<T>(pCpn, pLut: T; count: Integer): Double;
 function DCTInner_asm(pCpn_rcx, pLut_rdx: PFloat): Double; register; assembler;
 function EqualQualityTileCount(tileCount: Double): Integer;
 function GoldenRatioSearch(Func: TGRSEvalFunc; MinX, MaxX: Double; ObjectiveY: Double; EpsilonX, EpsilonY: Double; Data: Pointer): TGRSResult;
+function NelderMeadMinimize(Func: TEvalFunc; var X: TDoubleDynArray; SimplexExtents: array of Double; Epsilon: Double = 1e-9; Data: Pointer = nil): Double;
+function GridReduceMinimize(Func: TEvalFunc; var X: TDoubleDynArray; GridSize: array of Integer; GridExtents: array of Double; EpsilonReduce: Double; VerboseTag: String = ''; Data: Pointer = nil): Double;
 function EuclideanToPSNR(AEuclidean: Double): Double;
 function PSNRToEuclidean(APSNR: Double): Cardinal;
 procedure QuickSort(var AData;AFirstItem,ALastItem:Int64;AItemSize:Integer;ACompareFunction:TCompareFunction;AUserParameter:Pointer=nil);
@@ -1323,6 +1325,114 @@ begin
       Result.X := x;
       Result.Y := y;
   end;
+end;
+
+threadvar
+  GNMData: Pointer;
+  GNMFunc: TEvalFunc;
+
+  function NMX(X : TDoubleDynArray) : Float;
+  begin
+    Result := GNMFunc(X, GNMData);
+  end;
+
+function NelderMeadMinimize(Func: TEvalFunc; var X: TDoubleDynArray; SimplexExtents: array of Double; Epsilon: Double; Data: Pointer): Double;
+var
+  iX: Integer;
+  InitSimplex: TDoubleDynArray;
+begin
+  Assert((Length(X) = Length(SimplexExtents)) or (Length(SimplexExtents) = 0));
+
+  GNMData := Data;
+  GNMFunc := Func;
+  try
+    SetLength(InitSimplex, Length(SimplexExtents));
+    for iX := 0 to High(InitSimplex) do
+      InitSimplex[iX] := X[iX] + SimplexExtents[iX];
+
+    Simplex(@NMX, X, 0, High(X), Length(X) * 200, Epsilon, Result, InitSimplex);
+  finally
+    GNMData := nil;
+    GNMFunc := nil;
+  end;
+end;
+
+function GridReduceMinimize(Func: TEvalFunc; var X: TDoubleDynArray; GridSize: array of Integer;
+ GridExtents: array of Double; EpsilonReduce: Double; VerboseTag: String; Data: Pointer): Double;
+var
+  XBestFunc, bestX: TDoubleDynArray;
+  reduce: TDoubleDynArray;
+
+  procedure DoX(AIndex: Integer);
+  var
+    iX: Integer;
+    gs, iGrid: Integer;
+    f: Double;
+    lX: TDoubleDynArray;
+  begin
+    iX := AIndex;
+    if IsZero(reduce[iX], EpsilonReduce) then
+      Exit;
+
+    lX := Copy(X);
+    gs := GridSize[iX];
+
+    for iGrid := -gs to gs - 1 do
+    begin
+      lX[iX] := X[iX] + lerp(-GridExtents[iX], GridExtents[iX], (iGrid + gs) / (2 * gs)) * reduce[iX];
+
+      f := Func(lX, data);
+
+      if f < XBestFunc[iX] then
+      begin
+        XBestFunc[iX] := f;
+        bestX[iX] := lX[iX];
+      end;
+    end;
+  end;
+
+var
+  iter, iX: Integer;
+  bestFunc: Double;
+begin
+  Assert(Length(X) = Length(GridSize));
+  Assert(Length(X) = Length(GridExtents));
+
+  SetLength(XBestFunc, Length(X));
+  SetLength(bestX, Length(X));
+
+  SetLength(reduce, Length(X));
+  for iX := 0 to High(X) do
+    reduce[iX] := 1.0;
+
+  iter := 0;
+  repeat
+
+    for iX := 0 to High(X) do
+    begin
+      bestX[iX] := X[iX];
+      XBestFunc[iX] := Infinity;
+    end;
+
+    for iX := 0 to High(X) do
+      DoX(iX);
+
+    Inc(iter);
+    bestFunc := MinValue(XBestFunc);
+
+    for iX := 0 to High(X) do
+      if XBestFunc[iX] = bestFunc then
+      begin
+        X[iX] := bestX[iX];
+        reduce[iX] *= cInvPhi;
+
+        if VerboseTag <> '' then
+          WriteLn(VerboseTag, ', Iter:', iter:4, ', BestX:', iX:4, ', Reduce:', reduce[iX]:12:9, ', Func:', bestFunc:20:9);
+      end;
+
+  until IsZero(MaxValue(reduce), EpsilonReduce);
+
+  Result := bestFunc;
 end;
 
 function EuclideanToPSNR(AEuclidean: Double): Double;

@@ -90,7 +90,7 @@ procedure Simplex(Func      : TFuncNVar;
     if MaxIter < 1 then
       begin
         F_min := Func(X);
-        SetErrCode(OptOk);
+        //SetErrCode(OptOk);
         Exit;
       end;
 
@@ -223,10 +223,10 @@ procedure Simplex(Func      : TFuncNVar;
     if WriteLogFile then
       Close(LogFile);
 
-    if Iter > MaxIter then
-      SetErrCode(OptNonConv)
-    else
-      SetErrCode(OptOk);
+    //if Iter > MaxIter then
+    //  SetErrCode(OptNonConv)
+    //else
+    //  SetErrCode(OptOk);
   end;
 
 end.
