@@ -338,6 +338,28 @@ function drawPredictedTilemapItem(offsetY, offsetX, backBufOff) {
 	gtmTMPos++;
 }
 
+function drawWeightedTilemapItem(weight, backBufOff) {
+	var data = gtmTMBuffers[gtmTMBufIdxs[0]].data;
+	var dataM1 = gtmTMBuffers[gtmTMBufIdxs[backBufOff]].data;
+
+	let weightM1 = 256 + weight;
+	let x = (gtmTMPos % gtmWidth) * CTileWidth;
+	let y = Math.trunc(gtmTMPos / gtmWidth) * CTileWidth;
+	let p = (y * gtmWidth * CTileWidth + x) * 4;
+	
+	for (let ty = 0; ty < CTileWidth; ty++) {
+		for (let tx = 0; tx < CTileWidth; tx++) {
+			data[p] = Math.max(Math.min((dataM1[p] * weightM1) >>> 8, 255), 0); p++;
+			data[p] = Math.max(Math.min((dataM1[p] * weightM1) >>> 8, 255), 0); p++;
+			data[p] = Math.max(Math.min((dataM1[p] * weightM1) >>> 8, 255), 0); p++;
+			data[p] = dataM1[p]; p++;
+		}
+		p += (gtmWidth - 1) * CTileWidth * 4;
+	}
+
+	gtmTMPos++;
+}
+
 function drawBlendedTilemapItem(weight, alpha, backBufOff) {
 	var data = gtmTMBuffers[gtmTMBufIdxs[0]].data;
 	var dataM1 = gtmTMBuffers[gtmTMBufIdxs[backBufOff]].data;
@@ -524,7 +546,14 @@ function decodeFrame() {
 			case GTMCommand.PredictedTileBlending8x8:
 				let blendWeight = readByte();
 				let blendAlpha = readByte();
-				drawBlendedTilemapItem((blendWeight & 127) - (blendWeight & 128), blendAlpha, cmd[1] + 1);
+				
+				blendWeight = (blendWeight & 127) - (blendWeight & 128);
+				
+				if (blendAlpha) {
+					drawBlendedTilemapItem(blendWeight, blendAlpha, cmd[1] + 1);
+				} else {
+					drawWeightedTilemapItem(blendWeight, cmd[1] + 1);
+				}
 				break;
 				
 			case GTMCommand.ExtendedCommand:
