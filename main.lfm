@@ -129,23 +129,24 @@ object MainForm: TMainForm
     TabOrder = 5
     OnChange = UpdateVideo
     object tsSettings: TTabSheet
+      AutoSize = True
       Caption = 'Settings'
       ClientHeight = 582
       ClientWidth = 1144
       ParentBiDiMode = False
       PopupMenu = pmProcesses
       object edOutput: TEdit
-        Left = 396
+        Left = 388
         Height = 23
-        Top = 32
+        Top = 25
         Width = 456
         TabOrder = 2
         OnChange = UpdateGUI
       end
       object seMaxTiles: TSpinEdit
-        Left = 396
+        Left = 388
         Height = 23
-        Top = 136
+        Top = 129
         Width = 129
         Increment = 1000
         MaxValue = 1000000000
@@ -154,27 +155,27 @@ object MainForm: TMainForm
         OnEditingDone = seMaxTilesEditingDone
       end
       object btnInput: TButton
-        Left = 852
+        Left = 844
         Height = 25
-        Top = 7
+        Top = 0
         Width = 24
         Caption = '...'
         TabOrder = 1
         OnClick = btnInputClick
       end
       object seStartFrame: TSpinEdit
-        Left = 396
+        Left = 388
         Height = 23
-        Top = 64
+        Top = 57
         Width = 64
         MaxValue = 2000000000
         TabOrder = 4
         OnChange = UpdateGUI
       end
       object cbxYilMix: TComboBox
-        Left = 396
+        Left = 388
         Height = 23
-        Top = 394
+        Top = 387
         Width = 64
         ItemHeight = 15
         Items.Strings = (
@@ -188,18 +189,18 @@ object MainForm: TMainForm
         OnChange = UpdateGUI
       end
       object seFrameCount: TSpinEdit
-        Left = 461
+        Left = 453
         Height = 23
-        Top = 64
+        Top = 57
         Width = 64
         MaxValue = 2000000000
         TabOrder = 5
         OnChange = UpdateGUI
       end
       object chkUseTK: TCheckBox
-        Left = 8
+        Left = 0
         Height = 19
-        Top = 372
+        Top = 365
         Width = 401
         Alignment = taLeftJustify
         AutoSize = False
@@ -208,69 +209,69 @@ object MainForm: TMainForm
         OnChange = UpdateGUI
       end
       object Label13: TLabel
-        Left = 8
+        Left = 0
         Height = 15
-        Top = 68
+        Top = 61
         Width = 166
         Caption = 'Start frame; Frame count (0: all)'
         ParentColor = False
       end
       object Label11: TLabel
-        Left = 8
+        Left = 0
         Height = 15
-        Top = 398
+        Top = 391
         Width = 160
         Caption = 'Yliluoma 2 mixed colors count'
         ParentColor = False
       end
       object Label1: TLabel
-        Left = 8
+        Left = 0
         Height = 15
-        Top = 36
+        Top = 29
         Width = 94
         Caption = 'Output (GTM file)'
         ParentColor = False
       end
       object Label4: TLabel
-        Left = 8
+        Left = 0
         Height = 15
-        Top = 12
+        Top = 5
         Width = 189
         Caption = 'Input (any FFMPEG-compatible file)'
         ParentColor = False
       end
       object edInput: TEdit
-        Left = 396
+        Left = 388
         Height = 23
-        Top = 8
+        Top = 1
         Width = 456
         TabOrder = 0
         OnChange = UpdateGUI
       end
       object Label10: TLabel
-        Left = 8
+        Left = 0
         Height = 15
-        Top = 467
+        Top = 428
         Width = 118
         Caption = 'Gamma (visualization)'
         ParentColor = False
       end
       object seVisGamma: TFloatSpinEdit
-        Left = 396
+        Left = 388
         Height = 23
-        Top = 463
+        Top = 424
         Width = 64
         Increment = 0.1
         MaxValue = 10
         MinValue = 0.1
-        TabOrder = 24
+        TabOrder = 23
         Value = 1
         OnChange = UpdateVideo
       end
       object seQbTiles: TFloatSpinEdit
-        Left = 526
+        Left = 518
         Height = 23
-        Top = 136
+        Top = 129
         Width = 64
         Increment = 0.1
         MaxValue = 1000
@@ -281,26 +282,26 @@ object MainForm: TMainForm
         OnEditingDone = seQbTilesEditingDone
       end
       object btnGTM: TButton
-        Left = 852
+        Left = 844
         Height = 25
-        Top = 31
+        Top = 24
         Width = 24
         Caption = '...'
         TabOrder = 3
         OnClick = btnGTMClick
       end
       object Label12: TLabel
-        Left = 8
+        Left = 0
         Height = 15
-        Top = 200
+        Top = 193
         Width = 271
         Caption = 'Palettes layout (higher -> more colors) (count; size)'
         ParentColor = False
       end
       object cbxPalSize: TComboBox
-        Left = 461
+        Left = 453
         Height = 23
-        Top = 196
+        Top = 189
         Width = 64
         DropDownCount = 20
         ItemHeight = 15
@@ -316,9 +317,9 @@ object MainForm: TMainForm
         OnChange = UpdateGUI
       end
       object cbxPalCount: TComboBox
-        Left = 396
+        Left = 388
         Height = 23
-        Top = 196
+        Top = 189
         Width = 64
         DropDownCount = 20
         ItemHeight = 15
@@ -345,9 +346,9 @@ object MainForm: TMainForm
         OnChange = UpdateGUI
       end
       object cbxScaling: TComboBox
-        Left = 396
+        Left = 388
         Height = 23
-        Top = 88
+        Top = 81
         Width = 129
         DropDownCount = 20
         ItemHeight = 15
@@ -367,33 +368,33 @@ object MainForm: TMainForm
         OnChange = UpdateGUI
       end
       object Label15: TLabel
-        Left = 8
+        Left = 0
         Height = 15
-        Top = 92
+        Top = 85
         Width = 65
         Caption = 'Scaling ratio'
         ParentColor = False
       end
       object lblMaxCores: TLabel
-        Left = 8
+        Left = 0
         Height = 15
-        Top = 516
+        Top = 477
         Width = 239
         Caption = 'Maximum CPU cores used for multithreading'
         ParentColor = False
       end
       object Label20: TLabel
-        Left = 8
+        Left = 0
         Height = 15
-        Top = 248
+        Top = 241
         Width = 206
         Caption = 'Keyframes length (seconds) (min; max)'
         ParentColor = False
       end
       object seShotTransMaxSecondsPerKF: TFloatSpinEdit
-        Left = 461
+        Left = 453
         Height = 23
-        Top = 244
+        Top = 237
         Width = 64
         Increment = 0.1
         MaxValue = 100
@@ -401,9 +402,9 @@ object MainForm: TMainForm
         OnChange = UpdateGUI
       end
       object seShotTransMinSecondsPerKF: TFloatSpinEdit
-        Left = 396
+        Left = 388
         Height = 23
-        Top = 244
+        Top = 237
         Width = 64
         Increment = 0.05
         MaxValue = 100
@@ -411,17 +412,17 @@ object MainForm: TMainForm
         OnChange = UpdateGUI
       end
       object Label22: TLabel
-        Left = 8
+        Left = 0
         Height = 15
-        Top = 272
+        Top = 265
         Width = 176
         Caption = 'Keyframes threshold (correlation)'
         ParentColor = False
       end
       object seShotTransCorrelLoThres: TFloatSpinEdit
-        Left = 396
+        Left = 388
         Height = 23
-        Top = 268
+        Top = 261
         Width = 64
         Increment = 0.05
         MaxValue = 1
@@ -430,17 +431,17 @@ object MainForm: TMainForm
         OnChange = UpdateGUI
       end
       object Label17: TLabel
-        Left = 8
+        Left = 0
         Height = 15
-        Top = 343
+        Top = 336
         Width = 189
         Caption = 'Prepare palettes psychovisual mode'
         ParentColor = False
       end
       object cbxDitheringMode: TComboBox
-        Left = 396
+        Left = 388
         Height = 23
-        Top = 339
+        Top = 332
         Width = 129
         DropDownCount = 20
         ItemHeight = 15
@@ -449,17 +450,17 @@ object MainForm: TMainForm
         OnChange = UpdateGUI
       end
       object Label18: TLabel
-        Left = 8
+        Left = 0
         Height = 15
-        Top = 176
+        Top = 169
         Width = 321
         Caption = 'Motion prediction (higher -> slower) (radius; frame distance)'
         ParentColor = False
       end
       object cbxMPRadius: TComboBox
-        Left = 396
+        Left = 388
         Height = 23
-        Top = 172
+        Top = 165
         Width = 64
         DropDownCount = 20
         ItemHeight = 15
@@ -477,59 +478,59 @@ object MainForm: TMainForm
         OnChange = UpdateGUI
       end
       object Bevel1: TBevel
-        Left = 8
+        Left = 0
         Height = 2
-        Top = 128
+        Top = 121
         Width = 868
         Shape = bsTopLine
       end
       object Bevel2: TBevel
-        Left = 8
+        Left = 0
         Height = 2
-        Top = 236
+        Top = 229
         Width = 868
         Shape = bsTopLine
       end
       object Bevel3: TBevel
-        Left = 8
+        Left = 0
         Height = 2
-        Top = 504
+        Top = 465
         Width = 868
         Shape = bsTopLine
       end
       object seMaxCores: TSpinEdit
-        Left = 396
+        Left = 388
         Height = 23
-        Top = 512
+        Top = 473
         Width = 64
         MaxValue = 1000000
         MinValue = 1
-        TabOrder = 25
+        TabOrder = 24
         Value = 1
         OnChange = UpdateGUI
       end
       object rbTileLimit: TRadioButton
-        Left = 8
+        Left = 0
         Height = 19
-        Top = 137
+        Top = 130
         Width = 261
         Caption = 'Tile limit (higher -> bigger) (all; quality based)'
         TabOrder = 7
         OnChange = UpdateGUI
       end
       object rbPSNR: TRadioButton
-        Left = 604
+        Left = 596
         Height = 19
-        Top = 137
+        Top = 130
         Width = 206
         Caption = 'PSNR-HVS target (higher -> bigger)'
         TabOrder = 10
         OnChange = UpdateGUI
       end
       object sePSNR: TFloatSpinEdit
-        Left = 812
+        Left = 804
         Height = 23
-        Top = 136
+        Top = 129
         Width = 64
         MaxValue = 100
         TabOrder = 11
@@ -538,9 +539,9 @@ object MainForm: TMainForm
         OnEditingDone = seQbTilesEditingDone
       end
       object cbxMPMBF: TComboBox
-        Left = 461
+        Left = 453
         Height = 23
-        Top = 172
+        Top = 165
         Width = 64
         DropDownCount = 20
         ItemHeight = 15
@@ -553,37 +554,18 @@ object MainForm: TMainForm
         TabOrder = 13
         OnChange = UpdateGUI
       end
-      object lblMaxCores1: TLabel
-        Left = 8
-        Height = 15
-        Top = 433
-        Width = 240
-        Caption = 'Tile reuse dataset mutiplier (higher -> slower)'
-        ParentColor = False
-      end
-      object seReuse: TFloatSpinEdit
-        Left = 396
-        Height = 23
-        Top = 429
-        Width = 64
-        MaxValue = 100
-        MinValue = 1
-        TabOrder = 23
-        Value = 1
-        OnChange = UpdateGUI
-      end
       object Label19: TLabel
-        Left = 8
+        Left = 0
         Height = 15
-        Top = 308
+        Top = 301
         Width = 180
         Caption = 'Motion prediction blending mode'
         ParentColor = False
       end
       object cbxBlendingMode: TComboBox
-        Left = 396
+        Left = 388
         Height = 23
-        Top = 304
+        Top = 297
         Width = 129
         DropDownCount = 20
         ItemHeight = 15

@@ -18,14 +18,12 @@ const GTMHeader = {
 // =====================
 //
 // PredictedTileOffsets6x6:          data -> none; commandBits -> y offset (6 bits); x offset (6 bits)
-// PredictedTileOffsets8x8:          data -> y offset (8 bits); x offset (8 bits); commandBits -> none (10 bits); backbuffer offset - 1 (2 bits)
-// PredictedFm1Fm2Blend6x6:          data -> none; commandBits -> alpha additive weight (256 + w) (6 bits); frame -2 to frame -1 alpha (6 bits)
+// PredictedTileOffsets8x8:          data -> x offset (8 bits); y offset (8 bits); commandBits -> none (10 bits); backbuffer offset - 1 (2 bits)
+// PredictedTileBlending8x8:         data -> blending additive weight (8 bits) (256 + w); blending alpha (8 bits); commandBits -> none (10 bits); backbuffer offset - 1 (2 bits)
 // PredictedOffsetBlock0x0:          data -> none; commandBits -> block size in tiles - 1 (12 bits)
-// GlobalTile10:                     data -> none; commandBits -> global tile index (10 bits); V mirror (1 bit); H mirror (1 bit)
-// KeyFrmTile10:                     data -> none; commandBits -> keyframe tile index (10 bits); V mirror (1 bit); H mirror (1 bit)
 // GlobalTile16:                     data -> global tile index (16 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
-// KeyFrmTile16:                     data -> keyframe tile index (16 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
 // GlobalTile32:                     data -> global tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
+// KeyFrmTile16:                     data -> keyframe tile index (16 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
 // KeyFrmTile32:                     data -> keyframe tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
 //
 // (insert new commands here...)
@@ -39,14 +37,12 @@ const GTMHeader = {
 const GTMCommand = {
     'PredictedTileOffsets6x6' : 0,
     'PredictedTileOffsets8x8' : 1,
-    'PredictedFm1Fm2Blend8x4' : 2,
+    'PredictedTileBlending8x8' : 2,
     'PredictedOffsetBlock0x0' : 3,
-    'GlobalTile10' : 4,
-    'KeyFrmTile10' : 5,
-    'GlobalTile16' : 6,
-    'KeyFrmTile16' : 7,
-    'GlobalTile32' : 8,
-    'KeyFrmTile32' : 9,
+    'GlobalTile16' : 4,
+    'GlobalTile32' : 5,
+    'KeyFrmTile16' : 6,
+    'KeyFrmTile32' : 7,
 
     'FrameEnd' : 11,
     'LoadPalette' : 12,
@@ -342,12 +338,12 @@ function drawPredictedTilemapItem(offsetY, offsetX, backBufOff) {
 	gtmTMPos++;
 }
 
-function drawBlendedTilemapItem(weight, alpha) {
+function drawBlendedTilemapItem(weight, alpha, backBufOff) {
 	var data = gtmTMBuffers[gtmTMBufIdxs[0]].data;
-	var dataM1 = gtmTMBuffers[gtmTMBufIdxs[1]].data;
-	var dataM2 = gtmTMBuffers[gtmTMBufIdxs[2]].data;
+	var dataM1 = gtmTMBuffers[gtmTMBufIdxs[backBufOff]].data;
+	var dataM2 = gtmTMBuffers[gtmTMBufIdxs[backBufOff + 1]].data;
 
-	let weightM1 = (256 + weight) * (64 - alpha);
+	let weightM1 = (256 + weight) * (256 - alpha);
 	let weightM2 = (256 + weight) * alpha;
 	let x = (gtmTMPos % gtmWidth) * CTileWidth;
 	let y = Math.trunc(gtmTMPos / gtmWidth) * CTileWidth;
@@ -355,9 +351,9 @@ function drawBlendedTilemapItem(weight, alpha) {
 	
 	for (let ty = 0; ty < CTileWidth; ty++) {
 		for (let tx = 0; tx < CTileWidth; tx++) {
-			data[p] = Math.max(Math.min((dataM1[p] * weightM1 + dataM2[p] * weightM2) >>> 14, 255), 0); p++;
-			data[p] = Math.max(Math.min((dataM1[p] * weightM1 + dataM2[p] * weightM2) >>> 14, 255), 0); p++;
-			data[p] = Math.max(Math.min((dataM1[p] * weightM1 + dataM2[p] * weightM2) >>> 14, 255), 0); p++;
+			data[p] = Math.max(Math.min((dataM1[p] * weightM1 + dataM2[p] * weightM2) >>> 16, 255), 0); p++;
+			data[p] = Math.max(Math.min((dataM1[p] * weightM1 + dataM2[p] * weightM2) >>> 16, 255), 0); p++;
+			data[p] = Math.max(Math.min((dataM1[p] * weightM1 + dataM2[p] * weightM2) >>> 16, 255), 0); p++;
 			data[p] = (dataM1[p] * (256 - alpha) + dataM2[p] * alpha) >>> 8; p++;
 		}
 		p += (gtmWidth - 1) * CTileWidth * 4;
@@ -499,14 +495,6 @@ function decodeFrame() {
 				skipBlock(cmd[1] + 1);
 				break;
 
-			case GTMCommand.GlobalTile10:
-				drawTilemapItem(cmd[1] >>> 2, cmd[1] & 3, 0);
-				break;
-				
-			case GTMCommand.KeyFrmTile10:
-				drawTilemapItem(cmd[1] >>> 2, cmd[1] & 3, 1);
-				break;
-				
 			case GTMCommand.GlobalTile16:
 				drawTilemapItem(readWord(), cmd[1], 0);
 				break;
@@ -528,13 +516,15 @@ function decodeFrame() {
 				break;
 
 			case GTMCommand.PredictedTileOffsets8x8:
-				let offsetY = readByte();
 				let offsetX = readByte();
+				let offsetY = readByte();
 				drawPredictedTilemapItem((offsetY & 127) - (offsetY & 128), (offsetX & 127) - (offsetX & 128), cmd[1] + 1);
 				break;
 				
-			case GTMCommand.PredictedFm1Fm2Blend8x4:
-				drawBlendedTilemapItem(((cmd[1] >>> 6) & 31) - ((cmd[1] >>> 6) & 32), cmd[1] & 63);
+			case GTMCommand.PredictedTileBlending8x8:
+				let blendWeight = readByte();
+				let blendAlpha = readByte();
+				drawBlendedTilemapItem((blendWeight & 127) - (blendWeight & 128), blendAlpha, cmd[1] + 1);
 				break;
 				
 			case GTMCommand.ExtendedCommand:

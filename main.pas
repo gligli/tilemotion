@@ -58,7 +58,6 @@ type
     Label22: TLabel;
     Label4: TLabel;
     Label6: TLabel;
-    lblMaxCores1: TLabel;
     lblPct: TLabel;
     llPalTileDesc: TPanel;
     miGeneratePNGsOutput: TMenuItem;
@@ -87,7 +86,6 @@ type
     Separator1: TMenuItem;
     Separator3: TMenuItem;
     sePSNR: TFloatSpinEdit;
-    seReuse: TFloatSpinEdit;
     seShotTransMaxSecondsPerKF: TFloatSpinEdit;
     seShotTransCorrelLoThres: TFloatSpinEdit;
     seQbTiles: TFloatSpinEdit;
@@ -715,8 +713,6 @@ begin
       FTilingEncoder.RenderPage := rpNone;
     end;
 
-    FTilingEncoder.ReconstructReuseMultiplier := seReuse.Value;
-
     FTilingEncoder.MaxThreadCount := seMaxCores.Value;
 
     sedPalIdx.MaxValue := FTilingEncoder.PaletteCount - 1;
@@ -793,8 +789,6 @@ begin
    seShotTransMinSecondsPerKF.Value := FTilingEncoder.ShotTransMinSecondsPerKF;
    seShotTransMaxSecondsPerKF.Value := FTilingEncoder.ShotTransMaxSecondsPerKF;
    seShotTransCorrelLoThres.Value := FTilingEncoder.ShotTransCorrelLoThres;
-
-   seReuse.Value := FTilingEncoder.ReconstructReuseMultiplier;
   finally
     FLockChanges := False;
   end;
