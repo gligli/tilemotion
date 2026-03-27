@@ -596,7 +596,7 @@ begin
   if FFMPEG.FrameCount <= 0 then
   begin
     // estimate frame count using file duration
-    FFMPEG.FrameCount := Round(Max(0, FFMPEG.FmtCtx^.duration) * FFMPEG.FramesPerSecond / AV_TIME_BASE_I);
+    FFMPEG.FrameCount := Round(Max(0, PPtrIdx(FFMPEG.FmtCtx^.streams, FFMPEG.VideoStream)^.duration) * FFMPEG.TimeBase.num * FFMPEG.FramesPerSecond / FFMPEG.TimeBase.den);
   end;
   if FFMPEG.FrameCount <= 0 then
   begin
@@ -617,6 +617,7 @@ procedure FFMPEG_LoadFrames(AFFMPEG: TFFMPEG; AStartFrame, AFrameCount: Integer;
  AUserParameter: Pointer);
 var
   frmTS, frmIdx: Int64;
+  initialSeekDone: Boolean;
   doneFrameCount, ret, ret2: Integer;
   FFFrame: PAVFrame;
   FFSWSCtx: PSwsContext;
@@ -625,11 +626,15 @@ var
   FFDstLinesize: array[0..3] of Integer;
   FFDstPixFmt: TAVPixelFormat;
 begin
+  if AFrameCount <= 0 then
+    Exit;
+
   FFFrame := nil;
   FFSWSCtx := nil;
   FFPacket := nil;
   FillChar(FFDstData, Sizeof(FFDstData), 0);
   doneFrameCount := 0;
+  initialSeekDone := False;
   try
     FFDstPixFmt := AV_PIX_FMT_RGB32; // compatible with TPortableNetworkGraphic
 
@@ -645,7 +650,7 @@ begin
     // Get scaler context
     FFSWSCtx := sws_getContext(
         AFFMPEG.CodecCtx^.width, AFFMPEG.CodecCtx^.height, AFFMPEG.CodecCtx^.pix_fmt,
-        AFFMPEG.DstWidth, AFFMPEG.DstHeight ,FFDstPixFmt,
+        AFFMPEG.DstWidth, AFFMPEG.DstHeight, FFDstPixFmt,
         SWS_LANCZOS, nil, nil, nil);
     if not Assigned(FFSWSCtx) then
       raise EFFMPEGError.Create('Could not get scaler context');
@@ -680,25 +685,44 @@ begin
 
         Continue;
       end
+      else if ret = AVERROR_EOF then
+      begin
+        // EOF before video end -> fill remaining frames with black
+
+        ret := av_image_fill_black(@FFDstData[0], PNativeInt(@FFDstLinesize[0]), FFDstPixFmt, AVCOL_RANGE_JPEG, AFFMPEG.DstWidth, AFFMPEG.DstHeight);
+        if ret < 0 then
+          raise EFFMPEGError.Create('Error clearing frame');
+
+        while doneFrameCount < AFrameCount do
+        begin
+          AFrameCallback(AStartFrame + doneFrameCount, FFDstLinesize[0] shr 2, AFFMPEG.DstHeight, PInteger(FFDstData[0]), AUserParameter);
+          Inc(doneFrameCount);
+        end;
+
+        Break;
+      end
       else if ret < 0 then
         raise EFFMPEGError.Create('Error receiving frame');
 
-      frmIdx := (FFFrame^.best_effort_timestamp - AFFMPEG.StartTimeStamp) div FFFrame^.duration;
+      if not initialSeekDone then
+      begin
+        // Timestamps can be trusted enough to seek to the initial frame we want, but not much more (ie. they tend to falter at video end)
 
-      // seeking can be inaccurate, so ensure we have the frame we want
-      if (frmIdx >= AStartFrame + doneFrameCount) or (frmIdx < 0) then
+        frmIdx := 0;
+        if (FFFrame^.best_effort_timestamp >= 0) and (FFFrame^.duration > 0) then
+          frmIdx := (FFFrame^.best_effort_timestamp - AFFMPEG.StartTimeStamp) div FFFrame^.duration;
+        initialSeekDone := frmIdx >= AStartFrame;
+      end;
+
+      if initialSeekDone then
       begin
         // Convert the image from its native format to RGB
         if sws_scale(FFSWSCtx, FFFrame^.data, FFFrame^.linesize, 0, AFFMPEG.CodecCtx^.height, FFDstData, FFDstLinesize) < 0 then
           raise EFFMPEGError.Create('Error rescaling frame');
 
-        while AStartFrame + doneFrameCount <= frmIdx do
-        begin
-          //writeln(frmIdx:8, AStartFrame + doneFrameCount:8);
-
-          AFrameCallback(AStartFrame + doneFrameCount, FFDstLinesize[0] shr 2, AFFMPEG.DstHeight, PInteger(FFDstData[0]), AUserParameter);
-          Inc(doneFrameCount);
-        end;
+        // Pass the image to the callback
+        AFrameCallback(AStartFrame + doneFrameCount, FFDstLinesize[0] shr 2, AFFMPEG.DstHeight, PInteger(FFDstData[0]), AUserParameter);
+        Inc(doneFrameCount);
 
         if doneFrameCount >= AFrameCount then
           Break;

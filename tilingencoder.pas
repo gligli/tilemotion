@@ -2249,7 +2249,7 @@ begin
 
       frmCnt := FFMPEG.FrameCount;
       if frmCnt > 0 then
-        frmCnt -= FStartFrame;
+        frmCnt := Max(0, frmCnt - FStartFrame);
       if FrameCountSetting > 0 then
         frmCnt := FrameCountSetting;
 
