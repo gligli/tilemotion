@@ -206,6 +206,7 @@ type
   private
     function GetHMirror: Boolean;
     function GetIsBlended: Boolean;
+    function GetIsMotion: Boolean;
     function GetIsSmoothed: Boolean;
     function GetVMirror: Boolean;
     procedure SetHMirror(AValue: Boolean);
@@ -217,6 +218,7 @@ type
     procedure Reset(AKeepMirrors: Boolean);
 
     property IsPredicted: Boolean read GetIsPredicted write SetIsPredicted;
+    property IsMotion: Boolean read GetIsMotion;
     property IsBlended: Boolean read GetIsBlended write SetIsBlended;
     property IsSmoothed: Boolean read GetIsSmoothed;
     property HMirror: Boolean read GetHMirror write SetHMirror;
@@ -719,6 +721,11 @@ end;
 function TTileMapItemHelper.GetIsBlended: Boolean;
 begin
   Result := tmfBlended in Flags;
+end;
+
+function TTileMapItemHelper.GetIsMotion: Boolean;
+begin
+  Result := (tmfPredicted in Flags) and not (tmfBlended in Flags);
 end;
 
 function TTileMapItemHelper.GetIsSmoothed: Boolean;
@@ -3874,59 +3881,56 @@ begin
           begin
             TMI := @Frame.TileMap[sy, sx];
 
-            if TMI^.IsPredicted then
+            if TMI^.IsSmoothed then
             begin
-              if TMI^.IsSmoothed then
+              canvas.Brush.Color := clWhite;
+              canvas.FrameRect(
+                (sx shl cTileWidthBits) - 3 + off, (sy shl cTileWidthBits) - 3 + off,
+                (sx shl cTileWidthBits) + 3 + off, (sy shl cTileWidthBits) + 3 + off);
+            end
+            else if TMI^.IsBlended then
+            begin
+              if TMI^.Attrs.Alpha <> 0 then
               begin
-                canvas.Brush.Color := clWhite;
-                canvas.FrameRect(
-                  (sx shl cTileWidthBits) - 3 + off, (sy shl cTileWidthBits) - 3 + off,
-                  (sx shl cTileWidthBits) + 3 + off, (sy shl cTileWidthBits) + 3 + off);
-              end
-              else if TMI^.IsBlended then
-              begin
-                if TMI^.Attrs.Alpha <> 0 then
-                begin
-                  siz := TMI^.Attrs.Alpha + Abs(TMI^.Attrs.Weight);
-                  col := Max(0, CDrawPredictBaseLuma - siz);
-                  col := ToRGB($ff, $ff, col);
-                end
-                else
-                begin
-                  siz := Abs(TMI^.Attrs.Weight) shl 1;
-                  col := Max(0, CDrawPredictBaseLuma - siz);
-                  col := ToRGB(col, $ff, col);
-                end;
-
-                canvas.Brush.Color := col;
-                canvas.FillRect(
-                  (sx shl cTileWidthBits) - 2 + off, (sy shl cTileWidthBits) - 2 + off,
-                  (sx shl cTileWidthBits) + 2 + off, (sy shl cTileWidthBits) + 2 + off);
+                siz := TMI^.Attrs.Alpha + Abs(TMI^.Attrs.Weight);
+                col := Max(0, CDrawPredictBaseLuma - siz);
+                col := ToRGB($ff, $ff, col);
               end
               else
               begin
-                siz := Abs(TMI^.Attrs.MotionX) + Abs(TMI^.Attrs.MotionY);
+                siz := Abs(TMI^.Attrs.Weight) shl 1;
                 col := Max(0, CDrawPredictBaseLuma - siz);
+                col := ToRGB(col, $ff, col);
+              end;
 
-                if TMI^.Attrs.MotionBackBufferOffset > 1 then
-                  col := ToRGB(col, col, $ff)
-                else
-                  col := ToRGB($ff, col, col);
+              canvas.Brush.Color := col;
+              canvas.FillRect(
+                (sx shl cTileWidthBits) - 2 + off, (sy shl cTileWidthBits) - 2 + off,
+                (sx shl cTileWidthBits) + 2 + off, (sy shl cTileWidthBits) + 2 + off);
+            end
+            else if TMI^.IsMotion then
+            begin
+              siz := Abs(TMI^.Attrs.MotionX) + Abs(TMI^.Attrs.MotionY);
+              col := Max(0, CDrawPredictBaseLuma - siz);
 
-                if siz = 0 then
-                begin
-                  canvas.Brush.Color := col;
-                  canvas.FillRect(
-                    (sx shl cTileWidthBits) - 1 + off, (sy shl cTileWidthBits) - 1 + off,
-                    (sx shl cTileWidthBits) + 1 + off, (sy shl cTileWidthBits) + 1 + off);
-                end
-                else
-                begin
-                  canvas.Pen.Color := col;
-                  canvas.Line(
-                    (sx shl cTileWidthBits) + off, (sy shl cTileWidthBits) + off,
-                    (sx shl cTileWidthBits) + TMI^.Attrs.MotionX + off, (sy shl cTileWidthBits) + TMI^.Attrs.MotionY + off);
-                end;
+              if TMI^.Attrs.MotionBackBufferOffset > 1 then
+                col := ToRGB(col, col, $ff)
+              else
+                col := ToRGB($ff, col, col);
+
+              if siz = 0 then
+              begin
+                canvas.Brush.Color := col;
+                canvas.FillRect(
+                  (sx shl cTileWidthBits) - 1 + off, (sy shl cTileWidthBits) - 1 + off,
+                  (sx shl cTileWidthBits) + 1 + off, (sy shl cTileWidthBits) + 1 + off);
+              end
+              else
+              begin
+                canvas.Pen.Color := col;
+                canvas.Line(
+                  (sx shl cTileWidthBits) + off, (sy shl cTileWidthBits) + off,
+                  (sx shl cTileWidthBits) + TMI^.Attrs.MotionX + off, (sy shl cTileWidthBits) + TMI^.Attrs.MotionY + off);
               end;
             end;
           end;
@@ -5381,6 +5385,7 @@ var
     begin
       DivMod(i, FTileMapWidth, sy, sx);
       frm.TileMap[sy, sx].IsPredicted := True;
+      frm.TileMap[sy, sx].IsBlended := False;
       frm.TileMap[sy, sx].Attrs.MotionX := 0;
       frm.TileMap[sy, sx].Attrs.MotionY := 0;
       frm.TileMap[sy, sx].Attrs.MotionBackBufferOffset := 1;
@@ -5610,30 +5615,27 @@ var
     attrs: Word;
     isLongOffsets, isKeyFrameTile, isTile32: Boolean;
   begin
-    if TMI.IsPredicted then
+    if TMI.IsBlended then
     begin
-      if TMI.IsBlended then
+      DoCmd(gtPredictedTileBlending8x8, TMI.Attrs.BlendBackBufferOffset - 1);
+      DoByte(PByte(@TMI.Attrs.Weight)^);
+      DoByte(TMI.Attrs.Alpha);
+    end
+    else if TMI.IsMotion then
+    begin
+      isLongOffsets := not InRange(TMI.Attrs.MotionX, -32, 31) or not InRange(TMI.Attrs.MotionY, -32, 31) or (TMI.Attrs.MotionBackBufferOffset > 1);
+
+      if isLongOffsets then
       begin
-        DoCmd(gtPredictedTileBlending8x8, TMI.Attrs.BlendBackBufferOffset - 1);
-        DoByte(PByte(@TMI.Attrs.Weight)^);
-        DoByte(TMI.Attrs.Alpha);
+        DoCmd(gtPredictedTileOffsets8x8, TMI.Attrs.MotionBackBufferOffset - 1);
+        DoByte(PByte(@TMI.Attrs.MotionX)^);
+        DoByte(PByte(@TMI.Attrs.MotionY)^);
       end
       else
       begin
-        isLongOffsets := not InRange(TMI.Attrs.MotionX, -32, 31) or not InRange(TMI.Attrs.MotionY, -32, 31) or (TMI.Attrs.MotionBackBufferOffset > 1);
+        attrs := (PByte(@TMI.Attrs.MotionX)^ and 63) or ((PByte(@TMI.Attrs.MotionY)^ and 63) shl 6);
 
-        if isLongOffsets then
-        begin
-          DoCmd(gtPredictedTileOffsets8x8, TMI.Attrs.MotionBackBufferOffset - 1);
-          DoByte(PByte(@TMI.Attrs.MotionX)^);
-          DoByte(PByte(@TMI.Attrs.MotionY)^);
-        end
-        else
-        begin
-          attrs := (PByte(@TMI.Attrs.MotionX)^ and 63) or ((PByte(@TMI.Attrs.MotionY)^ and 63) shl 6);
-
-          DoCmd(gtPredictedTileOffsets6x6, attrs);
-        end;
+        DoCmd(gtPredictedTileOffsets6x6, attrs);
       end;
     end
     else
