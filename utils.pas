@@ -227,7 +227,8 @@ function YUVToRGB(y, u, v, scl: TFloat): Integer;
 function lerp(x, y, alpha: Double): Double; inline;
 function ilerp(x, y, alpha, maxAlpha: Integer): Integer; inline;
 function revlerp(x, r, alpha: Double): Double; inline;
-function BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte): Integer; inline;
+procedure BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte; out r, g, b: Byte);
+function BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte): Integer;
 function Posterize(v: Byte; cvt: Integer): Byte; inline;
 function PosterizeBpc(v, bpc: Byte): Byte; inline;
 function CompareEuclideanDCTPtr(pa, pb: PDCTScalar): Cardinal;
@@ -665,7 +666,7 @@ begin
   Result := x + (r - x) / alpha;
 end;
 
-function BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte): Integer;
+procedure BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte; out r, g, b: Byte);
 var
   r1, g1, b1: Integer;
   r2, g2, b2: Integer;
@@ -685,11 +686,17 @@ begin
   g1 := (g1 * invAlpha + g2 * alpha + rounding) shr shift;
   b1 := (b1 * invAlpha + b2 * alpha + rounding) shr shift;
 
-  r1 := EnsureRange(r1, 0, High(Byte));
-  g1 := EnsureRange(g1, 0, High(Byte));
-  b1 := EnsureRange(b1, 0, High(Byte));
+  r := EnsureRange(r1, 0, High(Byte));
+  g := EnsureRange(g1, 0, High(Byte));
+  b := EnsureRange(b1, 0, High(Byte));
+end;
 
-  Result := ToRGB(r1, g1, b1);
+function BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte): Integer;
+var
+  r, g, b: Byte;
+begin
+  BlendRGB(x, y, alpha, weight, alphaShift, weightShift, r, g, b);
+  Result := ToRGB(r, g, b);
 end;
 
 function Posterize(v: Byte; cvt: Integer): Byte; inline;
