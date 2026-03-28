@@ -349,9 +349,9 @@ function drawWeightedTilemapItem(weight, backBufOff) {
 	
 	for (let ty = 0; ty < CTileWidth; ty++) {
 		for (let tx = 0; tx < CTileWidth; tx++) {
-			data[p] = Math.max(Math.min((dataM1[p] * weightM1) >>> 8, 255), 0); p++;
-			data[p] = Math.max(Math.min((dataM1[p] * weightM1) >>> 8, 255), 0); p++;
-			data[p] = Math.max(Math.min((dataM1[p] * weightM1) >>> 8, 255), 0); p++;
+			data[p] = Math.max(Math.min((dataM1[p] * weightM1 + 128) >>> 8, 255), 0); p++;
+			data[p] = Math.max(Math.min((dataM1[p] * weightM1 + 128) >>> 8, 255), 0); p++;
+			data[p] = Math.max(Math.min((dataM1[p] * weightM1 + 128) >>> 8, 255), 0); p++;
 			data[p] = dataM1[p]; p++;
 		}
 		p += (gtmWidth - 1) * CTileWidth * 4;
@@ -373,10 +373,10 @@ function drawBlendedTilemapItem(weight, alpha, backBufOff) {
 	
 	for (let ty = 0; ty < CTileWidth; ty++) {
 		for (let tx = 0; tx < CTileWidth; tx++) {
-			data[p] = Math.max(Math.min((dataM1[p] * weightM1 + dataM2[p] * weightM2) >>> 16, 255), 0); p++;
-			data[p] = Math.max(Math.min((dataM1[p] * weightM1 + dataM2[p] * weightM2) >>> 16, 255), 0); p++;
-			data[p] = Math.max(Math.min((dataM1[p] * weightM1 + dataM2[p] * weightM2) >>> 16, 255), 0); p++;
-			data[p] = (dataM1[p] * (256 - alpha) + dataM2[p] * alpha) >>> 8; p++;
+			data[p] = Math.max(Math.min((dataM1[p] * weightM1 + dataM2[p] * weightM2 + 32768) >>> 16, 255), 0); p++;
+			data[p] = Math.max(Math.min((dataM1[p] * weightM1 + dataM2[p] * weightM2 + 32768) >>> 16, 255), 0); p++;
+			data[p] = Math.max(Math.min((dataM1[p] * weightM1 + dataM2[p] * weightM2 + 32768) >>> 16, 255), 0); p++;
+			data[p] = (dataM1[p] * (256 - alpha) + dataM2[p] * alpha + 128) >>> 8; p++;
 		}
 		p += (gtmWidth - 1) * CTileWidth * 4;
 	}
