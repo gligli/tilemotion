@@ -1899,7 +1899,7 @@ begin
         Inc(iDS);
       end;
 
-    WriteLn('KF: ', Index:8, ' TileCount: ', Length(IntraReducedTiles):8);
+    WriteLn('KF: ', Index:8, ', TileCount: ', Length(IntraReducedTiles):8);
   finally
     ReleaseFrameTiles;
   end;
@@ -2402,6 +2402,8 @@ end;
 procedure TTilingEncoder.Reduce;
 var
   kfIdx: Integer;
+  GlobalUnpredictedCount, KFFFUnpredictedCount: Integer;
+  KFFFRatio: Double;
   KF: TKeyFrame;
   Frame: TFrame;
 begin
@@ -2411,20 +2413,29 @@ begin
   ProgressRedraw(0, '', esReduce);
 
   if FGlobalTilingUseTargetPSNR then
-    SolveAvgPSNR(FGlobalTilingTargetPSNR)
+    GlobalUnpredictedCount := SolveAvgPSNR(FGlobalTilingTargetPSNR)
   else
-    SolveTileCount(FGlobalTilingTileCount);
+    GlobalUnpredictedCount := SolveTileCount(FGlobalTilingTileCount);
 
   ProgressRedraw(1, 'Solve');
+
+  KFFFUnpredictedCount := 0;
+  for kfIdx := 0 to High(FKeyFrames) do
+  begin
+    KF := FKeyFrames[kfIdx];
+    Frame := FFrames[KF.StartFrame];
+
+    KFFFUnpredictedCount += Frame.GetUnpredictedTileCount;
+  end;
+
+  KFFFRatio := Max(1.0, DivDef(GlobalUnpredictedCount * cInvPhi, KFFFUnpredictedCount, 1.0));
 
   for kfIdx := 0 to High(FKeyFrames) do
   begin
     KF := FKeyFrames[kfIdx];
     Frame := FFrames[KF.StartFrame];
 
-    Frame.IntraReduce(max(2, Frame.GetUnpredictedTileCount));
-
-    Write(kfIdx + 1:8, ' / ', Length(FKeyFrames):8, #13);
+    Frame.IntraReduce(Max(2, Ceil(Frame.GetUnpredictedTileCount * KFFFRatio)));
   end;
 
   ProgressRedraw(2, 'KeyFrameFirstFrameReduce');
