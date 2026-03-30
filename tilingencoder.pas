@@ -1899,7 +1899,7 @@ begin
         Inc(iDS);
       end;
 
-    WriteLn('KF: ', Index:8, ', TileCount: ', Length(IntraReducedTiles):8);
+    WriteLn('KF: ', Index:8, ', TileCount: ', Length(IntraReducedTiles):8, ' /', ATargetTileCount:8);
   finally
     ReleaseFrameTiles;
   end;
@@ -2403,7 +2403,7 @@ procedure TTilingEncoder.Reduce;
 var
   kfIdx: Integer;
   GlobalUnpredictedCount, KFFFUnpredictedCount: Integer;
-  KFFFRatio: Double;
+  KFFFRemFactor, KFFFGrowFactor: Double;
   KF: TKeyFrame;
   Frame: TFrame;
 begin
@@ -2428,14 +2428,18 @@ begin
     KFFFUnpredictedCount += Frame.GetUnpredictedTileCount;
   end;
 
-  KFFFRatio := Max(1.0, DivDef(GlobalUnpredictedCount * cInvPhi, KFFFUnpredictedCount, 1.0));
+  KFFFRemFactor := EqualQualityTileCount(KFFFUnpredictedCount) / EqualQualityTileCount(GlobalUnpredictedCount);
+  KFFFGrowFactor := DivDef(GlobalUnpredictedCount * KFFFRemFactor, KFFFUnpredictedCount, 1.0);
+
+  WriteLn('KF first frame / remainder tile count factor: ', KFFFRemFactor:9:3);
+  WriteLn('KF first frame tile count grow factor: ', KFFFGrowFactor:9:3);
 
   for kfIdx := 0 to High(FKeyFrames) do
   begin
     KF := FKeyFrames[kfIdx];
     Frame := FFrames[KF.StartFrame];
 
-    Frame.IntraReduce(Max(2, Ceil(Frame.GetUnpredictedTileCount * KFFFRatio)));
+    Frame.IntraReduce(Max(2, Ceil(Frame.GetUnpredictedTileCount * KFFFGrowFactor)));
   end;
 
   ProgressRedraw(2, 'KeyFrameFirstFrameReduce');
