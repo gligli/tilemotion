@@ -236,6 +236,18 @@ type
 
   PTilingDataset = ^TTilingDataset;
 
+  { TGRPSNRData }
+
+  TGRPSNRData = record
+    OnTileCount: Boolean;
+    MeanPSNR: Double;
+    KFFFGrowFactor: Double;
+    GlobalUnpredictedTileCount: Integer;
+    KFFFUnpredictedTileCount: TIntegerDynArray;
+  end;
+
+  PGRPSNRData = ^TGRPSNRData;
+
   { TMixingPlan }
 
   TMixingPlan = record
@@ -528,8 +540,8 @@ type
     procedure FindKeyFrames(AManualMode: Boolean);
 
     function GRPSNR(x: Double; Data: Pointer): Double;
-    function SolveTileCount(ATileCount: Integer): Integer;
-    function SolveAvgPSNR(AAvgPSNR: Double): Integer;
+    function SolveTileCount(ATileCount: Integer): TGRPSNRData;
+    function SolveAvgPSNR(AAvgPSNR: Double): TGRPSNRData;
     procedure TransferTiles;
 
     procedure DoPalettization;
@@ -2402,8 +2414,7 @@ end;
 procedure TTilingEncoder.Reduce;
 var
   kfIdx: Integer;
-  GlobalUnpredictedCount, KFFFUnpredictedCount: Integer;
-  KFFFRemFactor, KFFFGrowFactor: Double;
+  GRPSNRData: TGRPSNRData;
   KF: TKeyFrame;
   Frame: TFrame;
 begin
@@ -2413,33 +2424,20 @@ begin
   ProgressRedraw(0, '', esReduce);
 
   if FGlobalTilingUseTargetPSNR then
-    GlobalUnpredictedCount := SolveAvgPSNR(FGlobalTilingTargetPSNR)
+    GRPSNRData := SolveAvgPSNR(FGlobalTilingTargetPSNR)
   else
-    GlobalUnpredictedCount := SolveTileCount(FGlobalTilingTileCount);
+    GRPSNRData := SolveTileCount(FGlobalTilingTileCount);
 
   ProgressRedraw(1, 'Solve');
 
-  KFFFUnpredictedCount := 0;
-  for kfIdx := 0 to High(FKeyFrames) do
-  begin
-    KF := FKeyFrames[kfIdx];
-    Frame := FFrames[KF.StartFrame];
-
-    KFFFUnpredictedCount += Frame.GetUnpredictedTileCount;
-  end;
-
-  KFFFRemFactor := EqualQualityTileCount(KFFFUnpredictedCount) / EqualQualityTileCount(GlobalUnpredictedCount);
-  KFFFGrowFactor := DivDef(GlobalUnpredictedCount * KFFFRemFactor, KFFFUnpredictedCount, 1.0);
-
-  WriteLn('KF first frame / remainder tile count factor: ', KFFFRemFactor:9:3);
-  WriteLn('KF first frame tile count grow factor: ', KFFFGrowFactor:9:3);
+  WriteLn('KF first frame tile count grow factor: ', GRPSNRData.KFFFGrowFactor:9:3);
 
   for kfIdx := 0 to High(FKeyFrames) do
   begin
     KF := FKeyFrames[kfIdx];
     Frame := FFrames[KF.StartFrame];
 
-    Frame.IntraReduce(Max(2, Ceil(Frame.GetUnpredictedTileCount * KFFFGrowFactor)));
+    Frame.IntraReduce(Max(2, Ceil(GRPSNRData.KFFFUnpredictedTileCount[kfIdx] * GRPSNRData.KFFFGrowFactor)));
   end;
 
   ProgressRedraw(2, 'KeyFrameFirstFrameReduce');
@@ -4364,21 +4362,14 @@ begin
     FOnProgress(Self, FProgressSyncPos, FProgressSyncMax, FProgressSyncHG);
 end;
 
-type
-  TGRPSNRData = record
-    OnTileCount: Boolean;
-    MeanPSNR: Double;
-    UnpredictedTileCount: Integer;
-  end;
-
-  PGRPSNRData = ^TGRPSNRData;
-
 function TTilingEncoder.GRPSNR(x: Double; Data: Pointer): Double;
 var
   GRData: PGRPSNRData absolute Data;
-  frmIdx, sy, sx: Integer;
+  frmIdx, sy, sx, kfffUPCSum, kfNewUTC, kfIdx: Integer;
+  isKFFF: Boolean;
   errThres: Cardinal;
   meanErr: UInt64;
+  KFFFFactor: Double;
   Frame: TFrame;
   TMI: PTileMapItem;
 begin
@@ -4386,11 +4377,14 @@ begin
 
   meanErr := 0;
   GRData^.MeanPSNR := 0.0;
-  GRData^.UnpredictedTileCount := 0;
+  GRData^.GlobalUnpredictedTileCount := 0;
+  FillDWord(GRData^.KFFFUnpredictedTileCount[0], Length(FKeyFrames), 0);
 
   for frmIdx := 0 to High(FFrames) do
   begin
     Frame := FFrames[frmIdx];
+    kfIdx := Frame.PKeyFrame.Index;
+    isKFFF := Frame.Index = Frame.PKeyFrame.StartFrame;
 
     for sy := 0 to FTileMapHeight - 1 do
       for sx := 0 to FTileMapWidth - 1 do
@@ -4398,44 +4392,59 @@ begin
         TMI := @Frame.TileMap[sy, sx];
 
         // trim high (unfit) Errors
-        TMI^.IsPredicted := TMI^.Error < errThres;
 
-        meanErr += IfThen(TMI^.IsPredicted, TMI^.Error);
-        Inc(GRData^.UnpredictedTileCount, Ord(not TMI^.IsPredicted));
+        if TMI^.Error < errThres then
+        begin
+          TMI^.IsPredicted := True;
+          meanErr += TMI^.Error;
+        end
+        else
+        begin
+          TMI^.IsPredicted := False;
+          Inc(GRData^.GlobalUnpredictedTileCount);
+          Inc(GRData^.KFFFUnpredictedTileCount[kfIdx], Ord(isKFFF));
+        end;
       end;
   end;
 
-  meanErr := iDivDef(meanErr, Length(FFrames) * FTileMapSize - GRData^.UnpredictedTileCount, 0);
+  meanErr := iDivDef(meanErr, Length(FFrames) * FTileMapSize - GRData^.GlobalUnpredictedTileCount, 0);
   GRData^.MeanPSNR := EuclideanToPSNR(meanErr);
 
-  WriteLn('Threshold: ', x:9:3, ', Mean PSNR: ', GRData^.MeanPSNR:9:3, ', TileCount: ', GRData^.UnpredictedTileCount:8);
+  kfffUPCSum := SumInt(GRData^.KFFFUnpredictedTileCount);
+
+  KFFFFactor := DivDef(EqualQualityTileCount(kfffUPCSum), EqualQualityTileCount(GRData^.GlobalUnpredictedTileCount), 1.0);
+  GRData^.KFFFGrowFactor := DivDef(GRData^.GlobalUnpredictedTileCount * KFFFFactor, kfffUPCSum, 1.0);
+
+  for kfIdx := 0 to High(FKeyFrames) do
+  begin
+    kfNewUTC := EnsureRange(Ceil(GRData^.KFFFUnpredictedTileCount[kfIdx] * GRData^.KFFFGrowFactor), 2, FTileMapSize);
+    GRData^.GlobalUnpredictedTileCount += kfNewUTC - GRData^.KFFFUnpredictedTileCount[kfIdx];
+  end;
+
+  WriteLn('Threshold: ', x:9:3, ', Mean PSNR: ', GRData^.MeanPSNR:9:3, ', TileCount: ', GRData^.GlobalUnpredictedTileCount:8);
 
   if GRData^.OnTileCount then
-    Result := GRData^.UnpredictedTileCount
+    Result := GRData^.GlobalUnpredictedTileCount
   else
     Result := GRData^.MeanPSNR;
 end;
 
-function TTilingEncoder.SolveTileCount(ATileCount: Integer): Integer;
-var
-  GRData: TGRPSNRData;
+function TTilingEncoder.SolveTileCount(ATileCount: Integer): TGRPSNRData;
 begin
-  GRData.OnTileCount := True;
-  GRData.MeanPSNR := 0;
-  GRData.UnpredictedTileCount := 0;
-  GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, ATileCount, cPSNRPrecision, 0.5, @GRData);
-  Result := GRData.UnpredictedTileCount;
+  Result.OnTileCount := True;
+  Result.MeanPSNR := 0;
+  Result.GlobalUnpredictedTileCount := 0;
+  SetLength(Result.KFFFUnpredictedTileCount, Length(FKeyFrames));
+  GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, ATileCount, cPSNRPrecision, 0.5, @Result);
 end;
 
-function TTilingEncoder.SolveAvgPSNR(AAvgPSNR: Double): Integer;
-var
-  GRData: TGRPSNRData;
+function TTilingEncoder.SolveAvgPSNR(AAvgPSNR: Double): TGRPSNRData;
 begin
-  GRData.OnTileCount := False;
-  GRData.MeanPSNR := 0;
-  GRData.UnpredictedTileCount := 0;
-  GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, AAvgPSNR, cPSNRPrecision, 0.01, @GRData);
-  Result := GRData.UnpredictedTileCount;
+  Result.OnTileCount := False;
+  Result.MeanPSNR := 0;
+  Result.GlobalUnpredictedTileCount := 0;
+  SetLength(Result.KFFFUnpredictedTileCount, Length(FKeyFrames));
+  GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, AAvgPSNR, cPSNRPrecision, 0.01, @Result);
 end;
 
 procedure TTilingEncoder.TransferTiles;
@@ -4526,6 +4535,8 @@ begin
   TMTPool.DoStandaloneLocalProc(@DoTransfer, 0, High(FFrames), MaxThreadCount);
 
   Assert(newTIdx = tileCount);
+
+  WriteLn('TransferTiles:', Length(Tiles):12, ' / ', Length(FFrames) * FTileMapSize:12,  ' transfered tiles, (', Length(Tiles) * 100.0 / (Length(FFrames) * FTileMapSize):4:3, '%)');
 end;
 
 procedure TTilingEncoder.DoPalettization;
@@ -5087,7 +5098,7 @@ begin
   for tIdx := 0 to High(FTiles) do
     FTiles[tIdx]^.TmpIndex := -1;
 
-  WriteLn('ReindexTiles: ', Length(Tiles):12, ' / ', Length(FFrames) * FTileMapSize:12,  ' final tiles, (', Length(Tiles) * 100.0 / (Length(FFrames) * FTileMapSize):4:3, '%)');
+  WriteLn('ReindexTiles: ', Length(Tiles):12, ' / ', Length(FFrames) * FTileMapSize:12,  ' reindexed tiles, (', Length(Tiles) * 100.0 / (Length(FFrames) * FTileMapSize):4:3, '%)');
 end;
 
 function CompareTilePalPixels(Item1, Item2:Pointer):Integer;
