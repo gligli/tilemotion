@@ -20,7 +20,7 @@ type
   TBlendingMode = (bmNone, bmWeight, bmAlphaWeight);
 
 const
-  cEncoderStepLen: array[TEncoderStep] of Integer = ({esAll} -1, {esLoad} 5, {esPredict} 1, {esReduce} 3, {esPreparePalettes} 3, {esDither} 2, {esReindex1} 3, {esReconstruct} 2, {esReindex2} 3, {esSave} 1);
+  cEncoderStepLen: array[TEncoderStep] of Integer = ({esAll} -1, {esLoad} 5, {esPredict} 1, {esReduce} 3, {esPreparePalettes} 2, {esDither} 2, {esReindex1} 3, {esReconstruct} 2, {esReindex2} 3, {esSave} 1);
 
 type
   // GliGli's TileMotion header structs and commands
@@ -545,10 +545,8 @@ type
     procedure TransferTiles;
 
     procedure DoPalettization;
-    function MinimizeOP(const x: TDoubleDynArray; data: Pointer): Double;
     procedure QuantizeUsingYakmo(APalIdx, AColorCount: Integer);
     procedure DoQuantization(APalIdx: Integer);
-    procedure OptimizePalettes;
 
     procedure PrepareReconstruct;
     procedure FinishReconstruct;
@@ -2379,10 +2377,6 @@ begin
   TMTPool.DoStandaloneLocalProc(@DoQuant, 0, High(FPalettes), MaxThreadCount);
 
   ProgressRedraw(2, 'Quantization');
-
-  OptimizePalettes;
-
-  ProgressRedraw(3, 'OptimizePalettes');
 end;
 
 procedure TTilingEncoder.Dither;
@@ -4646,194 +4640,6 @@ begin
   end;
 end;
 
-type
-  TMinimizeOPData = record
-    Encoder: TTilingEncoder;
-    CurPalIdx: Integer;
-    MeanR, MeanG, MeanB: Int64;
-    PalR, PalG, PalB: array[0 .. Sqr(cTileWidth) - 1] of Int64;
-    InnerPerm: TIndexWeightList;
-    NewPal: TIntegerDynArray2;
-  end;
-
-
-function ComparePerms(const Item1,Item2:PIndexWeight):Integer;
-begin
-  Result := CompareValue(Item1^.Weight * 1000.0 + Item1^.Index, Item2^.Weight * 1000.0 + Item2^.Index);
-end;
-
-function TTilingEncoder.MinimizeOP(const x: TDoubleDynArray; data: Pointer): Double;
-var
-  PData: ^TMinimizeOPData absolute data;
-  StdDevR, StdDevG, StdDevB: UInt64;
-  colIdx, col: Integer;
-  r, g, b: Byte;
-begin
-  // from rank to palette
-
-  PData^.InnerPerm[0]^.Index := 0;
-  PData^.InnerPerm[0]^.Weight := 0.0;
-  for colIdx := 1 to PData^.Encoder.FPaletteSize - 1 do
-  begin
-    PData^.InnerPerm[colIdx]^.Index := colIdx;
-    PData^.InnerPerm[colIdx]^.Weight := x[colIdx - 1];
-  end;
-
-  PData^.InnerPerm.Sort(@ComparePerms);
-
-  // try to maximize accumulated palette standard deviation
-  // rationale: the less samey it is, the better the colors pair with each other across palette
-
-  StdDevR := 0;
-  StdDevG := 0;
-  StdDevB := 0;
-  for colIdx := 0 to PData^.Encoder.FPaletteSize - 1 do
-  begin
-    col := PData^.Encoder.FPalettes[PData^.CurPalIdx].PaletteRGB[PData^.InnerPerm[colIdx]^.Index];
-    FromRGB(col, r, g, b);
-
-    PData^.NewPal[PData^.CurPalIdx, colIdx] := col;
-
-    StdDevR += Sqr(PData^.PalR[colIdx] + r - PData^.MeanR);
-    StdDevG += Sqr(PData^.PalG[colIdx] + g - PData^.MeanG);
-    StdDevB += Sqr(PData^.PalB[colIdx] + b - PData^.MeanB);
-  end;
-
-  Result := (cRedMul * Sqrt(StdDevR / PData^.Encoder.FPaletteSize) +
-             cGreenMul * Sqrt(StdDevG / PData^.Encoder.FPaletteSize) +
-             cBlueMul * Sqrt(StdDevB / PData^.Encoder.FPaletteSize)) / cLumaDiv;
-
-  Result := -Result;
-end;
-
-procedure TTilingEncoder.OptimizePalettes;
-var
-  f: TDoubleDynArray;
-  MeanR, MeanG, MeanB: UInt64;
-  NewPal: TIntegerDynArray2;
-
-  procedure DoPal(AIndex: PtrInt; AData: Pointer);
-  var
-    Data: TMinimizeOPData;
-    x: TDoubleDynArray;
-    palIdx, colIdx: Integer;
-    iw: PIndexWeight;
-    r, g, b: Byte;
-  begin
-    SetLength(x, FPaletteSize - 1);
-    for colIdx := 1 to FPaletteSize - 1 do
-      x[colIdx - 1] := colIdx;
-
-    Data.Encoder := Self;
-    Data.CurPalIdx := AIndex;
-    Data.MeanR := MeanR;
-    Data.MeanG := MeanG;
-    Data.MeanB := MeanB;
-    Data.NewPal := NewPal;
-
-    Data.InnerPerm := TIndexWeightList.Create;
-    for colIdx := 0 to FPaletteSize - 1 do
-    begin
-      New(iw);
-      Data.InnerPerm.Add(iw);
-    end;
-    try
-
-    // accumulate the whole palette except the one that will be permutated
-
-    FillQWord(Data.PalR[0], FPaletteSize, 0);
-    FillQWord(Data.PalG[0], FPaletteSize, 0);
-    FillQWord(Data.PalB[0], FPaletteSize, 0);
-
-    for palIdx := 0 to FPaletteCount - 1 do
-      if palIdx <> AIndex then
-      begin
-        for colIdx := 0 to FPaletteSize - 1 do
-        begin
-          FromRGB(FPalettes[palIdx].PaletteRGB[colIdx], r, g, b);
-
-          Data.PalR[colIdx] += r;
-          Data.PalG[colIdx] += g;
-          Data.PalB[colIdx] += b;
-        end;
-      end;
-
-    // use Powell's method to try permutations in the current palette
-
-    PowellMinimize(@MinimizeOP, x, FPaletteSize * cInvPhi, 0.0, 0.0, MaxInt, @Data);
-
-    f[AIndex] := -MinimizeOP(x, @Data);
-
-    finally
-      for colIdx := 0 to FPaletteSize - 1 do
-        Dispose(Data.InnerPerm[colIdx]);
-      Data.InnerPerm.Free;
-    end;
-  end;
-
-var
-  palIdx, colIdx, iteration: Integer;
-  fSum, prevFSum: Double;
-  r, g, b: Byte;
-  MTPool: TMTPool;
-begin
-  SetLength(f, FPaletteCount);
-  SetLength(NewPal, FPaletteCount, FPaletteSize);
-
-  // mean of all palette colors
-
-  MeanR := 0;
-  MeanG := 0;
-  MeanB := 0;
-
-  for palIdx := 0 to FPaletteCount - 1 do
-    for colIdx := 0 to FPaletteSize - 1 do
-    begin
-      FromRGB(FPalettes[palIdx].PaletteRGB[colIdx], r, g, b);
-
-      MeanR += r;
-      MeanG += g;
-      MeanB += b;
-    end;
-
-  MeanR := MeanR div FPaletteSize;
-  MeanG := MeanG div FPaletteSize;
-  MeanB := MeanB div FPaletteSize;
-
-  iteration := 0;
-  prevFSum := 0;
-  fSum := 0;
-
-  // stepwise algorithm (each palette being optimized alone, needs iterations to attain global optimum)
-
-  MTPool := TMTPool.Create(MaxThreadCount);
-  try
-    repeat
-      prevFSum := max(fSum, prevFSum);
-      Inc(iteration);
-
-      MTPool.DoLocalProc(@DoPal, 0, FPaletteCount - 1);
-
-      fSum := 0;
-      for palIdx := 0 to FPaletteCount - 1 do
-      begin
-        fSum += f[palIdx];
-
-        for colIdx := 0 to FPaletteSize - 1 do
-          FPalettes[palIdx].PaletteRGB[colIdx] := NewPal[palIdx, colIdx];
-      end;
-      fSum /= FPaletteCount;
-
-      //WriteLn(iteration:4,fSum:16:3);
-
-    until fSum <= prevFSum;
-  finally
-    MTPool.Free;
-  end;
-
-  WriteLn('OptimizePalettes: ', iteration, ' iterations');
-end;
-
 procedure TTilingEncoder.QuantizeUsingYakmo(APalIdx, AColorCount: Integer);
 const
   cFeatureCount = 3;
@@ -4928,6 +4734,7 @@ begin
 
     CMItem^.Count := 0;
     RGBToHSV(CMItem^.R, CMItem^.G, CMItem^.B, CMItem^.Hue, CMItem^.Sat, CMItem^.Val);
+    CMItem^.Luma := ToLuma(CMItem^.R, CMItem^.G, CMItem^.B);
     CMPal.Add(CMItem);
   end;
 end;
@@ -4946,7 +4753,7 @@ begin
 
     // split most used colors into tile palettes
 
-    CMPal.Sort(@CompareCountIndexVSH);
+    CMPal.Sort(@CompareCountIndexYSH);
 
     SetLength(FPalettes[APalIdx].PaletteRGB, FPaletteSize);
     for i := 0 to CMPal.Count - 1 do

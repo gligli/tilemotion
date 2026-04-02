@@ -150,6 +150,7 @@ type
   TCountIndex = record
     Index, Count: Integer;
     R, G, B: Byte;
+    Luma: Integer;
     Hue, Sat, Val: Byte;
   end;
 
@@ -234,7 +235,7 @@ function PosterizeBpc(v, bpc: Byte): Byte; inline;
 function CompareEuclideanDCTPtr(pa, pb: PDCTScalar): Cardinal;
 function CompareEuclideanDCTPtr_asm(pa_rcx, pb_rdx: PDCTScalar): Cardinal; register; assembler;
 function CompareEuclidean(a, b: PFloat; size: Integer): Double; inline;
-function CompareCountIndexVSH(const Item1,Item2:PCountIndex):Integer;
+function CompareCountIndexYSH(const Item1,Item2:PCountIndex):Integer;
 function CompareIntegers(Item1,Item2,UserParameter:Pointer):Integer;
 function CompareDoubles(Item1,Item2,UserParameter:Pointer):Integer;
 function ComparePaletteUseCount(Item1,Item2,UserParameter:Pointer):Integer;
@@ -815,9 +816,9 @@ begin
   Result := CompareValue(PInteger(Item1)^, PInteger(Item2)^);
 end;
 
-function CompareCountIndexVSH(const Item1,Item2:PCountIndex):Integer;
+function CompareCountIndexYSH(const Item1,Item2:PCountIndex):Integer;
 begin
-  Result := CompareValue(Item1^.Val, Item2^.Val);
+  Result := CompareValue(Item1^.Luma, Item2^.Luma);
   if Result = 0 then
     Result := CompareValue(Item1^.Sat, Item2^.Sat);
   if Result = 0 then
