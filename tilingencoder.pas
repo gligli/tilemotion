@@ -2121,7 +2121,8 @@ var
 
   procedure DoXY(AIndex: PtrInt; AData: Pointer);
   var
-    sx, sy, dsIdx: Integer;
+    sx, sy, dsIdx, tIdx: Integer;
+    HMirror, VMirror: Boolean;
     knnErr: Cardinal;
 
     FrameTile: PTile;
@@ -2145,8 +2146,14 @@ var
     dsIdx := ann_kdtree_short_search(DS^.ANN, @FTDCT[0], 0, @knnErr);
     if InRange(dsIdx, 0, DS^.KNNSize - 1) then
     begin
-      TMI^.TileIdx := dsIdx;
-      TMI^.PalIdx := Encoder.FTiles[dsIdx]^.PalIdx;
+      tIdx := dsIdx shr 2;
+      VMirror := (dsIdx and 2) <> 0;
+      HMirror := (dsIdx and 1) <> 0;
+
+      TMI^.TileIdx := tIdx;
+      TMI^.PalIdx := Encoder.FTiles[tIdx]^.PalIdx;
+      TMI^.VMirror := TMI^.VMirror xor VMirror;
+      TMI^.HMirror := TMI^.HMirror xor HMirror;
       TMI^.Error := knnErr;
       TMI^.IsPredicted := False;
       FillChar(TMI^.Attrs, SizeOf(TMI^.Attrs), 0);
@@ -2382,6 +2389,7 @@ procedure TTilingEncoder.Dither;
 
   procedure DoDither(AIndex: PtrInt; AData: Pointer);
   var
+    HMirror, VMirror: Boolean;
     Tile: PTile;
   begin
     Tile := FTiles[AIndex];
@@ -2390,6 +2398,14 @@ procedure TTilingEncoder.Dither;
       Exit;
 
     DitherTile(Tile^, FPalettes[Tile^.PalIdx].MixingPlan);
+
+    GetTileHVMirrorHeuristics(Tile^, True, HMirror, VMirror);
+
+    Tile^.HMirror_Initial := Tile^.HMirror_Initial xor HMirror;
+    Tile^.VMirror_Initial := Tile^.VMirror_Initial xor VMirror;
+
+    if HMirror then HMirrorTile(Tile^);
+    if VMirror then VMirrorTile(Tile^);
   end;
 
 var
@@ -4955,17 +4971,22 @@ var
   procedure DoPsyV(AIndex: PtrInt; AData: Pointer);
   var
     dsIdx: Integer;
+    HMirror, VMirror: Boolean;
     T: PTile;
     CpnPixels: TCpnPixels;
   begin
     T := Tiles[AIndex];
     Assert(T^.Active);
 
-    dsIdx := AIndex;
+    dsIdx := AIndex * 4 {H/V mirrors};
 
-    ConvertToCpnPixels(T^, True, False, False, False, FPalettes[T^.PalIdx].PaletteRGB, CpnPixels);
-
-    ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsPSNRHVS, cColorCpns, DS^.DatasetPtrs[dsIdx]);
+    for VMirror := False to True do
+      for HMirror := False to True do
+      begin
+        ConvertToCpnPixels(T^, True, False, VMirror, HMirror, FPalettes[T^.PalIdx].PaletteRGB, CpnPixels);
+        ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsPSNRHVS, cColorCpns, DS^.DatasetPtrs[dsIdx]);
+        Inc(dsIdx);
+      end;
   end;
 
 var
@@ -4977,7 +4998,7 @@ begin
   DS := New(PTilingDataset);
   FillChar(DS^, SizeOf(TTilingDataset), 0);
 
-  DS^.KNNSize := Length(FTiles);
+  DS^.KNNSize := Length(FTiles) * 4 {H/V mirrors};
   SetLength(DS^.Dataset, DS^.KNNSize * cTileDCTSize);
   SetLength(DS^.DatasetPtrs, DS^.KNNSize);
 
