@@ -56,7 +56,7 @@ const CTMAttrBits = 1 + 1 + 10; // HMir + VMir + PalIdx
 const CShortIdxBits = 16 - CTMAttrBits;
 const CTileSize = CTileWidth * CTileWidth;
 const CMaxPaletteCount = 65536;
-const CMaxTMBuffers = 4;
+const CMaxTMBuffers = 5;
 
 let gtmWLZMA = null;
 

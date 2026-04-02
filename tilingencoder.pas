@@ -3304,7 +3304,7 @@ end;
 procedure TTilingEncoder.SetMotionPredictMaxBufferedFrames(AValue: Integer);
 begin
   if FMotionPredictMaxBufferedFrames = AValue then Exit;
-  FMotionPredictMaxBufferedFrames := EnsureRange(AValue, 1, 3);
+  FMotionPredictMaxBufferedFrames := EnsureRange(AValue, 1, 4);
 end;
 
 procedure TTilingEncoder.ConvertToCpnPixels(const ATile: TTile; FromPal, UseLAB, VMirror, HMirror: Boolean; const APalette: TIntegerDynArray; out ACpnPixels: TCpnPixels);

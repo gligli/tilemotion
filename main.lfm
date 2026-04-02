@@ -123,9 +123,9 @@ object MainForm: TMainForm
     Height = 610
     Top = 40
     Width = 1152
-    ActivePage = tsOutput
+    ActivePage = tsSettings
     Anchors = [akTop, akLeft, akRight, akBottom]
-    TabIndex = 2
+    TabIndex = 0
     TabOrder = 5
     OnChange = UpdateVideo
     object tsSettings: TTabSheet
@@ -549,6 +549,7 @@ object MainForm: TMainForm
           '1'
           '2'
           '3'
+          '4'
         )
         Style = csDropDownList
         TabOrder = 13
