@@ -152,6 +152,7 @@ type
     procedure miLoadSettingsClick(Sender: TObject);
     procedure miReloadClick(Sender: TObject);
     procedure miSaveSettingsClick(Sender: TObject);
+    procedure screenClick(Sender: TObject);
     procedure seMaxTilesEditingDone(Sender: TObject);
     procedure seQbTilesEditingDone(Sender: TObject);
     procedure tbFrameChange(Sender: TObject);
@@ -427,6 +428,11 @@ begin
   end;
 end;
 
+procedure TMainForm.screenClick(Sender: TObject);
+begin
+  tbFrame.SetFocus;
+end;
+
 procedure TMainForm.btnRunAllClick(Sender: TObject);
 var
   firstStep: TEncoderStep;
@@ -532,6 +538,7 @@ begin
       end;
     end;
     VK_PRIOR, VK_NEXT:
+    begin
       for i := 0 to FTilingEncoder.KeyFrameCount - 1 do
         if InRange(tbFrame.Position, FTilingEncoder.KeyFrames[i].StartFrame, FTilingEncoder.KeyFrames[i].EndFrame) then
         begin
@@ -543,6 +550,8 @@ begin
             tbFrame.Position := FTilingEncoder.KeyFrames[EnsureRange(i + IfThen(k = VK_NEXT, 1, -1), 0, FTilingEncoder.KeyFrameCount - 1)].StartFrame;
           Break;
         end;
+      tbFrame.SetFocus;
+    end;
     VK_CONTROL:
       tbFrame.LineSize := round(FTilingEncoder.FramesPerSecond);
   end;
