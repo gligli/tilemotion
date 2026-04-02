@@ -4065,7 +4065,7 @@ end;
 
 procedure TTilingEncoder.Render;
 var
-  frmIdx: Integer;
+  frmIdx, sf: Integer;
 begin
   if not FRenderOutputDirty or (FRenderPage <> rpOutput) or not Assigned(FFrames) then
   begin
@@ -4074,7 +4074,10 @@ begin
   else
   begin
     frmIdx := EnsureRange(FRenderFrameIndex, 0, High(FFrames));
-    for frmIdx := FFrames[frmIdx].PKeyFrame.StartFrame to frmIdx do
+    sf := FFrames[frmIdx].PKeyFrame.StartFrame;
+    if (FRenderOuptutFrameIndex < FRenderFrameIndex) and InRange(FRenderOuptutFrameIndex, sf, FFrames[frmIdx].PKeyFrame.EndFrame) then
+      sf := FRenderOuptutFrameIndex;
+    for frmIdx := sf to frmIdx do
       RenderFrame(frmIdx, rpOutput);
   end;
 end;
