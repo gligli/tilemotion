@@ -4313,6 +4313,8 @@ begin
   if not Assigned(AThread) then
     scalable_allocation_command(TBBMALLOC_CLEAN_ALL_BUFFERS, nil); // force the mem allocator to release unused memory
 
+  FRenderOutputDirty := True;
+
   curTime := GetTickCount64;
 
   if (ASubStepIdx < 0) and (AProgressStep = esAll) then // reset
