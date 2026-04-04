@@ -624,7 +624,7 @@ object MainForm: TMainForm
       ClientHeight = 582
       ClientWidth = 1144
       object sePage: TSpinEdit
-        Left = 136
+        Left = 153
         Height = 23
         Top = 8
         Width = 128
@@ -633,18 +633,18 @@ object MainForm: TMainForm
         OnChange = UpdateVideo
       end
       object Label6: TLabel
-        Left = 4
+        Left = 8
         Height = 15
-        Top = 12
+        Top = 11
         Width = 47
         Caption = 'Tile page'
         ParentColor = False
       end
       object llPalTileDesc: TPanel
-        Left = 272
+        Left = 292
         Height = 18
-        Top = 8
-        Width = 864
+        Top = 10
+        Width = 844
         Anchors = [akTop, akLeft, akRight]
         BevelOuter = bvLowered
         Font.CharSet = ANSI_CHARSET
@@ -653,13 +653,13 @@ object MainForm: TMainForm
         Font.Quality = fqDraft
         ParentColor = False
         ParentFont = False
-        TabOrder = 2
+        TabOrder = 1
       end
       object imgTiles: TImage
-        Left = 272
-        Height = 543
-        Top = 32
-        Width = 864
+        Left = 292
+        Height = 535
+        Top = 40
+        Width = 844
         AntialiasingMode = amOff
         Anchors = [akTop, akLeft, akRight, akBottom]
         PopupMenu = pmProcesses
@@ -669,34 +669,32 @@ object MainForm: TMainForm
         OnMouseWheelUp = imgTilesMouseWheelUp
         OnPaintBackground = imgPaintBackground
       end
-      object sbPalette: TScrollBox
-        Left = 4
-        Height = 534
-        Top = 41
-        Width = 260
-        HorzScrollBar.Page = 1
-        HorzScrollBar.Visible = False
-        VertScrollBar.Increment = 256
-        VertScrollBar.Page = 528
-        VertScrollBar.Tracking = True
+      object imgPalette: TPaintBox
+        Cursor = crHandPoint
+        Left = 8
+        Height = 535
+        Top = 40
+        Width = 256
         Anchors = [akTop, akLeft, akBottom]
-        ClientHeight = 530
-        ClientWidth = 256
-        TabOrder = 1
-        object imgPalette: TImage
-          Cursor = crHandPoint
-          Left = 0
-          Height = 528
-          Top = 0
-          Width = 256
-          AntialiasingMode = amOff
-          PopupMenu = pmProcesses
-          Stretch = True
-          OnClick = imgPaletteClick
-          OnContextPopup = imgPaletteContextPopup
-          OnMouseMove = imgPaletteMouseMove
-          OnPaintBackground = imgPaintBackground
-        end
+        PopupMenu = pmProcesses
+        OnClick = imgPaletteClick
+        OnContextPopup = imgPaletteContextPopup
+        OnMouseMove = imgPaletteMouseMove
+        OnMouseWheelDown = imgPaletteMouseWheelDown
+        OnMouseWheelUp = imgPaletteMouseWheelUp
+        OnPaint = imgPalettePaint
+      end
+      object sbPalettes: TScrollBar
+        Left = 264
+        Height = 535
+        Top = 40
+        Width = 17
+        Anchors = [akTop, akLeft, akBottom]
+        Kind = sbVertical
+        LargeChange = 4
+        PageSize = 0
+        TabOrder = 2
+        OnChange = sbPalettesChange
       end
     end
   end

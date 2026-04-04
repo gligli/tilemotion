@@ -15,7 +15,7 @@ uses
 type
   TEncoderStep = (esAll = -1, esLoad = 0, esPredict, esReduce, esPreparePalettes, esDither, esReindex1, esReconstruct, esReindex2, esSave);
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
-  TRenderPage = (rpNone, rpInput, rpOutput, rpTilesPalette);
+  TRenderPage = (rpNone, rpInput, rpOutput, rpTiles);
   TPsyVisMode = (pvsDCT, pvsWeightedDCT, pvsSpeDCT, pvsWeightedSpeDCT, pvsPSNRHVS);
   TBlendingMode = (bmNone, bmWeight, bmAlphaWeight);
 
@@ -460,7 +460,6 @@ type
     FRenderFrameBuffer: TFrameBuffer;
     FOutputBitmap: TBitmap;
     FInputBitmap: TBitmap;
-    FPaletteBitmap: TBitmap;
     FTilesBitmap: TBitmap;
     FOnProgress: TTilingEncoderProgressEvent;
     FProgressStep: TEncoderStep;
@@ -652,7 +651,6 @@ type
     property RenderPsychoVisualQuality: Double read FRenderPsychoVisualQuality;
     property OutputBitmap: TBitmap read FOutputBitmap;
     property InputBitmap: TBitmap read FInputBitmap;
-    property PaletteBitmap: TBitmap read FPaletteBitmap;
     property TilesBitmap: TBitmap read FTilesBitmap;
     property ProgressStep: TEncoderStep read FProgressStep;
     property OnProgress: TTilingEncoderProgressEvent read FOnProgress write FOnProgress;
@@ -3082,10 +3080,6 @@ begin
   FTilesBitmap.Width:=FScreenWidth;
   FTilesBitmap.Height:=FScreenHeight;
   FTilesBitmap.PixelFormat:=pf32bit;
-
-  FPaletteBitmap.Width := FPaletteSize;
-  FPaletteBitmap.Height := FPaletteCount;
-  FPaletteBitmap.PixelFormat:=pf32bit;
 end;
 
 procedure TTilingEncoder.InitFrames(AFrameCount: Integer);
@@ -3760,7 +3754,7 @@ const
   end;
 
 var
-  i, j, sx, sy, globalTileCount, col, off, siz: Integer;
+  sx, sy, globalTileCount, col, off, siz: Integer;
   hmir, vmir: Boolean;
   tidx: Int64;
   errCml: UInt64;
@@ -3983,29 +3977,10 @@ begin
       FRenderOuptutFrameIndex := Frame.Index;
     end;
 
-    // "FPalettes / Tiles" tab
+    // "Tiles" tab
 
-    if APage = rpTilesPalette then
+    if APage = rpTiles then
     begin
-      FPaletteBitmap.BeginUpdate;
-      try
-        for j := 0 to FPaletteBitmap.Height - 1 do
-        begin
-          pFB := FPaletteBitmap.ScanLine[j];
-          for i := 0 to FPaletteBitmap.Width - 1 do
-          begin
-            if Assigned(FPalettes) and Assigned(FPalettes[j].PaletteRGB) then
-              pFB^ := SwapRB(FPalettes[j].PaletteRGB[i])
-            else
-              pFB^ := clFuchsia;
-
-            Inc(pFB);
-          end;
-        end;
-      finally
-        FPaletteBitmap.EndUpdate;
-      end;
-
       FTilesBitmap.Canvas.Brush.Color := clAqua;
       FTilesBitmap.Canvas.Brush.Style := bsSolid;
       FTilesBitmap.Canvas.FillRect(FTilesBitmap.Canvas.ClipRect);
@@ -5908,7 +5883,6 @@ begin
   FInputBitmap := TBitmap.Create;
   FOutputBitmap := TBitmap.Create;
   FTilesBitmap := TBitmap.Create;
-  FPaletteBitmap := TBitmap.Create;
 
   FRenderOuptutFrameIndex := -1;
   FRenderPredicted := True;
@@ -5931,7 +5905,6 @@ begin
   FInputBitmap.Free;
   FOutputBitmap.Free;
   FTilesBitmap.Free;
-  FPaletteBitmap.Free;
 end;
 
 procedure TTilingEncoder.Run(AStep: TEncoderStep);
