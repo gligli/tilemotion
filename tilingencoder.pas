@@ -3788,7 +3788,7 @@ begin
 
     globalTileCount := GetTileCount(False);
 
-    FRenderTitleText := 'Global: ' + IntToStr(globalTileCount) + ' / Frame #' + IntToStr(Frame.Index) + IfThen(Frame.PKeyFrame.StartFrame = Frame.Index, ' [KF]', '     ') + ' : ' + IntToStr(Frame.GetUsedTileCount);
+    FRenderTitleText := Format('Global: %12d / Frame #%8d %s: %8d', [globalTileCount, Frame.Index, IfThen(Frame.PKeyFrame.StartFrame = Frame.Index, '[KF]', '    '), Frame.GetUsedTileCount]);
 
     // "Input" tab
 

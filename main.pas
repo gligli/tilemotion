@@ -314,9 +314,9 @@ begin
     llPalTileDesc.Caption := Format('Tile #: %6d, UseCount: %6d%s%s%s', [
         tileIdx,
         FTilingEncoder.Tiles[tileIdx]^.UseCount,
-        IfThen(FTilingEncoder.Tiles[tileIdx]^.Active, ', [Active]'),
-        IfThen(FTilingEncoder.Tiles[tileIdx]^.HMirror_Initial, ', [H]'),
-        IfThen(FTilingEncoder.Tiles[tileIdx]^.VMirror_Initial, ', [V]')])
+        IfThen(FTilingEncoder.Tiles[tileIdx]^.Active, ', [Active]', '          '),
+        IfThen(FTilingEncoder.Tiles[tileIdx]^.HMirror_Initial, ', [H]', '     '),
+        IfThen(FTilingEncoder.Tiles[tileIdx]^.VMirror_Initial, ', [V]', '     ')])
   else
     llPalTileDesc.Caption := 'Invalid tile!';
 end;
