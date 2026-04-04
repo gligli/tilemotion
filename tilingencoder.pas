@@ -5448,6 +5448,31 @@ begin
   ReframeUI(FTileMapWidth, FTileMapHeight); // for FPaletteBitmap
 end;
 
+function CompareTileIdxsUseCountPalPixels(Item1, Item2, UserParameter:Pointer):Integer;
+var
+  Encoder: TTilingEncoder absolute UserParameter;
+  t1, t2: PTile;
+begin
+  t1 := Encoder.FTiles[PInteger(Item1)^];
+  t2 := Encoder.FTiles[PInteger(Item2)^];
+
+  Result := CompareValue(t2^.UseCount, t1^.UseCount);
+
+  if Result = 0 then
+    Result := t1^.ComparePalPixelsTo(t2^);
+end;
+
+function CompareTileIdxsPalPixels(Item1, Item2, UserParameter:Pointer):Integer;
+var
+  Encoder: TTilingEncoder absolute UserParameter;
+  t1, t2: PTile;
+begin
+  t1 := Encoder.FTiles[PInteger(Item1)^];
+  t2 := Encoder.FTiles[PInteger(Item2)^];
+
+  Result := t1^.ComparePalPixelsTo(t2^);
+end;
+
 procedure TTilingEncoder.SaveStream(AStream: TStream);
 const
   CMinBlkSkipCount = 4;
@@ -5608,7 +5633,7 @@ var
 
   procedure MapTiles;
   var
-    tIdx, frmIdx, sy, sx, kfIdx: Integer;
+    tIdx, iTIdx, frmIdx, sy, sx, kfIdx: Integer;
     perKFPos: TIntegerDynArray;
     globalPos: Integer;
     TMI: PTileMapItem;
@@ -5660,17 +5685,15 @@ var
       end;
     end;
 
-    // dim arrays & log TileCount
+    // dim arrays
 
     SetLength(globalTiles, globalPos);
     globalPos := 0;
-    WriteLn('Global      , TileCount: ', Length(globalTiles):8);
     SetLength(perKfTiles, Length(FKeyFrames));
     for kfIdx := 0 to High(perKfTiles) do
     begin
       SetLength(perKfTiles[kfIdx], perKFPos[kfIdx]);
       perKFPos[kfIdx] := 0;
-      WriteLn('KF: ', FKeyFrames[kfIdx].StartFrame:8,', TileCount: ', Length(perKfTiles[kfIdx]):8);
     end;
 
     // fill arrays with tile indexes
@@ -5684,20 +5707,40 @@ var
       begin
         if kfIdx < High(Integer) then
         begin
-          tile^.TmpIndex := Length(globalTiles) + perKFPos[kfIdx];
-
           perKfTiles[kfIdx, perKFPos[kfIdx]] := tIdx;
           Inc(perKFPos[kfIdx]);
         end
         else
         begin
-          tile^.TmpIndex := globalPos;
-
           globalTiles[globalPos] := tIdx;
           Inc(globalPos);
         end;
       end;
     end;
+
+    // sort arrays
+
+    if Assigned(globalTiles) then
+      QuickSort(globalTiles[0], 0, High(globalTiles), SizeOf(Integer), @CompareTileIdxsUseCountPalPixels, Self);
+
+    for kfIdx := 0 to High(perKfTiles) do
+      if Assigned(perKfTiles[kfIdx]) then
+        QuickSort(perKfTiles[kfIdx, 0], 0, High(perKfTiles[kfIdx]), SizeOf(Integer), @CompareTileIdxsPalPixels, Self);
+
+    // map tiles to final indexes thru TmpIndex
+
+    for iTIdx := 0 to High(globalTiles) do
+      FTiles[globalTiles[iTIdx]]^.TmpIndex := iTIdx;
+
+    for kfIdx := 0 to High(perKfTiles) do
+      for iTIdx := 0 to High(perKfTiles[kfIdx]) do
+        FTiles[perKfTiles[kfIdx, iTIdx]]^.TmpIndex := iTIdx + Length(globalTiles);
+
+    // log TileCount
+
+    WriteLn('Global      , TileCount: ', Length(globalTiles):8);
+    for kfIdx := 0 to High(perKfTiles) do
+      WriteLn('KF: ', FKeyFrames[kfIdx].StartFrame:8,', TileCount: ', Length(perKfTiles[kfIdx]):8);
   end;
 
 var
