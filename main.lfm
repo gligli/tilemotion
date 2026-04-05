@@ -623,28 +623,11 @@ object MainForm: TMainForm
       Caption = 'Palettes / Tiles'
       ClientHeight = 582
       ClientWidth = 1144
-      object sePage: TSpinEdit
-        Left = 153
-        Height = 23
-        Top = 8
-        Width = 128
-        MaxValue = 10000
-        TabOrder = 0
-        OnChange = UpdateVideo
-      end
-      object Label6: TLabel
-        Left = 8
-        Height = 15
-        Top = 11
-        Width = 47
-        Caption = 'Tile page'
-        ParentColor = False
-      end
       object llPalTileDesc: TPanel
-        Left = 292
+        Left = 8
         Height = 18
         Top = 10
-        Width = 844
+        Width = 1128
         Anchors = [akTop, akLeft, akRight]
         BevelOuter = bvLowered
         Font.CharSet = ANSI_CHARSET
@@ -653,13 +636,13 @@ object MainForm: TMainForm
         Font.Quality = fqDraft
         ParentColor = False
         ParentFont = False
-        TabOrder = 1
+        TabOrder = 0
       end
       object imgTiles: TImage
         Left = 292
         Height = 535
         Top = 40
-        Width = 844
+        Width = 827
         AntialiasingMode = amOff
         Anchors = [akTop, akLeft, akRight, akBottom]
         PopupMenu = pmProcesses
@@ -693,8 +676,19 @@ object MainForm: TMainForm
         Kind = sbVertical
         LargeChange = 4
         PageSize = 0
-        TabOrder = 2
+        TabOrder = 1
         OnChange = sbPalettesChange
+      end
+      object sbTiles: TScrollBar
+        Left = 1119
+        Height = 535
+        Top = 39
+        Width = 17
+        Anchors = [akTop, akRight, akBottom]
+        Kind = sbVertical
+        PageSize = 0
+        TabOrder = 2
+        OnChange = UpdateVideo
       end
     end
   end

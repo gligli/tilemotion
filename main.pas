@@ -57,7 +57,6 @@ type
     Label20: TLabel;
     Label22: TLabel;
     Label4: TLabel;
-    Label6: TLabel;
     lblPct: TLabel;
     llPalTileDesc: TPanel;
     miGeneratePNGsOutput: TMenuItem;
@@ -80,6 +79,7 @@ type
     rbTileLimit: TRadioButton;
     rbPSNR: TRadioButton;
     sbPalettes: TScrollBar;
+    sbTiles: TScrollBar;
     sdGTM: TSaveDialog;
     sdSettings: TSaveDialog;
     seMaxCores: TSpinEdit;
@@ -92,7 +92,6 @@ type
     seVisGamma: TFloatSpinEdit;
     seFrameCount: TSpinEdit;
     seMaxTiles: TSpinEdit;
-    sePage: TSpinEdit;
     seStartFrame: TSpinEdit;
     seShotTransMinSecondsPerKF: TFloatSpinEdit;
     tiTrackbar: TTimer;
@@ -156,6 +155,7 @@ type
     procedure miReloadClick(Sender: TObject);
     procedure miSaveSettingsClick(Sender: TObject);
     procedure sbPalettesChange(Sender: TObject);
+    procedure sbTilesChange(Sender: TObject);
     procedure screenClick(Sender: TObject);
     procedure seMaxTilesEditingDone(Sender: TObject);
     procedure seQbTilesEditingDone(Sender: TObject);
@@ -290,27 +290,31 @@ var
   palIdx, useCount: Integer;
 begin
   P := imgPalette.ScreenToClient(Mouse.CursorPos);
-  palIdx := EnsureRange(iDivDef(P.Y, imgPalette.Tag, 0) + sbPalettes.Position, 0, High(FTilingEncoder.Palettes));
+  palIdx := Max(0, iDivDef(P.Y, imgPalette.Tag, 0) + sbPalettes.Position);
 
-  useCount := -1;
   if InRange(FTilingEncoder.RenderFrameIndex, 0, High(FTilingEncoder.Frames)) and
       Assigned(FTilingEncoder.Frames[FTilingEncoder.RenderFrameIndex].PKeyFrame) and
       InRange(palIdx, 0, High(FTilingEncoder.Palettes)) then
+  begin
     useCount := FTilingEncoder.Palettes[palIdx].UseCount;
-
-  llPalTileDesc.Caption := Format('Palette #: %3d, UseCount: %6d', [palIdx, useCount]);
+    llPalTileDesc.Caption := Format('Palette #: %3d, UseCount: %6d', [palIdx, useCount]);
+  end
+  else
+  begin
+    llPalTileDesc.Caption := 'Invalid palette!';
+  end;
 end;
 
 procedure TMainForm.imgPaletteMouseWheelDown(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
 begin
-  sbPalettes.Position := EnsureRange(sbPalettes.Position + sbPalettes.LargeChange, 0, FTilingEncoder.PaletteCount - sbPalettes.LargeChange);
+  sbPalettes.Position := EnsureRange(sbPalettes.Position + sbPalettes.LargeChange, 0, Length(FTilingEncoder.Palettes) - sbPalettes.LargeChange);
   Handled := True;
   imgPalette.Invalidate;
 end;
 
 procedure TMainForm.imgPaletteMouseWheelUp(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
 begin
-  sbPalettes.Position := EnsureRange(sbPalettes.Position - sbPalettes.LargeChange, 0, FTilingEncoder.PaletteCount - sbPalettes.LargeChange);
+  sbPalettes.Position := EnsureRange(sbPalettes.Position - sbPalettes.LargeChange, 0, Length(FTilingEncoder.Palettes) - sbPalettes.LargeChange);
   Handled := True;
   imgPalette.Invalidate;
 end;
@@ -361,12 +365,13 @@ begin
   P.X := P.X * imgTiles.Picture.Width div imgTiles.Width;
   P.Y := P.Y * imgTiles.Picture.Height div imgTiles.Height;
 
-  tileIdx := (sePage.Value * (imgTiles.Picture.Height shr cTileWidthBits) + (P.Y shr cTileWidthBits)) * (imgTiles.Picture.Width shr cTileWidthBits) + (P.X shr cTileWidthBits);
+  tileIdx := (sbTiles.Position * (imgTiles.Picture.Height shr cTileWidthBits) + (P.Y shr cTileWidthBits)) * (imgTiles.Picture.Width shr cTileWidthBits) + (P.X shr cTileWidthBits);
 
   if InRange(FTilingEncoder.RenderFrameIndex, 0, High(FTilingEncoder.Frames)) and
       Assigned(FTilingEncoder.Frames[FTilingEncoder.RenderFrameIndex].PKeyFrame) and
       InRange(tileIdx, 0, High(FTilingEncoder.Tiles)) then
-    llPalTileDesc.Caption := Format('Tile #: %6d, UseCount: %6d%s%s%s', [
+    llPalTileDesc.Caption := Format('Page: %4d / %4d, Tile #: %6d, UseCount: %6d%s%s%s', [
+        FTilingEncoder.RenderTilePage, FTilingEncoder.RenderTilePageCount - 1,
         tileIdx,
         FTilingEncoder.Tiles[tileIdx]^.UseCount,
         IfThen(FTilingEncoder.Tiles[tileIdx]^.Active, ', [Active]', '          '),
@@ -378,14 +383,16 @@ end;
 
 procedure TMainForm.imgTilesMouseWheelDown(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
 begin
-  sePage.Value := sePage.Value + 1;
+  sbTiles.Position := EnsureRange(sbTiles.Position + sbTiles.LargeChange, 0, FTilingEncoder.RenderTilePageCount - sbTiles.LargeChange);
   Handled := True;
+  UpdateVideo(nil);
 end;
 
 procedure TMainForm.imgTilesMouseWheelUp(Sender: TObject; Shift: TShiftState; MousePos: TPoint; var Handled: Boolean);
 begin
-  sePage.Value := sePage.Value - 1;
+  sbTiles.Position := EnsureRange(sbTiles.Position - sbTiles.LargeChange, 0, FTilingEncoder.RenderTilePageCount - sbTiles.LargeChange);
   Handled := True;
+  UpdateVideo(nil);
 end;
 
 procedure TMainForm.miGeneratePNGsInputClick(Sender: TObject);
@@ -486,6 +493,11 @@ end;
 procedure TMainForm.sbPalettesChange(Sender: TObject);
 begin
   imgPalette.Invalidate;
+end;
+
+procedure TMainForm.sbTilesChange(Sender: TObject);
+begin
+
 end;
 
 procedure TMainForm.screenClick(Sender: TObject);
@@ -661,11 +673,17 @@ end;
 
 procedure TMainForm.imgPaletteClick(Sender: TObject);
 var
+  palIdx: Integer;
   P: TPoint;
 begin
   P := imgPalette.ScreenToClient(Mouse.CursorPos);
-  sedPalIdx.Value := EnsureRange(iDivDef(P.Y, imgPalette.Tag, 0) + sbPalettes.Position, 0, High(FTilingEncoder.Palettes));
-  FTilingEncoder.RenderPaletteIndex := sedPalIdx.Value;
+
+  palIdx := Max(0, iDivDef(P.Y, imgPalette.Tag, 0) + sbPalettes.Position);
+  if palIdx < Length(FTilingEncoder.Palettes) then
+  begin
+    sedPalIdx.Value := palIdx;
+    FTilingEncoder.RenderPaletteIndex := palIdx;
+  end;
 end;
 
 procedure TMainForm.seMaxTilesEditingDone(Sender: TObject);
@@ -741,7 +759,7 @@ begin
     FTilingEncoder.RenderOutputDithered := chkDitheredO.Checked;
     FTilingEncoder.RenderUseGamma := chkGamma.Checked;
     FTilingEncoder.RenderPaletteIndex := sedPalIdx.Value;
-    FTilingEncoder.RenderTilePage := sePage.Value;
+    FTilingEncoder.RenderTilePage := sbTiles.Position;
     FTilingEncoder.RenderGammaValue := seVisGamma.Value;
 
     FTilingEncoder.MotionPredictRadius := StrToIntDef(cbxMPRadius.Text, 0);
@@ -792,7 +810,8 @@ begin
     seQbTiles.Enabled := rbTileLimit.Checked;
     seMaxTiles.Enabled := rbTileLimit.Checked;
     tbFrame.PageSize := Round(FTilingEncoder.FramesPerSecond);
-    sbPalettes.Max := FTilingEncoder.PaletteCount - sbPalettes.LargeChange;
+    sbPalettes.Max := Max(0, Length(FTilingEncoder.Palettes) - sbPalettes.LargeChange);
+    sbTiles.Max := FTilingEncoder.RenderTilePageCount - sbTiles.LargeChange;
 
     if FTrackbarTickCount <> FTilingEncoder.KeyFrameCount then
     begin

@@ -473,6 +473,7 @@ type
     function GetKeyFrameCount: Integer;
     function GetTiles: PTileDynArray;
     function GetRenderGammaValue: Double;
+    function GetRenderTilePageCount: Integer;
     procedure SetDitheringYliluoma2MixedColors(AValue: Integer);
     procedure SetFrameCountSetting(AValue: Integer);
     procedure SetFramesPerSecond(AValue: Double);
@@ -645,6 +646,7 @@ type
     property RenderUseGamma: Boolean read FRenderUseGamma write SetRenderUseGamma;
     property RenderPaletteIndex: Integer read FRenderPaletteIndex write SetRenderPaletteIndex;
     property RenderTilePage: Integer read FRenderTilePage write SetRenderTilePage;
+    property RenderTilePageCount: Integer read GetRenderTilePageCount;
     property RenderGammaValue: Double read GetRenderGammaValue write SetRenderGammaValue;
     property RenderPage: TRenderPage read FRenderPage write SetRenderPage;
     property RenderTitleText: String read FRenderTitleText;
@@ -2823,6 +2825,11 @@ begin
   Result := FGamma[1];
 end;
 
+function TTilingEncoder.GetRenderTilePageCount: Integer;
+begin
+  Result := (Length(FTiles) - 1) div FTileMapSize + 1;
+end;
+
 function TTilingEncoder.GetSettings: AnsiString;
 var
   tmpFN: String;
@@ -3651,6 +3658,7 @@ end;
 
 procedure TTilingEncoder.RenderFrame(AFrameIndex: Integer; APage: TRenderPage);
 const
+  CDummyTilesColor = $303030;
   CDrawPredictBaseLuma = $d0;
 
   procedure DrawTile(const ABuffer: TIntegerDynArray2; const APal: TIntegerDynArray; ATilePtr: PTile; ASY, ASX: Integer; AHmirror, AVmirror, AForceActive: Boolean); inline;
@@ -3691,7 +3699,7 @@ const
     end;
   end;
 
-  procedure DrawDummyTile(const ABuffer: TIntegerDynArray2; ASY, ASX: Integer; AColor: Integer = $303030);
+  procedure DrawDummyTile(const ABuffer: TIntegerDynArray2; ASY, ASX: Integer; AColor: Integer = CDummyTilesColor);
   const
     cTileData: array[0..7] of Byte = ($81, $42, $24, $18, $18, $24, $42, $81);
   var
@@ -3766,6 +3774,31 @@ var
   pal: TIntegerDynArray;
   canvas: TCanvas;
 begin
+  if (APage = rpInput) and (Length(FFrames) <= 0) then
+  begin
+    FInputBitmap.Canvas.Brush.Color := clBlack;
+    FInputBitmap.Canvas.Brush.Style := bsSolid;
+    FInputBitmap.Canvas.FillRect(FInputBitmap.Canvas.ClipRect);
+    FInputBitmap.Canvas.Brush.Color := CDummyTilesColor;
+    FInputBitmap.Canvas.Brush.Style := bsDiagCross;
+    FInputBitmap.Canvas.FillRect(FInputBitmap.Canvas.ClipRect);
+  end
+  else if (APage = rpOutput) and (Length(FFrames) <= 0) then
+  begin
+    FOutputBitmap.Canvas.Brush.Color := clBlack;
+    FOutputBitmap.Canvas.Brush.Style := bsSolid;
+    FOutputBitmap.Canvas.FillRect(FOutputBitmap.Canvas.ClipRect);
+    FOutputBitmap.Canvas.Brush.Color := CDummyTilesColor;
+    FOutputBitmap.Canvas.Brush.Style := bsDiagCross;
+    FOutputBitmap.Canvas.FillRect(FOutputBitmap.Canvas.ClipRect);
+  end
+  else if APage = rpTiles then
+  begin
+    FTilesBitmap.Canvas.Brush.Color := clAqua;
+    FTilesBitmap.Canvas.Brush.Style := bsSolid;
+    FTilesBitmap.Canvas.FillRect(FTilesBitmap.Canvas.ClipRect);
+  end;
+
   if Length(FFrames) <= 0 then
     Exit;
 
@@ -3788,13 +3821,6 @@ begin
 
     if APage = rpInput then
     begin
-      FInputBitmap.Canvas.Brush.Color := clBlack;
-      FInputBitmap.Canvas.Brush.Style := bsSolid;
-      FInputBitmap.Canvas.FillRect(FInputBitmap.Canvas.ClipRect);
-      FInputBitmap.Canvas.Brush.Color := $202020;
-      FInputBitmap.Canvas.Brush.Style := bsDiagCross;
-      FInputBitmap.Canvas.FillRect(FInputBitmap.Canvas.ClipRect);
-
       FInputBitmap.BeginUpdate;
       Frame.AcquireFrameTiles;
       try
@@ -3981,10 +4007,6 @@ begin
 
     if APage = rpTiles then
     begin
-      FTilesBitmap.Canvas.Brush.Color := clAqua;
-      FTilesBitmap.Canvas.Brush.Style := bsSolid;
-      FTilesBitmap.Canvas.FillRect(FTilesBitmap.Canvas.ClipRect);
-
       FTilesBitmap.BeginUpdate;
       try
         pFB := PInteger(FTilesBitmap.RawImage.Data);
