@@ -595,8 +595,13 @@ begin
   FFMPEG.FrameCount := PPtrIdx(FFMPEG.FmtCtx^.streams, FFMPEG.VideoStream)^.nb_frames;
   if FFMPEG.FrameCount <= 0 then
   begin
-    // estimate frame count using file duration
+    // estimate frame count using stream duration
     FFMPEG.FrameCount := Round(Max(0, PPtrIdx(FFMPEG.FmtCtx^.streams, FFMPEG.VideoStream)^.duration) * FFMPEG.TimeBase.num * FFMPEG.FramesPerSecond / FFMPEG.TimeBase.den);
+  end;
+  if FFMPEG.FrameCount <= 0 then
+  begin
+    // estimate frame count using file duration
+    FFMPEG.FrameCount := Round(Max(0, FFMPEG.FmtCtx^.duration) * FFMPEG.FramesPerSecond / AV_TIME_BASE_I);
   end;
   if FFMPEG.FrameCount <= 0 then
   begin
