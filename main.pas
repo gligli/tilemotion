@@ -13,25 +13,22 @@ type
   { TMainForm }
 
   TMainForm = class(TForm)
-    Bevel1: TBevel;
-    Bevel2: TBevel;
-    Bevel3: TBevel;
-    btnInput: TButton;
     btnGTM: TButton;
+    btnInput: TButton;
     btnRunAll: TButton;
     btnPM: TButton;
     cbxBlendingMode: TComboBox;
-    cbxMPRadius: TComboBox;
     cbxDitheringMode: TComboBox;
     cbxMPMBF: TComboBox;
+    cbxMPRadius: TComboBox;
+    cbxPalCount: TComboBox;
+    cbxPalSize: TComboBox;
+    cbxScaling: TComboBox;
+    cbxYilMix: TComboBox;
     chkStretch: TCheckBox;
     chkPredicted: TCheckBox;
-    cbxScaling: TComboBox;
     cbxEndStep: TComboBox;
-    cbxPalCount: TComboBox;
     cbxStartStep: TComboBox;
-    cbxYilMix: TComboBox;
-    cbxPalSize: TComboBox;
     chkDitheredO: TCheckBox;
     chkGamma: TCheckBox;
     chkMirrored: TCheckBox;
@@ -40,6 +37,9 @@ type
     edInput: TEdit;
     edOutput: TEdit;
     From: TLabel;
+    gbMain: TGroupBox;
+    gbAdvanced: TGroupBox;
+    gbCPU: TGroupBox;
     imgDest: TImage;
     imgPalette: TPaintBox;
     imgSource: TImage;
@@ -49,14 +49,15 @@ type
     Label11: TLabel;
     Label12: TLabel;
     Label13: TLabel;
-    Label18: TLabel;
+    Label14: TLabel;
     Label15: TLabel;
-    Label19: TLabel;
-    lblMaxCores: TLabel;
     Label17: TLabel;
+    Label18: TLabel;
+    Label19: TLabel;
     Label20: TLabel;
     Label22: TLabel;
     Label4: TLabel;
+    lblMaxCores: TLabel;
     lblPct: TLabel;
     llPalTileDesc: TPanel;
     miGeneratePNGsOutput: TMenuItem;
@@ -76,24 +77,20 @@ type
     pbProgress: TProgressBar;
     pcPages: TPageControl;
     pnLbl: TPanel;
-    rbTileLimit: TRadioButton;
-    rbPSNR: TRadioButton;
     sbPalettes: TScrollBar;
     sbTiles: TScrollBar;
     sdGTM: TSaveDialog;
     sdSettings: TSaveDialog;
+    seFrameCount: TSpinEdit;
     seMaxCores: TSpinEdit;
     Separator1: TMenuItem;
     Separator3: TMenuItem;
     sePSNR: TFloatSpinEdit;
-    seShotTransMaxSecondsPerKF: TFloatSpinEdit;
     seShotTransCorrelLoThres: TFloatSpinEdit;
-    seQbTiles: TFloatSpinEdit;
-    seVisGamma: TFloatSpinEdit;
-    seFrameCount: TSpinEdit;
-    seMaxTiles: TSpinEdit;
-    seStartFrame: TSpinEdit;
+    seShotTransMaxSecondsPerKF: TFloatSpinEdit;
     seShotTransMinSecondsPerKF: TFloatSpinEdit;
+    seStartFrame: TSpinEdit;
+    seVisGamma: TFloatSpinEdit;
     tiTrackbar: TTimer;
     tsTilesPal: TTabSheet;
     To1: TLabel;
@@ -157,8 +154,6 @@ type
     procedure sbPalettesChange(Sender: TObject);
     procedure sbTilesChange(Sender: TObject);
     procedure screenClick(Sender: TObject);
-    procedure seMaxTilesEditingDone(Sender: TObject);
-    procedure seQbTilesEditingDone(Sender: TObject);
     procedure tbFrameChange(Sender: TObject);
     procedure tiTrackbarTimer(Sender: TObject);
     procedure UpdateVideo(Sender: TObject);
@@ -547,7 +542,6 @@ begin
   cbxScaling.ItemIndex := 4;
   cbxPalCount.Text := '256';
   cbxMPRadius.Text := '128';
-  rbTileLimit.Checked := True;
 
   FTilingEncoder.Test;
 
@@ -562,7 +556,6 @@ begin
   cbxScaling.ItemIndex := 2;
   cbxPalCount.Text := '256';
   cbxMPRadius.Text := '128';
-  rbTileLimit.Checked := True;
 
   FTilingEncoder.Test;
 
@@ -686,19 +679,6 @@ begin
   end;
 end;
 
-procedure TMainForm.seMaxTilesEditingDone(Sender: TObject);
-begin
-  FTilingEncoder.GlobalTilingTileCount := seMaxTiles.Value;
-  seQbTiles.Value := FTilingEncoder.GlobalTilingQualityBasedTileCount;
-end;
-
-procedure TMainForm.seQbTilesEditingDone(Sender: TObject);
-begin
-  FTilingEncoder.GlobalTilingQualityBasedTileCount := seQbTiles.Value;
-  seMaxTiles.Value := FTilingEncoder.GlobalTilingTileCount;
-  UpdateGUI(Sender);
-end;
-
 procedure TMainForm.tbFrameChange(Sender: TObject);
 begin
   if FLockChanges then
@@ -766,9 +746,7 @@ begin
     FTilingEncoder.MotionPredictMaxBufferedFrames := StrToIntDef(cbxMPMBF.Text, 0);
     FTilingEncoder.MotionPredictBlendingMode := TBlendingMode(cbxBlendingMode.ItemIndex);
 
-    FTilingEncoder.GlobalTilingUseTargetPSNR := rbPSNR.Checked;
     FTilingEncoder.GlobalTilingTargetPSNR := sePSNR.Value;
-    FTilingEncoder.GlobalTilingQualityBasedTileCount := seQbTiles.Value;
 
     FTilingEncoder.DitheringMode := TPsyVisMode(cbxDitheringMode.ItemIndex);
     FTilingEncoder.DitheringYliluoma2MixedColors := StrToIntDef(cbxYilMix.Text, 1);
@@ -806,9 +784,6 @@ begin
     imgDest.Stretch := imgSource.Stretch;
     imgSource.Proportional := chkStretch.State = cbGrayed;
     imgDest.Proportional := imgSource.Proportional;
-    sePSNR.Enabled := rbPSNR.Checked;
-    seQbTiles.Enabled := rbTileLimit.Checked;
-    seMaxTiles.Enabled := rbTileLimit.Checked;
     tbFrame.PageSize := Round(FTilingEncoder.FramesPerSecond);
     sbPalettes.Max := Max(0, Length(FTilingEncoder.Palettes) - sbPalettes.LargeChange);
     sbTiles.Max := FTilingEncoder.RenderTilePageCount - sbTiles.LargeChange;
@@ -860,11 +835,7 @@ begin
    cbxMPMBF.Text := IntToStr(FTilingEncoder.MotionPredictMaxBufferedFrames);
    cbxBlendingMode.ItemIndex := Ord(FTilingEncoder.MotionPredictBlendingMode);
 
-   rbPSNR.Checked := FTilingEncoder.GlobalTilingUseTargetPSNR;
-   rbTileLimit.Checked := not FTilingEncoder.GlobalTilingUseTargetPSNR;
    sePSNR.Value := FTilingEncoder.GlobalTilingTargetPSNR;
-   seMaxTiles.Value := FTilingEncoder.GlobalTilingTileCount;
-   seQbTiles.Value := FTilingEncoder.GlobalTilingQualityBasedTileCount;
 
    cbxDitheringMode.ItemIndex := Ord(FTilingEncoder.DitheringMode);
    chkUseTK.Checked := FTilingEncoder.DitheringUseThomasKnoll;

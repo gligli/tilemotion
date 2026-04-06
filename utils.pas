@@ -634,20 +634,28 @@ begin
   y := yy; u := uu; v := vv; // for safe "out" param
 end;
 
+// from https://en.wikipedia.org/wiki/YCbCr#JPEG_conversion (0..255 digital version)
 procedure RGBToYUV(r, g, b: Byte; out y, u, v: TFloat; scl: TFloat);
 begin
-  y := (16  +  65.481 / 255.0 * r + 128.553 / 255.0 * g +  24.966 / 255.0 * b) * scl;
-  u := (128 -  37.797 / 255.0 * r -  74.203 / 255.0 * g + 112.000 / 255.0 * b) * scl;
-  v := (128 + 112.000 / 255.0 * r -  93.786 / 255.0 * g -  18.214 / 255.0 * b) * scl;
+  y := (        0.299    * r + 0.587    * g + 0.114    * b) * scl;
+  u := (128.0 - 0.168736 * r - 0.331264 * g + 0.5      * b) * scl;
+  v := (128.0 + 0.5      * r - 0.418688 * g - 0.081312 * b) * scl;
 end;
 
 function YUVToRGB(y, u, v, scl: TFloat): Integer;
 var
   r, g, b: TFloat;
 begin
-  r := 298.082 / (256.0 * scl) * y                               + 408.583 / (256.0 * scl) * v - 222.921;
-  g := 298.082 / (256.0 * scl) * y - 100.291 / (256.0 * scl) * u - 208.120 / (256.0 * scl) * v + 135.576;
-  b := 298.082 / (256.0 * scl) * y + 516.412 / (256.0 * scl) * u                               - 276.836;
+  y *= 1.0 / scl;
+  u *= 1.0 / scl;
+  v *= 1.0 / scl;
+
+  u -= 128.0;
+  v -= 128.0;
+
+  r := y                + 1.402    * v;
+  g := y - 0.344136 * u - 0.714136 * v;
+  b := y + 1.772    * u;
 
   Result := ToRGB(EnsureRange(Round(r), 0, 255), EnsureRange(Round(g), 0, 255), EnsureRange(Round(b), 0, 255));
 end;
