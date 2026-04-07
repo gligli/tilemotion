@@ -278,7 +278,7 @@ object MainForm: TMainForm
           Left = 346
           Height = 23
           Top = 85
-          Width = 128
+          Width = 129
           DropDownCount = 20
           ItemHeight = 15
           Items.Strings = (
@@ -332,16 +332,6 @@ object MainForm: TMainForm
           TabOrder = 10
           OnChange = UpdateGUI
         end
-        object sePSNR: TFloatSpinEdit
-          Left = 346
-          Height = 23
-          Top = 121
-          Width = 128
-          MaxValue = 100
-          TabOrder = 7
-          Value = 2
-          OnChange = UpdateGUI
-        end
         object cbxMPMBF: TComboBox
           Left = 411
           Height = 23
@@ -362,10 +352,31 @@ object MainForm: TMainForm
         object Label14: TLabel
           Left = 8
           Height = 15
-          Top = 125
-          Width = 288
-          Caption = 'Objective quality target (PSNR-HVS) (higher -> bigger)'
+          Top = 121
+          Width = 136
+          Caption = 'Quality (higher -> bigger)'
           ParentColor = False
+        end
+        object tbQuality: TTrackBar
+          Left = 342
+          Height = 26
+          Top = 120
+          Width = 136
+          Frequency = 10
+          Max = 100
+          Position = 50
+          ShowSelRange = False
+          OnChange = UpdateGUI
+          Color = 3487029
+          ParentColor = False
+          TabOrder = 7
+        end
+        object lblQuality: TLabel
+          Left = 480
+          Height = 15
+          Top = 121
+          Width = 51
+          Caption = 'lblQuality'
         end
       end
       object gbCPU: TGroupBox

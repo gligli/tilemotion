@@ -59,6 +59,7 @@ type
     Label4: TLabel;
     lblMaxCores: TLabel;
     lblPct: TLabel;
+    lblQuality: TLabel;
     llPalTileDesc: TPanel;
     miGeneratePNGsOutput: TMenuItem;
     miGeneratePNGsInput: TMenuItem;
@@ -85,12 +86,12 @@ type
     seMaxCores: TSpinEdit;
     Separator1: TMenuItem;
     Separator3: TMenuItem;
-    sePSNR: TFloatSpinEdit;
     seShotTransCorrelLoThres: TFloatSpinEdit;
     seShotTransMaxSecondsPerKF: TFloatSpinEdit;
     seShotTransMinSecondsPerKF: TFloatSpinEdit;
     seStartFrame: TSpinEdit;
     seVisGamma: TFloatSpinEdit;
+    tbQuality: TTrackBar;
     tiTrackbar: TTimer;
     tsTilesPal: TTabSheet;
     To1: TLabel;
@@ -746,7 +747,7 @@ begin
     FTilingEncoder.MotionPredictMaxBufferedFrames := StrToIntDef(cbxMPMBF.Text, 0);
     FTilingEncoder.MotionPredictBlendingMode := TBlendingMode(cbxBlendingMode.ItemIndex);
 
-    FTilingEncoder.GlobalTilingTargetPSNR := sePSNR.Value;
+    FTilingEncoder.ReduceQuality := tbQuality.Position;
 
     FTilingEncoder.DitheringMode := TPsyVisMode(cbxDitheringMode.ItemIndex);
     FTilingEncoder.DitheringYliluoma2MixedColors := StrToIntDef(cbxYilMix.Text, 1);
@@ -787,6 +788,7 @@ begin
     tbFrame.PageSize := Round(FTilingEncoder.FramesPerSecond);
     sbPalettes.Max := Max(0, Length(FTilingEncoder.Palettes) - sbPalettes.LargeChange);
     sbTiles.Max := FTilingEncoder.RenderTilePageCount - sbTiles.LargeChange;
+    lblQuality.Caption := IntToStr(FTilingEncoder.ReduceQuality) + ' %';
 
     if FTrackbarTickCount <> FTilingEncoder.KeyFrameCount then
     begin
@@ -835,7 +837,7 @@ begin
    cbxMPMBF.Text := IntToStr(FTilingEncoder.MotionPredictMaxBufferedFrames);
    cbxBlendingMode.ItemIndex := Ord(FTilingEncoder.MotionPredictBlendingMode);
 
-   sePSNR.Value := FTilingEncoder.GlobalTilingTargetPSNR;
+   tbQuality.Position := FTilingEncoder.ReduceQuality;
 
    cbxDitheringMode.ItemIndex := Ord(FTilingEncoder.DitheringMode);
    chkUseTK.Checked := FTilingEncoder.DitheringUseThomasKnoll;

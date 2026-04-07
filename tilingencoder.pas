@@ -11,7 +11,7 @@ interface
 uses
   windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, zstream, IniFiles, Graphics,
   IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, bufstream,
-  tbbmalloc, extern, utils, powell, mtpool;
+  tbbmalloc, extern, utils, powell, mtpool, FPReadJPEG, mywritejpeg;
 type
   TEncoderStep = (esAll = -1, esLoad = 0, esPredict, esReduce, esPreparePalettes, esDither, esReindex1, esReconstruct, esReindex2, esSave);
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
@@ -119,6 +119,7 @@ type
     UseCount: Cardinal;
     TmpIndex, MergeIndex: Integer;
     PalIdx: Integer;
+    TargetError: Cardinal;
     Flags: set of (tfActive, tfHasRGBPixels, tfHasPalPixels, tfHMirror_Initial, tfVMirror_Initial);
   end;
 
@@ -323,6 +324,7 @@ type
     FrameTilesEvent: THandle;
     FrameTilesLock: TSpinlock;
     CompressedFrameTiles: TMemoryStream;
+    FrameTilesJPEGPSNR: Double;
 
     IntraReducedTiles: PTileDynArray;
     IntraReducedTileIndexes: TIntegerDynArray2;
@@ -435,10 +437,7 @@ type
     FDitheringMode: TPsyVisMode;
     FDitheringUseThomasKnoll: Boolean;
     FDitheringYliluoma2MixedColors: Integer;
-    FGlobalTilingUseTargetPSNR: Boolean;
-    FGlobalTilingTargetPSNR: Double;
-    FGlobalTilingTileCount: Integer;
-    FGlobalTilingQualityBasedTileCount: Double;
+    FReduceQuality: Integer;
     FMaxThreadCount: Integer;
     FShotTransMaxSecondsPerKF: Double;
     FShotTransMinSecondsPerKF: Double;
@@ -478,7 +477,6 @@ type
     procedure SetDitheringYliluoma2MixedColors(AValue: Integer);
     procedure SetFrameCountSetting(AValue: Integer);
     procedure SetFramesPerSecond(AValue: Double);
-    procedure SetGlobalTilingQualityBasedTileCount(AValue: Double);
     procedure SetMaxThreadCount(AValue: Integer);
     procedure SetPaletteCount(AValue: Integer);
     procedure SetPaletteSize(AValue: Integer);
@@ -492,8 +490,7 @@ type
     procedure SetRenderPaletteIndex(AValue: Integer);
     procedure SetRenderPredicted(AValue: Boolean);
     procedure SetRenderTilePage(AValue: Integer);
-    procedure SetGlobalTilingTargetPSNR(AValue: Double);
-    procedure SetGlobalTilingTileCount(AValue: Integer);
+    procedure SetReduceQuality(AValue: Integer);
     procedure SetRenderUseGamma(AValue: Boolean);
     procedure SetScaling(AValue: Double);
     procedure SetShotTransCorrelLoThres(AValue: Double);
@@ -626,10 +623,7 @@ type
     property DitheringMode: TPsyVisMode read FDitheringMode write FDitheringMode;
     property DitheringUseThomasKnoll: Boolean read FDitheringUseThomasKnoll write FDitheringUseThomasKnoll;
     property DitheringYliluoma2MixedColors: Integer read FDitheringYliluoma2MixedColors write SetDitheringYliluoma2MixedColors;
-    property GlobalTilingUseTargetPSNR: Boolean read FGlobalTilingUseTargetPSNR write FGlobalTilingUseTargetPSNR;
-    property GlobalTilingTargetPSNR: Double read FGlobalTilingTargetPSNR write SetGlobalTilingTargetPSNR;
-    property GlobalTilingTileCount: Integer read FGlobalTilingTileCount write SetGlobalTilingTileCount;
-    property GlobalTilingQualityBasedTileCount: Double read FGlobalTilingQualityBasedTileCount write SetGlobalTilingQualityBasedTileCount;
+    property ReduceQuality: Integer read FReduceQuality write SetReduceQuality;
     property MaxThreadCount: Integer read FMaxThreadCount write SetMaxThreadCount;
     property ShotTransMaxSecondsPerKF: Double read FShotTransMaxSecondsPerKF write SetShotTransMaxSecondsPerKF;
     property ShotTransMinSecondsPerKF: Double read FShotTransMinSecondsPerKF write SetShotTransMinSecondsPerKF;
@@ -663,6 +657,21 @@ type
     procedure InitializeWriter(AImage: TLazIntfImage; AWriter: TFPCustomImageWriter); override;
   end;
 
+  { TRGBTiledImg }
+
+  TRGBTiledImg = class(TFPCustomImage)
+  private
+    FImage: PTileDynArray;
+    FTileStride: Integer;
+  protected
+    function GetInternalColor(x, y: integer): TFPColor; override;
+    procedure SetInternalColor (x, y: integer; const Value: TFPColor); override;
+    function GetInternalPixel(x, y: integer): integer; override;
+    procedure SetInternalPixel(x, y: integer; Value: integer); override;
+  public
+    property Image: PTileDynArray read FImage write FImage;
+    property TileStride: Integer read FTileStride write FTileStride;
+  end;
 
 implementation
 
@@ -781,6 +790,40 @@ var
 begin
   inherited InitializeWriter(AImage, AWriter);
   W.CompressionLevel := clfastest;
+end;
+
+{ TRGBTiledImg }
+
+function TRGBTiledImg.GetInternalColor(x, y: integer): TFPColor;
+var
+  r, g, b: Integer;
+begin
+  FromRGB(GetInternalPixel(x, y), r ,g, b);
+  Result.red:=(r shl 8)+r;
+  Result.green:=(g shl 8)+g;
+  Result.blue:=(b shl 8)+b;
+  Result.alpha:=alphaOpaque;
+end;
+
+procedure TRGBTiledImg.SetInternalColor(x, y: integer; const Value: TFPColor);
+begin
+  SetInternalPixel(x, y, ToRGB(Value.red shr 8, Value.green shr 8, Value.blue shr 8));
+end;
+
+function TRGBTiledImg.GetInternalPixel(x, y: integer): integer;
+var
+  T: PTile;
+begin
+  T := FImage[(y shr cTileWidthBits) * FTileStride + (x shr cTileWidthBits)];
+  Result := T^.GetRGBPixels(y and (cTileWidth - 1), x and (cTileWidth - 1));
+end;
+
+procedure TRGBTiledImg.SetInternalPixel(x, y: integer; Value: integer);
+var
+  T: PTile;
+begin
+  T := FImage[(y shr cTileWidthBits) * FTileStride + (x shr cTileWidthBits)];
+  T^.SetRGBPixels(y and (cTileWidth - 1), x and (cTileWidth - 1), Value);
 end;
 
 { TTileHelper }
@@ -1177,6 +1220,7 @@ begin
   TmpIndex := ATile.TmpIndex;
   PalIdx := ATile.PalIdx;
   MergeIndex := ATile.MergeIndex;
+  TargetError := ATile.TargetError;
   Active := ATile.Active;
   HMirror_Initial := ATile.HMirror_Initial;
   VMirror_Initial := ATile.VMirror_Initial;
@@ -1804,7 +1848,7 @@ end;
 
 procedure TFrame.SelectPredictions;
 begin
-  GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, Encoder.GlobalTilingTargetPSNR, cPSNRPrecision, 0.01, nil);
+  GoldenRatioSearch(@GRPSNR, 0.0, cBestPSNR, FrameTilesJPEGPSNR, cPSNRPrecision, 0.01, nil);
 end;
 
 procedure DoAsyncLoadFromImage(AData : Pointer);
@@ -2099,9 +2143,17 @@ procedure TFrame.AsyncLoadFromImage;
 var
   i: Integer;
   HMirror, VMirror: Boolean;
+  errAcc: Cardinal;
   Tile: PTile;
   TMI: PTileMapItem;
   prevFrameICD: TFloatDynArray;
+  Img: TRGBTiledImg;
+  JPEGTiles: PTileDynArray;
+  JPEGWr: TMyWriterJPEG;
+  JPEGRd: TFPReaderJPEG;
+  JPEGStream: TMemoryStream;
+  CpnPixels: TCpnPixels;
+  PlainDCT, JPEGDCT: TDCT;
 begin
   // compute inter-frame correlations
 
@@ -2115,6 +2167,51 @@ begin
 
     prevFrameICD := Encoder.FFrames[Index - 1].InterframeCorrelationData;
     InterframeCorrelation := Encoder.PearsonCorrelation(prevFrameICD, InterframeCorrelationData);
+  end;
+
+  // Use JPEG to devise FrameTile target error (PSNR-HVS)
+
+  Img := TRGBTiledImg.Create(Encoder.ScreenWidth, Encoder.ScreenHeight);
+  JPEGTiles := TTile.Array1DNew(Encoder.FTileMapSize, True, False);
+  JPEGWr := TMyWriterJPEG.Create;
+  JPEGRd := TFPReaderJPEG.Create;
+  JPEGStream := TMemoryStream.Create;
+  try
+    Img.Image := FrameTiles;
+    Img.TileStride := Encoder.FTileMapWidth;
+
+    JPEGWr.CompressionQuality := Encoder.ReduceQuality;
+    JPEGWr.ProgressiveEncoding := False;
+    JPEGWr.ChromaSubsampling := False;
+    Img.SaveToStream(JPEGStream, JPEGWr);
+
+    JPEGRd.Performance := jpBestQuality;
+    Img.Image := JPEGTiles;
+    JPEGStream.Seek(0, soBeginning);
+    Img.LoadFromStream(JPEGStream, JPEGRd);
+
+    errAcc := 0;
+    for i := 0 to Encoder.FTileMapSize - 1 do
+    begin
+      Tile := JPEGTiles[i];
+      Encoder.ConvertToCpnPixels(Tile^, False, False, False, False, nil, CpnPixels);
+      Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsPSNRHVS, cColorCpns, JPEGDCT);
+
+      Tile := FrameTiles[i];
+      Encoder.ConvertToCpnPixels(Tile^, False, False, False, False, nil, CpnPixels);
+      Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsPSNRHVS, cColorCpns, PlainDCT);
+
+      Tile^.TargetError := CompareEuclideanDCTPtr_asm(@PlainDCT[0], @JPEGDCT[0]);
+
+      errAcc += Tile^.TargetError;
+    end;
+    FrameTilesJPEGPSNR := EuclideanToPSNR(errAcc div Encoder.FTileMapSize);
+  finally
+    JPEGStream.Free;
+    JPEGRd.Free;
+    JPEGWr.Free;
+    TTile.Array1DDispose(JPEGTiles);
+    Img.Free;
   end;
 
   // also handle tilemap H/V mirrors
@@ -2299,16 +2396,12 @@ end;
 
 procedure TTilingEncoder.Load;
 var
-  frmIdx, frmCnt, eqtc, startFrmIdx: Integer;
+  frmIdx, frmCnt, startFrmIdx: Integer;
   fn: String;
   bmp: TPicture;
-  wasAutoQ, manualKeyFrames: Boolean;
-  qbTC: TFloat;
+  manualKeyFrames: Boolean;
   FFMPEG: TFFMPEG;
 begin
-  eqtc := EqualQualityTileCount(FrameCount * FTileMapSize);
-  wasAutoQ := (Length(FFrames) > 0) and (FGlobalTilingTileCount = round(FGlobalTilingQualityBasedTileCount * eqtc));
-
   ProgressRedraw(-1, '', esAll);
 
   FLoadedInputPath := '';
@@ -2384,13 +2477,6 @@ begin
   ProgressRedraw(3, 'LoadInputVideo');
 
   FindKeyFrames(manualKeyFrames);
-
-  if wasAutoQ or (FGlobalTilingTileCount <= 0) then
-  begin
-    qbTC := FGlobalTilingQualityBasedTileCount;
-    SetGlobalTilingQualityBasedTileCount(0.0);
-    SetGlobalTilingQualityBasedTileCount(qbTC);
-  end;
 
   ProgressRedraw(4, 'FindKeyFrames');
 
@@ -3200,19 +3286,6 @@ begin
   FFramesPerSecond := Max(0.0, AValue);
 end;
 
-procedure TTilingEncoder.SetGlobalTilingQualityBasedTileCount(AValue: Double);
-var
-  eqtc, RawTileCount: Int64;
-begin
-  if FGlobalTilingQualityBasedTileCount = AValue then Exit;
-  FGlobalTilingQualityBasedTileCount := AValue;
-
-  eqtc := EqualQualityTileCount(FrameCount * FTileMapSize);
-
-  RawTileCount := Length(FFrames) * FTileMapSize;
-  FGlobalTilingTileCount := min(round(AValue * eqtc), RawTileCount);
-end;
-
 procedure TTilingEncoder.SetMaxThreadCount(AValue: Integer);
 begin
  if FMaxThreadCount = AValue then Exit;
@@ -3229,26 +3302,6 @@ procedure TTilingEncoder.SetPaletteSize(AValue: Integer);
 begin
   if FPaletteSize = AValue then Exit;
   FPaletteSize := EnsureRange(AValue, 2, 64);
-end;
-
-procedure TTilingEncoder.SetGlobalTilingTargetPSNR(AValue: Double);
-begin
-  if FGlobalTilingTargetPSNR = AValue then Exit;
-  FGlobalTilingTargetPSNR := EnsureRange(AValue, 0, cBestPSNR);
-end;
-
-procedure TTilingEncoder.SetGlobalTilingTileCount(AValue: Integer);
-var
-  RawTileCount: Integer;
-begin
-  if FGlobalTilingTileCount = AValue then Exit;
-  FGlobalTilingTileCount := AValue;
-
-  RawTileCount := Length(FFrames) * FTileMapSize;
-  if RawTileCount <> 0 then
-    FGlobalTilingTileCount := EnsureRange(FGlobalTilingTileCount, 0, RawTileCount)
-  else
-    FGlobalTilingTileCount := max(FGlobalTilingTileCount, 0);
 end;
 
 procedure TTilingEncoder.SetRenderUseGamma(AValue: Boolean);
@@ -3340,6 +3393,12 @@ procedure TTilingEncoder.SetRenderTilePage(AValue: Integer);
 begin
   if FRenderTilePage = AValue then Exit;
   FRenderTilePage := Max(0, AValue);
+end;
+
+procedure TTilingEncoder.SetReduceQuality(AValue: Integer);
+begin
+  if FReduceQuality = AValue then Exit;
+  FReduceQuality := EnsureRange(AValue, Low(TMyJPEGCompressionQuality), High(TMyJPEGCompressionQuality));
 end;
 
 procedure TTilingEncoder.SetMotionPredictRadius(AValue: Integer);
@@ -4143,10 +4202,7 @@ begin
     ini.WriteInteger('MotionPredict', 'MotionPredictMaxBufferedFrames', MotionPredictMaxBufferedFrames);
     ini.WriteInteger('MotionPredict', 'MotionPredictBlendingMode', Ord(MotionPredictBlendingMode));
 
-    ini.WriteBool('GlobalTiling', 'GlobalTilingUseTargetPSNR', GlobalTilingUseTargetPSNR);
-    ini.WriteFloat('GlobalTiling', 'GlobalTilingTargetPSNR', GlobalTilingTargetPSNR);
-    ini.WriteFloat('GlobalTiling', 'GlobalTilingQualityBasedTileCount', GlobalTilingQualityBasedTileCount);
-    ini.WriteInteger('GlobalTiling', 'GlobalTilingTileCount', GlobalTilingTileCount);
+    ini.WriteInteger('Reduce', 'ReduceQuality', ReduceQuality);
 
     ini.WriteInteger('Dither', 'PaletteSize', PaletteSize);
     ini.WriteInteger('Dither', 'PaletteCount', PaletteCount);
@@ -4183,10 +4239,7 @@ begin
     MotionPredictMaxBufferedFrames := ini.ReadInteger('MotionPredict', 'MotionPredictMaxBufferedFrames', MotionPredictMaxBufferedFrames);
     MotionPredictBlendingMode := TBlendingMode(EnsureRange(ini.ReadInteger('MotionPredict', 'MotionPredictBlendingMode', Ord(MotionPredictBlendingMode)), Ord(Low(TBlendingMode)), Ord(High(TBlendingMode))));
 
-    GlobalTilingUseTargetPSNR := ini.ReadBool('GlobalTiling', 'GlobalTilingUseTargetPSNR', GlobalTilingUseTargetPSNR);
-    GlobalTilingTargetPSNR := ini.ReadFloat('GlobalTiling', 'GlobalTilingTargetPSNR', GlobalTilingTargetPSNR);
-    GlobalTilingQualityBasedTileCount := ini.ReadFloat('GlobalTiling', 'GlobalTilingQualityBasedTileCount', GlobalTilingQualityBasedTileCount);
-    GlobalTilingTileCount := ini.ReadInteger('GlobalTiling', 'GlobalTilingTileCount', GlobalTilingTileCount); // after GlobalTilingQualityBasedTileCount because has priority
+    ReduceQuality := ini.ReadInteger('Reduce', 'ReduceQuality', ReduceQuality);
 
     PaletteSize := ini.ReadInteger('Dither', 'PaletteSize', PaletteSize);
     PaletteCount := ini.ReadInteger('Dither', 'PaletteCount', PaletteCount);
@@ -4220,17 +4273,14 @@ begin
   MaxThreadCount := NumberOfProcessors;
 {$endif}
 
-  PaletteSize := 32;
+  PaletteSize := 16;
   PaletteCount := 1024;
 
   MotionPredictRadius := 64;
   MotionPredictMaxBufferedFrames := 3;
   MotionPredictBlendingMode := bmAlphaWeight;
 
-  GlobalTilingUseTargetPSNR := False;
-  GlobalTilingTargetPSNR := 30.0;
-  GlobalTilingQualityBasedTileCount := 7.0;
-  GlobalTilingTileCount := 0; // after GlobalTilingQualityBasedTileCount because has priority
+  ReduceQuality := 65;
 
   DitheringMode := pvsWeightedSpeDCT;
   DitheringUseThomasKnoll := False;
@@ -4471,7 +4521,7 @@ begin
     Result.GlobalUnpredictedTileCount += kfNewUTC - Result.KFFFUnpredictedTileCount[kfIdx];
   end;
 
-  WriteLn('Threshold: ', FGlobalTilingTargetPSNR:9:3, ', Mean PSNR: ', Result.MeanPSNR:9:3, ', TileCount: ', Result.GlobalUnpredictedTileCount:8);
+  WriteLn('Mean PSNR: ', Result.MeanPSNR:9:3, ', TileCount: ', Result.GlobalUnpredictedTileCount:8);
 end;
 
 procedure TTilingEncoder.TransferTiles;
