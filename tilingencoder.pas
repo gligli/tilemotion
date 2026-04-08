@@ -2143,7 +2143,7 @@ procedure TFrame.AsyncLoadFromImage;
 var
   i: Integer;
   HMirror, VMirror: Boolean;
-  errAcc: Cardinal;
+  errAcc: UInt64;
   Tile: PTile;
   TMI: PTileMapItem;
   prevFrameICD: TFloatDynArray;
@@ -4280,7 +4280,7 @@ begin
   MotionPredictMaxBufferedFrames := 3;
   MotionPredictBlendingMode := bmAlphaWeight;
 
-  ReduceQuality := 65;
+  ReduceQuality := 80;
 
   DitheringMode := pvsWeightedSpeDCT;
   DitheringUseThomasKnoll := False;
