@@ -4996,13 +4996,16 @@ begin
   WriteLn('ReindexTiles: ', Length(Tiles):12, ' / ', Length(FFrames) * FTileMapSize:12,  ' reindexed tiles, (', Length(Tiles) * 100.0 / (Length(FFrames) * FTileMapSize):4:3, '%)');
 end;
 
-function CompareTilePalPixels(Item1, Item2:Pointer):Integer;
+function CompareTilePalIdxPalPixels(Item1, Item2:Pointer):Integer;
 var
   t1, t2: PTile;
 begin
   t1 := PTile(Item1);
   t2 := PTile(Item2);
-  Result := t1^.ComparePalPixelsTo(t2^);
+
+  Result := CompareValue(t1^.PalIdx, t2^.PalIdx);
+  if Result = 0 then
+    Result := t1^.ComparePalPixelsTo(t2^);
 end;
 
 function CompareTileRGBPixels(Item1, Item2:Pointer):Integer;
@@ -5037,7 +5040,7 @@ var
   tIdx: Integer;
   PixelLSC: TListSortCompare;
 begin
-  PixelLSC := @CompareTilePalPixels;
+  PixelLSC := @CompareTilePalIdxPalPixels;
   if OnRGBPixels then
     PixelLSC := @CompareTileRGBPixels;
 
