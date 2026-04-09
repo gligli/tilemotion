@@ -61,6 +61,7 @@ type
   // GlobalTile32:                     data -> global tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
   // KeyFrmTile16:                     data -> keyframe tile index (16 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
   // KeyFrmTile32:                     data -> keyframe tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
+  // PalTile:                          data -> tile index (32 bits); palette index (16 bits); commandBits -> none (9 bits); keyframe tile (1 bit); V mirror (1 bit); H mirror (1 bit)
   //
   // (insert new commands here...)
   //
@@ -79,6 +80,7 @@ type
     gtGlobalTile32 = 5,
     gtKeyFrmTile16 = 6,
     gtKeyFrmTile32 = 7,
+    gtPalTile = 8,
 
     gtFrameEnd = 11,
     gtLoadPalette = 12,
@@ -2254,20 +2256,26 @@ begin
 end;
 
 procedure TFrame.Reconstruct(AMTPool: TMTPool; ARadius: Integer; AFrameBuffer: TFrameBuffer);
+const
+  cEpuKnnK = 64;
 var
   DS: PTilingDataset;
 
   procedure DoXY(AIndex: PtrInt; AData: Pointer);
   var
-    sx, sy, dsIdx, tIdx: Integer;
-    HMirror, VMirror: Boolean;
-    knnErr: Cardinal;
+    sx, sy, dsIdx, tIdx, tileEpuIdx, palEpuIdx, prevDSIdx, prevPalIdx: Integer;
+    baseHMirror, baseVMirror, HMirror, VMirror: Boolean;
+    knnErr, err: Cardinal;
 
     FrameTile: PTile;
     TMI: PTileMapItem;
 
-    FTDCT: TDCT;
+    FTDCT, CurDCT: TDCT;
     CpnPixels: TCpnPixels;
+
+    EpuErrs: array[0 .. cEpuKnnK - 1] of Cardinal;
+    EpuDSIdxs: array[0 .. cEpuKnnK - 1] of Integer;
+    EpuPalIdxs: array[0 .. cEpuKnnK - 1] of Integer;
   begin
     DivMod(AIndex, Encoder.FTileMapWidth, sy, sx);
 
@@ -2276,32 +2284,71 @@ var
     FrameTile := FrameTiles[AIndex];
 
     Encoder.ConvertToCpnPixels(FrameTile^, False, False, False, False, nil, CpnPixels);
-    Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsPSNRHVS, cColorCpns, FTDCT);
+    Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsPSNRHVS, cColorCpns, @FTDCT[0]);
 
-    // use the KNN dataset to predict a tile with its associated palette
+    // predict multiple tiles with the KNN and try the cartesian product of unique tiles * palettes
+
+    ann_kdtree_short_search_multi(DS^.ANN, @EpuDSIdxs[0], @EpuErrs[0], cEpuKnnK, @FTDCT[0], 0);
+
+    for tileEpuIdx := 0 to cEpuKnnK - 1 do
+      if InRange(EpuDSIdxs[tileEpuIdx], 0, DS^.KNNSize - 1) then
+      begin
+        EpuPalIdxs[tileEpuIdx] := Encoder.FTiles[EpuDSIdxs[tileEpuIdx] shr 2]^.PalIdx;
+      end
+      else
+      begin
+        EpuDSIdxs[tileEpuIdx] := -1;
+        EpuPalIdxs[tileEpuIdx] := -1;
+      end;
+
+    QuickSort(EpuDSIdxs, 0, cEpuKnnK - 1, SizeOf(EpuDSIdxs[0]), @CompareIntegers);
+    QuickSort(EpuPalIdxs, 0, cEpuKnnK - 1, SizeOf(EpuPalIdxs[0]), @CompareIntegers);
 
     knnErr := High(Cardinal);
-    dsIdx := ann_kdtree_short_search(DS^.ANN, @FTDCT[0], 0, @knnErr);
-    if InRange(dsIdx, 0, DS^.KNNSize - 1) then
-    begin
-      tIdx := dsIdx shr 2;
-      VMirror := (dsIdx and 2) <> 0;
-      HMirror := (dsIdx and 1) <> 0;
+    TMI^.TileIdx := -1;
+    TMI^.PalIdx := -1;
+    baseHMirror := TMI^.HMirror;
+    baseVMirror := TMI^.VMirror;
+    Assert(baseHMirror = FrameTile^.HMirror_Initial);
+    Assert(baseVMirror = FrameTile^.VMirror_Initial);
 
-      TMI^.TileIdx := tIdx;
-      TMI^.PalIdx := Encoder.FTiles[tIdx]^.PalIdx;
-      TMI^.VMirror := TMI^.VMirror xor VMirror;
-      TMI^.HMirror := TMI^.HMirror xor HMirror;
-      TMI^.Error := knnErr;
-      TMI^.IsPredicted := False;
-      FillChar(TMI^.Attrs, SizeOf(TMI^.Attrs), 0);
-    end
-    else
-    begin
-      TMI^.TileIdx := -1;
-		  TMI^.PalIdx := -1;
-      knnErr := High(Cardinal);
-    end;
+    prevDSIdx := -1;
+    for tileEpuIdx := 0 to cEpuKnnK - 1 do
+      if EpuDSIdxs[tileEpuIdx] <> prevDSIdx then
+      begin
+        dsIdx := EpuDSIdxs[tileEpuIdx];
+        tIdx := dsIdx shr 2;
+        VMirror := (dsIdx and 2) <> 0;
+        HMirror := (dsIdx and 1) <> 0;
+
+        prevPalIdx := -1;
+        for palEpuIdx := 0 to cEpuKnnK - 1 do
+          if EpuPalIdxs[palEpuIdx] <> prevPalIdx then
+          begin
+            Encoder.ConvertToCpnPixels(Encoder.FTiles[tIdx]^, True, False, VMirror, HMirror, Encoder.FPalettes[EpuPalIdxs[palEpuIdx]].PaletteRGB, CpnPixels);
+            Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsPSNRHVS, cColorCpns, @CurDCT[0]);
+
+            if QuickTestEuclideanDCTPtr_asm(FTDCT, CurDCT, knnErr) then
+            begin
+              err := CompareEuclideanDCTPtr_asm(FTDCT, CurDCT);
+
+              if err < knnErr then
+              begin
+                knnErr := err;
+                TMI^.TileIdx := tIdx;
+                TMI^.PalIdx := EpuPalIdxs[palEpuIdx];
+                TMI^.VMirror := baseVMirror xor VMirror;
+                TMI^.HMirror := baseHMirror xor HMirror;
+                TMI^.Error := knnErr;
+                TMI^.IsPredicted := False;
+              end;
+            end;
+
+            prevPalIdx := EpuPalIdxs[palEpuIdx];
+          end;
+
+        prevDSIdx := EpuDSIdxs[tileEpuIdx];
+      end;
   end;
 
 begin
@@ -5582,7 +5629,7 @@ var
   var
     finalTileIdx: Integer;
     attrs: Word;
-    isLongOffsets, isKeyFrameTile, isTile32: Boolean;
+    isLongOffsets, isKeyFrameTile, isTile32, isPalTile: Boolean;
   begin
     if TMI.IsBlended then
     begin
@@ -5620,16 +5667,26 @@ var
       end;
 
       isTile32 := finalTileIdx > High(Word);
+      isPalTile := TMI.PalIdx <> FTiles[TMI.TileIdx]^.PalIdx;
 
-      if isTile32 then
+      if isPalTile then
       begin
-        DoAltCmd(gtGlobalTile32, gtKeyFrmTile32, isKeyFrameTile, attrs);
+        DoCmd(gtPalTile, attrs or (Ord(isKeyFrameTile) shl 2));
         DoDWord(finalTileIdx);
+        DoWord(TMI.PalIdx);
       end
       else
       begin
-        DoAltCmd(gtGlobalTile16, gtKeyFrmTile16, isKeyFrameTile, attrs);
-        DoWord(finalTileIdx);
+        if isTile32 then
+        begin
+          DoAltCmd(gtGlobalTile32, gtKeyFrmTile32, isKeyFrameTile, attrs);
+          DoDWord(finalTileIdx);
+        end
+        else
+        begin
+          DoAltCmd(gtGlobalTile16, gtKeyFrmTile16, isKeyFrameTile, attrs);
+          DoWord(finalTileIdx);
+        end;
       end;
     end;
   end;

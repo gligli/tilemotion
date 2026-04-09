@@ -25,6 +25,7 @@ const GTMHeader = {
 // GlobalTile32:                     data -> global tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
 // KeyFrmTile16:                     data -> keyframe tile index (16 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
 // KeyFrmTile32:                     data -> keyframe tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
+// PalTile:                          data -> tile index (32 bits); palette index (16 bits); commandBits -> none (9 bits); keyframe tile (1 bit); V mirror (1 bit); H mirror (1 bit)
 //
 // (insert new commands here...)
 //
@@ -43,6 +44,7 @@ const GTMCommand = {
     'GlobalTile32' : 5,
     'KeyFrmTile16' : 6,
     'KeyFrmTile32' : 7,
+    'PalTile' : 8,
 
     'FrameEnd' : 11,
     'LoadPalette' : 12,
@@ -281,9 +283,17 @@ function renderEnd() {
 	canvas.putImageData(gtmTMBuffers[gtmTMBufIdxs[0]], 0, 0);
 }
 
-function drawTilemapItem(idx, attrs, iskf) {
-	let palIdx = gtmTilePalIdxs[iskf][idx];
-	let tOff = idx * CTileSize;
+function drawTilemapItem(tileIdx, palIdx, attrs, iskf) {
+	if (palIdx < 0)
+	{
+		palIdx = gtmTilePalIdxs[iskf][tileIdx];
+	}
+	else
+	{
+		console.log(tileIdx, palIdx, attrs, iskf);
+	}	
+
+	let tOff = tileIdx * CTileSize;
 	let palR = gtmPaletteR[palIdx];
 	let palG = gtmPaletteG[palIdx];
 	let palB = gtmPaletteB[palIdx];
@@ -518,19 +528,25 @@ function decodeFrame() {
 				break;
 
 			case GTMCommand.GlobalTile16:
-				drawTilemapItem(readWord(), cmd[1], 0);
-				break;
-				
-			case GTMCommand.KeyFrmTile16:
-				drawTilemapItem(readWord(), cmd[1], 1);
+				drawTilemapItem(readWord(), -1, cmd[1], 0);
 				break;
 				
 			case GTMCommand.GlobalTile32:
-				drawTilemapItem(readDWord(), cmd[1], 0);
+				drawTilemapItem(readDWord(), -1, cmd[1], 0);
+				break;
+				
+			case GTMCommand.KeyFrmTile16:
+				drawTilemapItem(readWord(), -1, cmd[1], 1);
 				break;
 				
 			case GTMCommand.KeyFrmTile32:
-				drawTilemapItem(readDWord(), cmd[1], 1);
+				drawTilemapItem(readDWord(), -1, cmd[1], 1);
+				break;
+
+			case GTMCommand.PalTile:
+				let ptTileIdx = readDWord();
+				let ptPalIdx = readWord();
+				drawTilemapItem(ptTileIdx, ptPalIdx, cmd[1] & 3, (cmd[1] >>> 2) & 1);
 				break;
 				
 			case GTMCommand.PredictedTileOffsets6x6:
