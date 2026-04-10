@@ -25,16 +25,16 @@ const GTMHeader = {
 // GlobalTile32:                     data -> global tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
 // KeyFrmTile16:                     data -> keyframe tile index (16 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
 // KeyFrmTile32:                     data -> keyframe tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
-// PalTile:                          data -> tile index (32 bits); palette index (16 bits); commandBits -> none (9 bits); keyframe tile (1 bit); V mirror (1 bit); H mirror (1 bit)
+// PalTile:                          data -> tile index (32 bits); palette index (16 bits); commandBits -> none (9 bits); is keyframe tile (1 bit); V mirror (1 bit); H mirror (1 bit)
 //
 // (insert new commands here...)
 //
-// FrameEnd:                         data -> none; commandBits -> none (11 bits); keyframe end (1 bit)
+// FrameEnd:                         data -> none; commandBits -> none (11 bits); is keyframe end (1 bit)
 // LoadPalette:                      data -> palette index (16 bits); { RGBA bytes (32bits) } * indexes count; commandBits -> palette format (0: RGBA32) (6 bits); indexes count per palette - 1 (6 bits)
-// TileSet:                          data -> start tile (32 bits); end tile (32 bits); { palette index (16 bits) } * count; { indexes per pixel (64 bytes) } * count; commandBits -> none (11 bits); is keyframe tileset (1 bit)
+// TileSet:                          data -> start tile (32 bits); end tile (32 bits); { palette index (16 bits) } * count; { indexes per pixel (64 [bytes] / [nibbles, ie: 103254...]) } * count; commandBits -> none (10 bits); is nibble coded (1 bit); is keyframe tileset (1 bit)
 // SetDimensions:                    data -> width in tiles (32 bits); height in tiles (32 bits); frame length in nanoseconds (32 bits) (2^32-1: still frame); global tile count (32 bits); maximum key frame tile count (32 bits); commandBits -> none (12 bits)
 // ExtendedCommand:                  data -> following bytes count (32 bits); custom commands, proprietary extensions, ...; commandBits -> extended command index (12 bits)
-
+   
 const GTMCommand = {
     'PredictedTileOffsets6x6' : 0,
     'PredictedTileOffsets8x8' : 1,
@@ -464,7 +464,7 @@ function decodeFrame() {
 			case GTMCommand.SetDimensions:
 				gtmWidth = readDWord();
 				gtmHeight = readDWord();
-				gtmFrameLength = Math.round(readDWord() / (1000 * 1000));
+				gtmFrameLength = Math.ceil(readDWord() / (1000 * 1000));
 				gtmTileCount[0] = readDWord();
 				gtmTileCount[1] = readDWord();
 				console.log('GlobalTileCount:', gtmTileCount[0], ',', 'KFMaxTileCount:', gtmTileCount[1]);
@@ -497,10 +497,10 @@ function decodeFrame() {
 				break;
 				
 			case GTMCommand.TileSet:
-				let isKFTileSet = (cmd[1] != 0) ? 1 : 0;
+				let isKFTileSet = cmd[1] & 1;
+				let isNibbleCoded = (cmd[1] >>> 1) & 1;
 				let tstart = readDWord();
 				let tend = readDWord();
-				let tcnt = gtmTileCount[isKFTileSet];
 				let tiles = gtmTiles[isKFTileSet];
 				let tlpal = gtmTilePalIdxs[isKFTileSet];
 
@@ -508,7 +508,20 @@ function decodeFrame() {
 					tlpal[p] = readWord();
 				}
 
-				readBuffer_Unsafe(tiles, tstart * CTileSize, (tend - tstart + 1) * CTileSize);
+				if (isNibbleCoded) {
+					let tmpSz = (tend - tstart + 1) * (CTileSize >>> 1);
+					let tmpBuf = new Uint8Array(tmpSz);
+					let tpos = tstart * CTileSize;
+
+					readBuffer_Unsafe(tmpBuf, tstart * (CTileSize >>> 1), tmpSz);
+					
+					for (let p = 0; p < tmpSz; p++) {
+						tiles[tpos] = tmpBuf[p] & 15; tpos++;
+						tiles[tpos] = (tmpBuf[p] >>> 4) & 15; tpos++;
+					}
+				} else {
+					readBuffer_Unsafe(tiles, tstart * CTileSize, (tend - tstart + 1) * CTileSize);
+				}
 				break;
 				
 			case GTMCommand.FrameEnd:
