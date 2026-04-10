@@ -61,13 +61,13 @@ type
   // GlobalTile32:                     data -> global tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
   // KeyFrmTile16:                     data -> keyframe tile index (16 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
   // KeyFrmTile32:                     data -> keyframe tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
-  // PalTile:                          data -> tile index (32 bits); palette index (16 bits); commandBits -> none (9 bits); keyframe tile (1 bit); V mirror (1 bit); H mirror (1 bit)
+  // PalTile:                          data -> tile index (32 bits); palette index (16 bits); commandBits -> none (9 bits); is keyframe tile (1 bit); V mirror (1 bit); H mirror (1 bit)
   //
   // (insert new commands here...)
   //
-  // FrameEnd:                         data -> none; commandBits -> none (11 bits); keyframe end (1 bit)
+  // FrameEnd:                         data -> none; commandBits -> none (11 bits); is keyframe end (1 bit)
   // LoadPalette:                      data -> palette index (16 bits); { RGBA bytes (32bits) } * indexes count; commandBits -> palette format (0: RGBA32) (6 bits); indexes count per palette - 1 (6 bits)
-  // TileSet:                          data -> start tile (32 bits); end tile (32 bits); { palette index (16 bits) } * count; { indexes per pixel (64 bytes) } * count; commandBits -> none (11 bits); is keyframe tileset (1 bit)
+  // TileSet:                          data -> start tile (32 bits); end tile (32 bits); { palette index (16 bits) } * count; { indexes per pixel (64 [bytes] / [nibbles, ie: 103254...]) } * count; commandBits -> none (10 bits); is nibble coded (1 bit); is keyframe tileset (1 bit)
   // SetDimensions:                    data -> width in tiles (32 bits); height in tiles (32 bits); frame length in nanoseconds (32 bits) (2^32-1: still frame); global tile count (32 bits); maximum key frame tile count (32 bits); commandBits -> none (12 bits)
   // ExtendedCommand:                  data -> following bytes count (32 bits); custom commands, proprietary extensions, ...; commandBits -> extended command index (12 bits)
 
@@ -1766,7 +1766,7 @@ var
     FrameTile := FrameTiles[AIndex];
 
     Encoder.ConvertToCpnPixels(FrameTile^, False, False, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, nil, CurCpnPixels);
-    Encoder.ComputeCpnPixelsPsyVisFeatures(CurCpnPixels, pvsPSNRHVS, cColorCpns, CurDCT);
+    Encoder.ComputeCpnPixelsPsyVisFeatures(CurCpnPixels, pvsPSNRHVS, cColorCpns, @CurDCT[0]);
 
     dx := sx shl cTileWidthBits;
     dy := sy shl cTileWidthBits;
@@ -3031,7 +3031,7 @@ begin
   try
     fs := TFileStream.Create(tmpFN, fmCreate or fmShareDenyWrite);
     try
-      fs.WriteAnsiString(ASettings);
+      fs.Write(ASettings[1], Length(ASettings));
     finally
       fs.Free;
     end;
@@ -5224,7 +5224,9 @@ procedure TTilingEncoder.LoadStream(AStream: TStream);
 var
   KFStream: TMemoryStream;
   frmIdx, kfIdx, loadedFrmCount: Integer;
+  curKFPSNRError: Cardinal;
   rawTileIdxToTileIdx: array[Boolean{is kf?}] of TIntegerDynArray;
+  kfPSNRs: TDoubleDynArray;
 
   function ReadDWord: Cardinal;
   begin
@@ -5256,11 +5258,14 @@ var
   begin
     settings := KFStream.ReadAnsiString;
     WriteLn(settings);
+    SetSettings(settings);
   end;
 
-  procedure ReadTiles(isKF: Boolean);
+  procedure ReadTiles(isKF, isNibbleCoded: Boolean);
   var
-    iRawTile, rawStartIdx, rawEndIdx, baseTileIdx, tileIdx, tileCnt: Integer;
+    iRawTile, rawStartIdx, rawEndIdx, baseTileIdx, tileIdx, tileCnt, ty, tx: Integer;
+    b: Byte;
+    T: PTile;
   begin
     rawStartIdx := ReadDWord; // start tile
     rawEndIdx := ReadDWord; // end tile
@@ -5286,7 +5291,22 @@ var
     begin
       tileIdx := baseTileIdx + iRawTile - rawStartIdx;
 
-      KFStream.Read(FTiles[tileIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
+      if isNibbleCoded then
+      begin
+        T := FTiles[tileIdx];
+        for ty := 0 to cTileWidth - 1 do
+          for tx := 0 to cTileWidth - 1 do
+            if not Odd(tx) then
+            begin
+              b := ReadByte;
+              T^.PalPixels[ty, tx] := b and 15;
+              T^.PalPixels[ty, tx + 1] := (b shr 4) and 15;
+            end;
+      end
+      else
+      begin
+        KFStream.Read(FTiles[tileIdx]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
+      end;
     end;
   end;
 
@@ -5329,15 +5349,19 @@ var
     FPaletteSize := palSize;
   end;
 
-  procedure SetTMI(tileIdx: Integer; attrs: Integer; var TMI: TTileMapItem);
+  procedure SetTMI(tileIdx, palIdx: Integer; attrs: Integer; var TMI: TTileMapItem);
   begin
     TMI.TileIdx := tileIdx;
-    TMI.PalIdx := FTiles[tileIdx]^.PalIdx;
+    TMI.PalIdx := palIdx;
+    if palIdx < 0 then
+      TMI.PalIdx := FTiles[tileIdx]^.PalIdx;
     TMI.HMirror := attrs and 1 <> 0;
     TMI.VMirror := attrs and 2 <> 0;
 
     TMI.IsPredicted := False;
     TMI.IsBlended := False;
+
+    TMI.Error := curKFPSNRError;
   end;
 
   function NextFrame(KF: TKeyFrame): TFrame;
@@ -5364,33 +5388,43 @@ var
     if kfIdx >= Length(FKeyFrames) then
       SetLength(FKeyFrames, kfIdx + 1);
     FKeyFrames[kfIdx] := Result;
+
+    FKeyFrames[kfIdx].ReconstructPSNR := kfPSNRs[kfIdx];
+    curKFPSNRError := PSNRToEuclidean(kfPSNRs[kfIdx]);
   end;
 
   procedure SkipBlock(frm: TFrame; SkipCount: Integer; var tmPos: Integer);
   var
     i: Integer;
     sx, sy: Integer;
+    TMI: PTileMapItem;
   begin
     Assert(frm.Index > 0);
     for i := tmPos to tmPos + SkipCount - 1 do
     begin
       DivMod(i, FTileMapWidth, sy, sx);
-      frm.TileMap[sy, sx].IsPredicted := True;
-      frm.TileMap[sy, sx].IsBlended := False;
-      frm.TileMap[sy, sx].Attrs.MotionX := 0;
-      frm.TileMap[sy, sx].Attrs.MotionY := 0;
-      frm.TileMap[sy, sx].Attrs.MotionBackBufferOffset := 1;
+      TMI := @frm.TileMap[sy, sx];
+
+      TMI^.IsPredicted := True;
+      TMI^.IsBlended := False;
+      TMI^.Attrs.MotionX := 0;
+      TMI^.Attrs.MotionY := 0;
+      TMI^.Attrs.MotionBackBufferOffset := 1;
+
+      TMI^.Error := curKFPSNRError;
     end;
     tmPos += SkipCount;
   end;
 
 var
   Header: TGTMHeader;
+  KFInfo: TGTMKeyFrameInfo;
   Command, prevCommand: TGTMCommand;
   CommandData: Word;
   b: Byte;
-  tmPos: Integer;
+  tmPos, iKF: Integer;
   tileIdx: Cardinal;
+  palIdx: Word;
   frm: TFrame;
   kf: TKeyFrame;
   TMI: PTileMapItem;
@@ -5405,10 +5439,17 @@ begin
     AStream.ReadBuffer(Header, SizeOf(Header));
     if Header.EncoderVersion <> 6 then
       raise ETilingEncoderGTMReloadError.Create('Can only reload GTM files made with current version!');
-    AStream.Seek(Header.WholeHeaderSize, soBeginning);
 
     SetLength(FKeyFrames, Header.KFCount);
     SetLength(FFrames, Header.FrameCount);
+
+    SetLength(kfPSNRs, Length(FKeyFrames));
+    FReconstructPSNR := Header.PSNRHVS / (1000.0 * 1000.0);
+    for iKF := 0 to High(FKeyFrames) do
+    begin
+      AStream.ReadBuffer(KFInfo, SizeOf(KFInfo));
+      kfPSNRs[iKF] := KFInfo.PSNRHVS / (1000.0 * 1000.0);
+    end;
   end;
 
   ClearAll(True);
@@ -5446,7 +5487,7 @@ begin
           end;
           gtTileSet:
           begin
-            ReadTiles((CommandData and 1) <> 0);
+            ReadTiles((CommandData and 1) <> 0, (CommandData and 2) <> 0);
           end;
           gtLoadPalette:
           begin
@@ -5486,7 +5527,21 @@ begin
 
             tileIdx := rawTileIdxToTileIdx[Command in [gtKeyFrmTile16, gtKeyFrmTile32], tileIdx];
 
-            SetTMI(tileIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
+            SetTMI(tileIdx, -1, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
+            Inc(tmPos);
+          end;
+          gtPalTile:
+          begin
+            tileIdx := ReadDWord;
+            palIdx := ReadWord;
+
+            // next frame if needed
+            if frm = nil then
+              frm := NextFrame(kf);
+
+            tileIdx := rawTileIdxToTileIdx[(CommandData and 4) <> 0, tileIdx];
+
+            SetTMI(tileIdx, palIdx, CommandData and 3, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
             Inc(tmPos);
           end;
           gtPredictedTileOffsets6x6:
@@ -5502,6 +5557,7 @@ begin
             TMI^.Attrs.MotionBackBufferOffset := 1;
             TMI^.IsPredicted := True;
             TMI^.IsBlended := False;
+            TMI^.Error := curKFPSNRError;
 
             Inc(tmPos);
           end;
@@ -5520,6 +5576,7 @@ begin
             TMI^.Attrs.MotionBackBufferOffset := (CommandData and 3) + 1;
             TMI^.IsPredicted := True;
             TMI^.IsBlended := False;
+            TMI^.Error := curKFPSNRError;
 
             Inc(tmPos);
           end;
@@ -5537,6 +5594,7 @@ begin
             TMI^.Attrs.BlendBackBufferOffset := (CommandData and 3) + 1;
             TMI^.IsPredicted := True;
             TMI^.IsBlended := True;
+            TMI^.Error := curKFPSNRError;
 
             Inc(tmPos);
           end;
@@ -5558,6 +5616,7 @@ begin
   end;
 
   ReframeUI(FTileMapWidth, FTileMapHeight); // for FPaletteBitmap
+  FRenderOutputDirty := True;
 end;
 
 function CompareTileIdxsUseCountPalPixels(Item1, Item2, UserParameter:Pointer):Integer;
@@ -5715,19 +5774,37 @@ var
 
   procedure WriteTiles(const AList: TIntegerDynArray; IsKF: Boolean; AStart: Integer = 0);
   var
-    tlIdx: Integer;
+    tx, ty, tlIdx: Integer;
+    isNibbleCoded: Boolean;
+    T: PTile;
   begin
     if Length(AList) > 0 then
     begin
-      DoCmd(gtTileSet, Ord(IsKF));
+      isNibbleCoded := FPaletteSize <= 16;
+
+      DoCmd(gtTileSet, Ord(IsKF) or (Ord(isNibbleCoded) shl 1));
       DoDWord(AStart); // start tile
       DoDWord(AStart + High(AList)); // end tile
 
       for tlIdx := 0 to High(AList) do
         DoWord(Tiles[AList[tlIdx]]^.PalIdx);
 
-      for tlIdx := 0 to High(AList) do
-        ZStream.Write(Tiles[AList[tlIdx]]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
+      if isNibbleCoded then
+      begin
+        for tlIdx := 0 to High(AList) do
+        begin
+          T := Tiles[AList[tlIdx]];
+          for ty := 0 to cTileWidth - 1 do
+            for tx := 0 to cTileWidth - 1 do
+              if not Odd(tx) then
+                DoByte((T^.PalPixels[ty, tx] and 15) + ((T^.PalPixels[ty, tx + 1] and 15) shl 4));
+        end;
+      end
+      else
+      begin
+        for tlIdx := 0 to High(AList) do
+          ZStream.Write(Tiles[AList[tlIdx]]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
+      end;
     end;
   end;
 

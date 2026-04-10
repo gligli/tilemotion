@@ -467,11 +467,11 @@ procedure TMainForm.miReloadClick(Sender: TObject);
 begin
   if odGTM.Execute then
   begin
-    edOutput.Text := ChangeFileExt(odGTM.FileName, '.reloaded.gtm');
     FTilingEncoder.ReloadGTM(odGTM.FileName);
     FTilingEncoder.Run(esReindex2);
     LoadGUISettings;
-    UpdateGUI(nil);
+    edOutput.Text := ChangeFileExt(odGTM.FileName, '.reloaded.gtm');
+    UpdateVideo(nil);
   end;
 end;
 
