@@ -2084,7 +2084,7 @@ procedure TFrame.PredictedBlit(AMTPool: TMTPool; AFrameBuffer: TFrameBuffer; AOn
         begin
           // draw fb (plain tile)
 
-          FrameTile := FrameTiles[sy * cTileWidth + sx];
+          FrameTile := FrameTiles[sy * Encoder.FTileMapWidth + sx];
           FrameTile^.BlitRGBPixels(FrontBuf, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, dy, dx);
         end;
       end;
