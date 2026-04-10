@@ -2263,7 +2263,7 @@ var
 
   procedure DoXY(AIndex: PtrInt; AData: Pointer);
   var
-    sx, sy, dsIdx, tIdx, tileEpuIdx, palEpuIdx, prevDSIdx, prevPalIdx: Integer;
+    sx, sy, dsIdx, tIdx, tileEpuIdx, palEpuIdx, prevDSIdx, prevPalIdx, epuK: Integer;
     baseHMirror, baseVMirror, HMirror, VMirror: Boolean;
     knnErr, err: Cardinal;
 
@@ -2288,9 +2288,10 @@ var
 
     // predict multiple tiles with the KNN and try the cartesian product of unique tiles * palettes
 
-    ann_kdtree_short_search_multi(DS^.ANN, @EpuDSIdxs[0], @EpuErrs[0], cEpuKnnK, @FTDCT[0], 0);
+    epuK := min(cEpuKnnK, DS^.KNNSize);
+    ann_kdtree_short_search_multi(DS^.ANN, @EpuDSIdxs[0], @EpuErrs[0], epuK, @FTDCT[0], 0);
 
-    for tileEpuIdx := 0 to cEpuKnnK - 1 do
+    for tileEpuIdx := 0 to epuK - 1 do
       if InRange(EpuDSIdxs[tileEpuIdx], 0, DS^.KNNSize - 1) then
       begin
         EpuPalIdxs[tileEpuIdx] := Encoder.FTiles[EpuDSIdxs[tileEpuIdx] shr 2]^.PalIdx;
@@ -2301,8 +2302,8 @@ var
         EpuPalIdxs[tileEpuIdx] := -1;
       end;
 
-    QuickSort(EpuDSIdxs, 0, cEpuKnnK - 1, SizeOf(EpuDSIdxs[0]), @CompareIntegers);
-    QuickSort(EpuPalIdxs, 0, cEpuKnnK - 1, SizeOf(EpuPalIdxs[0]), @CompareIntegers);
+    QuickSort(EpuDSIdxs, 0, epuK - 1, SizeOf(EpuDSIdxs[0]), @CompareIntegers);
+    QuickSort(EpuPalIdxs, 0, epuK - 1, SizeOf(EpuPalIdxs[0]), @CompareIntegers);
 
     knnErr := High(Cardinal);
     TMI^.TileIdx := -1;
@@ -2313,7 +2314,7 @@ var
     Assert(baseVMirror = FrameTile^.VMirror_Initial);
 
     prevDSIdx := -1;
-    for tileEpuIdx := 0 to cEpuKnnK - 1 do
+    for tileEpuIdx := 0 to epuK - 1 do
       if EpuDSIdxs[tileEpuIdx] <> prevDSIdx then
       begin
         dsIdx := EpuDSIdxs[tileEpuIdx];
@@ -2322,7 +2323,7 @@ var
         HMirror := (dsIdx and 1) <> 0;
 
         prevPalIdx := -1;
-        for palEpuIdx := 0 to cEpuKnnK - 1 do
+        for palEpuIdx := 0 to epuK - 1 do
           if EpuPalIdxs[palEpuIdx] <> prevPalIdx then
           begin
             Encoder.ConvertToCpnPixels(Encoder.FTiles[tIdx]^, True, False, VMirror, HMirror, Encoder.FPalettes[EpuPalIdxs[palEpuIdx]].PaletteRGB, CpnPixels);
@@ -4327,7 +4328,7 @@ begin
   MotionPredictMaxBufferedFrames := 3;
   MotionPredictBlendingMode := bmAlphaWeight;
 
-  ReduceQuality := 75;
+  ReduceQuality := 60;
 
   DitheringMode := pvsWeightedSpeDCT;
   DitheringUseThomasKnoll := True;
