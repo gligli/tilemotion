@@ -364,6 +364,7 @@ object MainForm: TMainForm
           Width = 136
           Frequency = 10
           Max = 100
+          PageSize = 5
           Position = 50
           ShowSelRange = False
           OnChange = UpdateGUI

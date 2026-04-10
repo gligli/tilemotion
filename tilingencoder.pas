@@ -4327,7 +4327,7 @@ begin
   MotionPredictMaxBufferedFrames := 3;
   MotionPredictBlendingMode := bmAlphaWeight;
 
-  ReduceQuality := 80;
+  ReduceQuality := 75;
 
   DitheringMode := pvsWeightedSpeDCT;
   DitheringUseThomasKnoll := True;
