@@ -4330,7 +4330,7 @@ begin
   ReduceQuality := 80;
 
   DitheringMode := pvsWeightedSpeDCT;
-  DitheringUseThomasKnoll := False;
+  DitheringUseThomasKnoll := True;
   DitheringYliluoma2MixedColors := 1;
 
   ShotTransMaxSecondsPerKF := 15.0;  // maximum seconds between keyframes
