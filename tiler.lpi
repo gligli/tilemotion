@@ -73,6 +73,7 @@
             <CompilerMessages>
               <IgnoredMessages idx7122="True" idx7121="True" idx6058="True" idx5044="True" idx5024="True"/>
             </CompilerMessages>
+            <CustomOptions Value="-dTEST"/>
           </Other>
         </CompilerOptions>
       </Item2>

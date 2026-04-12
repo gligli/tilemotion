@@ -224,6 +224,23 @@ type
     procedure AdvanceFrame;
   end;
 
+  { TTilesJPEG }
+
+  TTilesJPEG = class
+    Quality: TMyJPEGCompressionQuality;
+    BaseWidthInTiles: Integer;
+    Size: TPoint;
+
+    TilesRef: PTileDynArray;
+    TilesMap: TIntegerDynArray;
+    JPEG: TMemoryStream;
+
+    constructor Create(const ATilesRef: PTileDynArray; ATilesMap: TIntegerDynArray; ABaseWidthInTiles: Integer);
+    destructor Destroy; override;
+
+    procedure CompressJPEG(AQuality: TMyJPEGCompressionQuality); overload;
+  end;
+
   { TFrame }
 
   TFrame = class
@@ -546,6 +563,14 @@ type
     property IsJPEG: Boolean read FIsJPEG write FIsJPEG;
   end;
 
+  { TImgRGB8Bit }
+
+  TImgRGB8Bit = class(TFPCompactImgRGB8Bit)
+  protected
+    function GetInternalPixel(x, y: integer): integer; override;
+    procedure SetInternalPixel(x, y: integer; Value: integer); override;
+  end;
+
 implementation
 
 const
@@ -698,6 +723,24 @@ begin
   yx := ((y and (cTileWidth - 1)) shl cTileWidthBits) or (x and (cTileWidth - 1));
 
   FromRGB(Value, T^.Pixels[IsJPEG, 0, yx], T^.Pixels[IsJPEG, 1, yx], T^.Pixels[IsJPEG, 2, yx]);
+end;
+
+{ TImgRGB8Bit }
+
+function TImgRGB8Bit.GetInternalPixel(x, y: integer): integer;
+var
+  px: PFPCompactImgRGB8BitValue;
+begin
+  px := @FData[x+y*Width];
+  Result := ToRGB(px^.R, px^.G, px^.B);
+end;
+
+procedure TImgRGB8Bit.SetInternalPixel(x, y: integer; Value: integer);
+var
+  px: PFPCompactImgRGB8BitValue;
+begin
+  px := @FData[x+y*Width];
+  FromRGB(Value, px^.R, px^.G, px^.B);
 end;
 
 { TTileHelper }
@@ -1032,6 +1075,135 @@ end;
 procedure TDCTBuffer.AdvanceFrame;
 begin
   CurBufferIndex := (CurBufferIndex + 1) mod Length(DCTBuffer);
+end;
+
+{ TTilesJPEG }
+
+constructor TTilesJPEG.Create(const ATilesRef: PTileDynArray; ATilesMap: TIntegerDynArray; ABaseWidthInTiles: Integer);
+begin
+  TilesRef := ATilesRef;
+  TilesMap := ATilesMap;
+  BaseWidthInTiles := ABaseWidthInTiles;
+  JPEG := TMemoryStream.Create;
+end;
+
+destructor TTilesJPEG.Destroy;
+begin
+  JPEG.Free;
+  inherited Destroy;
+end;
+
+procedure TTilesJPEG.CompressJPEG(AQuality: TMyJPEGCompressionQuality);
+
+  procedure AdvancePos(var APos: Integer; AWidth: Integer);
+  begin
+    Inc(APos, cTileWidth);
+    if APos mod AWidth = 0 then
+    begin
+      Inc(APos, AWidth * (cTileWidth - 1));
+    end;
+  end;
+
+var
+  iMap, ty, tx, tyx, iy, imgPos, widthInTiles, heightInTiles, remx: Integer;
+  T: PTile;
+  Img: TImgRGB8Bit;
+  JPGWriter: TMyWriterJPEG;
+  JPGReader: TFPReaderJPEG;
+  px: PFPCompactImgRGB8BitValue;
+begin
+  JPEG.Clear;
+
+  if Length(TilesMap) <= 0 then
+    Exit;
+
+  widthInTiles := BaseWidthInTiles;
+  heightInTiles := (Length(TilesMap) - 1) div widthInTiles + 1;
+
+  Img := TImgRGB8Bit.Create(widthInTiles * cTileWidth, heightInTiles * cTileWidth);
+  JPGWriter := TMyWriterJPEG.Create;
+  JPGReader := TFPReaderJPEG.Create;
+  try
+    JPGWriter.CompressionQuality := EnsureRange(AQuality, Low(TJPEGQualityRange), High(TJPEGQualityRange));
+    JPGWriter.GrayScale := False;
+    JPGWriter.ProgressiveEncoding := True;
+    JPGWriter.ChromaSubsampling := False;
+    JPGWriter.WriteMarkers := False;
+
+    JPGReader.Performance := jpBestQuality;
+
+    imgPos := 0;
+    for iMap := 0 to High(TilesMap) do
+    begin
+      T := TilesRef[TilesMap[iMap]];
+
+      iy := 0;
+      for ty := 0 to cTileWidth - 1 do
+      begin
+        for tx := 0 to cTileWidth - 1 do
+        begin
+          tyx := (ty shl cTileWidthBits) + tx;
+          px := @Img.FData[imgPos + tx + iy];
+          px^.R := T^.Pixels[False, 0, tyx];
+          px^.G := T^.Pixels[False, 1, tyx];
+          px^.B := T^.Pixels[False, 2, tyx];
+        end;
+        Inc(iy, Img.Width);
+      end;
+
+      AdvancePos(imgPos, Img.Width);
+    end;
+
+    if imgPos <> Img.Width * Img.Height then
+    begin
+      iy := 0;
+      remx := (Img.Width - (imgPos mod Img.Width)) * cColorCpns;
+      for ty := 0 to cTileWidth - 1 do
+      begin
+        FillChar(Img.FData[imgPos + iy], remx, 0);
+        Inc(iy, Img.Width);
+      end;
+    end;
+
+{$if defined(DEBUG) or defined(TEST)}
+    Img.SaveToFile(Format('JPEG_%d.jpg', [TilesMap[0]]), JPGWriter);
+{$endif}
+
+    Img.SaveToStream(JPEG, JPGWriter);
+
+    JPEG.Position := 0;
+    Img.LoadFromStream(JPEG, JPGReader);
+
+    imgPos := 0;
+    for iMap := 0 to High(TilesMap) do
+    begin
+      T := TilesRef[TilesMap[iMap]];
+
+      iy := 0;
+      for ty := 0 to cTileWidth - 1 do
+      begin
+        for tx := 0 to cTileWidth - 1 do
+        begin
+          tyx := (ty shl cTileWidthBits) + tx;
+          px := @Img.FData[imgPos + tx + iy];
+          T^.Pixels[True, 0, tyx] := px^.R;
+          T^.Pixels[True, 1, tyx] := px^.G;
+          T^.Pixels[True, 2, tyx] := px^.B;
+        end;
+        Inc(iy, Img.Width);
+      end;
+
+      AdvancePos(imgPos, Img.Width);
+    end;
+
+    Quality := AQuality;
+    Size.X := Img.Width;
+    Size.Y := Img.Height;
+  finally
+    JPGReader.Free;
+    JPGWriter.Free;
+    Img.Free;
+  end;
 end;
 
 { TFrame }
@@ -4147,38 +4319,28 @@ var
   end;
 
   procedure WriteTiles(const AList: TIntegerDynArray; IsKF: Boolean; AStart: Integer = 0);
-  //var
-  //  tx, ty, tlIdx: Integer;
-  //  isNibbleCoded: Boolean;
-  //  T: PTile;
+  var
+    sz: Cardinal;
+    TilesJPEG: TTilesJPEG;
   begin
     if Length(AList) > 0 then
     begin
-      //isNibbleCoded := FPaletteSize <= 16;
-      //
-      //DoCmd(gtTileSet, Ord(IsKF) or (Ord(isNibbleCoded) shl 1));
-      //DoDWord(AStart); // start tile
-      //DoDWord(AStart + High(AList)); // end tile
-      //
-      //for tlIdx := 0 to High(AList) do
-      //  DoWord(Tiles[AList[tlIdx]]^.PalIdx);
-      //
-      //if isNibbleCoded then
-      //begin
-      //  for tlIdx := 0 to High(AList) do
-      //  begin
-      //    T := Tiles[AList[tlIdx]];
-      //    for ty := 0 to cTileWidth - 1 do
-      //      for tx := 0 to cTileWidth - 1 do
-      //        if not Odd(tx) then
-      //          DoByte((T^.PalPixels[ty, tx] and 15) + ((T^.PalPixels[ty, tx + 1] and 15) shl 4));
-      //  end;
-      //end
-      //else
-      //begin
-      //  for tlIdx := 0 to High(AList) do
-      //    ZStream.Write(Tiles[AList[tlIdx]]^.GetPalPixelsPtr^[0, 0], sqr(cTileWidth));
-      //end;
+      DoCmd(gtTileSet, Ord(IsKF));
+      DoDWord(AStart); // start tile
+      DoDWord(AStart + High(AList)); // end tile
+
+      TilesJPEG := TTilesJPEG.Create(FTiles, AList, FTileMapWidth);
+      try
+        TilesJPEG.CompressJPEG(FReduceQuality);
+
+        sz := TilesJPEG.JPEG.Size;
+        TilesJPEG.JPEG.Seek(0, soBeginning);
+
+        DoDWord(sz);
+        ZStream.CopyFrom(TilesJPEG.JPEG, sz);
+      finally
+        TilesJPEG.Free;
+      end;
     end;
   end;
 
