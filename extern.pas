@@ -34,6 +34,25 @@ type
   PPSmallint = ^PSmallInt;
   TSmallIntDynArray2 = array of TSmallIntDynArray;
 
+  TANNsplitRule = (
+  		ANN_KD_STD = 0,      // the optimized kd-splitting rule
+  		ANN_KD_MIDPT = 1,    // midpoint split
+  		ANN_KD_FAIR	= 2,     // fair split
+  		ANN_KD_SL_MIDPT = 3, // sliding midpoint splitting method
+  		ANN_KD_SL_FAIR = 4,  // sliding fair split method
+  		ANN_KD_SUGGEST = 5 // the authors' suggestion for best
+  );
+
+  TANNkdtree = record
+  end;
+
+  PANNkdtree = ^TANNkdtree;
+
+  TYakmo = record
+  end;
+
+  PYakmo = ^TYakmo;
+
   TFFMPEG = record
     FmtCtx: PAVFormatContext;
     CodecCtx: PAVCodecContext;
@@ -68,6 +87,19 @@ function RunProcess(p:TProcess;var outputstring:string; var stderrstring:string;
 function FFMPEG_Open(AFileName: String; AScaling: Double; ASilent: Boolean): TFFMPEG;
 procedure FFMPEG_Close(AFFMPEG: TFFMPEG);
 procedure FFMPEG_LoadFrames(AFFMPEG: TFFMPEG; AStartFrame, AFrameCount: Integer; AFrameCallback: TFFMPEGFrameCallback; AUserParameter: Pointer = nil);
+
+function ann_kdtree_short_create(pa: PPSmallint; n, dd, bs: Integer; split: TANNsplitRule): PANNkdtree; external 'ANN_short.dll' name 'ann_kdtree_create';
+procedure ann_kdtree_short_destroy(akd: PANNkdtree); external 'ANN_short.dll' name 'ann_kdtree_destroy';
+function ann_kdtree_short_search(akd: PANNkdtree; q: PSmallInt; eps: Cardinal; err: PCardinal): Integer; external 'ANN_short.dll' name 'ann_kdtree_search';
+procedure ann_kdtree_short_search_multi(akd: PANNkdtree; idxs: PInteger; errs: PCardinal; cnt: Integer; q: PSmallInt; eps: Cardinal); external 'ANN_short.dll' name 'ann_kdtree_search_multi';
+
+function yakmo_create(k: Cardinal; restartCount: Cardinal; maxIter: Integer; initType: Integer; initSeed: Integer; doNormalize: Integer; isVerbose: Integer): PYakmo; stdcall; external 'yakmo.dll';
+procedure yakmo_destroy(ay: PYakmo); stdcall; external 'yakmo.dll';
+procedure yakmo_set_num_threads(num_threads: Integer); stdcall; external 'yakmo.dll';
+procedure yakmo_load_train_data(ay: PYakmo; rowCount: Cardinal; colCount: Cardinal; dataset: PPDouble); stdcall; external 'yakmo.dll';
+procedure yakmo_load_train_data_weighted(ay: PYakmo; rowCount: Cardinal; colCount: Cardinal; dataset: PPDouble; weights: PCardinal); stdcall; external 'yakmo.dll';
+procedure yakmo_train_on_data(ay: PYakmo; pointToCluster: PInteger); stdcall; external 'yakmo.dll';
+procedure yakmo_get_centroids(ay: PYakmo; centroids: PPDouble); stdcall; external 'yakmo.dll';
 
 function GetActiveProcessorCount(GroupNumber: Word): DWORD; stdcall; external 'kernel32.dll';
 
