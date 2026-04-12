@@ -98,7 +98,6 @@ type
   PTileDynArray = array of PTile;
   PTileDynArray2 = array of PTileDynArray;
 
-  TCpnPixelsB = array[0 .. cColorCpns - 1, 0 .. Sqr(cTileWidth) - 1] of Byte;
   TCpnPixelsF = array[0 .. cColorCpns - 1, 0 .. Sqr(cTileWidth) - 1] of Single;
 
   PCpnPixelsF = ^TCpnPixelsF;
@@ -113,7 +112,7 @@ type
     JPEGError: Cardinal;
     TmpIndex, MergeIndex, MapTileIndex, MapKFIndex: Integer;
     Flags: set of (tfActive, tfHMirror_Initial, tfVMirror_Initial, tfFinalized);
-    Pixels: TCpnPixelsB;
+    Pixels: array[Boolean {JPEG?}, 0 .. cColorCpns - 1, 0 .. Sqr(cTileWidth) - 1] of Byte;
   end;
 
   { TTileHelper }
@@ -136,12 +135,12 @@ type
     class function New: PTile; static;
     class procedure Dispose(var ATile: PTile); static;
     procedure CopyFrom(const ATile: TTile);
-    procedure CopyRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer); overload;
-    procedure BlendRGBPixels(const AFrameM1, AFrameM2: TIntegerDynArray2; AY, AX: Integer; AAlpha, AWeight: Integer);
-    procedure BlitRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer);
-    procedure ClearRGBPixels;
-    function CompareRawPixelsTo(const ATile: TTile): Integer;
-    function CompareHSVPixelsTo(const ATile: TTile): Integer;
+    procedure CopyRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer; IsJPEG: Boolean); overload;
+    procedure BlendRGBPixels(const AFrameM1, AFrameM2: TIntegerDynArray2; AY, AX: Integer; AAlpha, AWeight: Integer; IsJPEG: Boolean);
+    procedure BlitRGBPixels(const AFrameBuffer: TIntegerDynArray2; AVMirror, AHMirror: Boolean; AY, AX: Integer; IsJPEG: Boolean);
+    procedure ClearPixels;
+    function CompareRawPixelsTo(const ATile: TTile; IsJPEG: Boolean): Integer;
+    function CompareHSVPixelsTo(const ATile: TTile; IsJPEG: Boolean): Integer;
 
     property Active: Boolean read GetActive write SetActive;
     property Finalized: Boolean read GetFinalized write SetFinalized;
@@ -241,12 +240,10 @@ type
     LoadFromImageFinishedEvent: THandle;
 
     FrameTiles: PTileDynArray;
-    FrameTilesJPEG: PTileDynArray;
     FrameTilesRefCount: Integer;
     FrameTilesEvent: THandle;
     FrameTilesLock: TSpinlock;
     FrameTilesStream: TMemoryStream;
-    FrameTilesJPEGStream: TMemoryStream;
     FrameTilesJPEGPSNR: Double;
 
     constructor Create(AParent: TTilingEncoder; AIndex: Integer);
@@ -363,7 +360,7 @@ type
     FRenderUseGamma: Boolean;
     FRenderMirrored: Boolean;
     FRenderPlaying: Boolean;
-    FRenderOutputJPEG: Boolean;
+    FRenderJPEG: Boolean;
     FRenderTilePage: Integer;
     FRenderFrameBuffer: TFrameBuffer;
     FOutputBitmap: TBitmap;
@@ -412,14 +409,14 @@ type
     function GammaCorrect(lut: Integer; x: Byte): TFloat; inline;
     function GammaUncorrect(lut: Integer; x: TFloat): Byte; inline;
 
-    class procedure ConvertToCpnPixels(const ATile: TTile; VMirror, HMirror: Boolean; out ACpnPixel: TCpnPixelsF);
+    class procedure ConvertToCpnPixels(const ATile: TTile; IsJPEG, VMirror, HMirror: Boolean; out ACpnPixel: TCpnPixelsF);
     procedure ComputePsyVisFeatures(const ACpnPixels: TCpnPixelsF; Mode: TPsyVisMode; ADCT: PDCTScalar);
 
     function GetTileCount(AActiveOnly: Boolean): Integer;
     function GetFrameTileCount(AFrame: TFrame): Integer;
     function GetUnpredictedTileCount: Integer;
-    class function GetTileZoneSum(const ATile: TTile; ACpn, x, y, w, h: Integer): Integer;
-    class procedure GetTileHVMirrorHeuristics(const ATile: TTile; ACpn: Integer; out AHMirror, AVMirror: Boolean);
+    class function GetTileZoneSum(const ATile: TTile; x, y, w, h: Integer): Integer;
+    class procedure GetTileHVMirrorHeuristics(const ATile: TTile; out AHMirror, AVMirror: Boolean);
     class procedure HMirrorTile(var ATile: TTile);
     class procedure VMirrorTile(var ATile: TTile);
 
@@ -510,7 +507,7 @@ type
     property RenderFrameIndex: Integer read FRenderFrameIndex write SetRenderFrameIndex;
     property RenderPredicted: Boolean read FRenderPredicted write SetRenderPredicted;
     property RenderMirrored: Boolean read FRenderMirrored write SetRenderMirrored;
-    property RenderOutputJPEG: Boolean read FRenderOutputJPEG write SetRenderOutputJPEG;
+    property RenderJPEG: Boolean read FRenderJPEG write SetRenderOutputJPEG;
     property RenderUseGamma: Boolean read FRenderUseGamma write SetRenderUseGamma;
     property RenderTilePage: Integer read FRenderTilePage write SetRenderTilePage;
     property RenderTilePageCount: Integer read GetRenderTilePageCount;
@@ -536,6 +533,7 @@ type
   TRGBTiledImg = class(TFPCustomImage)
   private
     FImage: PTileDynArray;
+    FIsJPEG: Boolean;
     FTileStride: Integer;
   protected
     function GetInternalColor(x, y: integer): TFPColor; override;
@@ -545,6 +543,7 @@ type
   public
     property Image: PTileDynArray read FImage write FImage;
     property TileStride: Integer read FTileStride write FTileStride;
+    property IsJPEG: Boolean read FIsJPEG write FIsJPEG;
   end;
 
 implementation
@@ -568,7 +567,7 @@ const
 
     Result := CompareValue(t2^.UseCount, t1^.UseCount);
     if Result = 0 then
-      Result := t1^.CompareHSVPixelsTo(t2^)
+      Result := t1^.CompareHSVPixelsTo(t2^, True)
   end;
 
 { TTileMapItemHelper }
@@ -687,7 +686,7 @@ begin
   T := FImage[(y shr cTileWidthBits) * FTileStride + (x shr cTileWidthBits)];
   yx := ((y and (cTileWidth - 1)) shl cTileWidthBits) or (x and (cTileWidth - 1));
 
-  Result := ToRGB(T^.Pixels[0, yx], T^.Pixels[1, yx], T^.Pixels[2, yx]);
+  Result := ToRGB(T^.Pixels[IsJPEG, 0, yx], T^.Pixels[IsJPEG, 1, yx], T^.Pixels[IsJPEG, 2, yx]);
 end;
 
 procedure TRGBTiledImg.SetInternalPixel(x, y: integer; Value: integer);
@@ -698,7 +697,7 @@ begin
   T := FImage[(y shr cTileWidthBits) * FTileStride + (x shr cTileWidthBits)];
   yx := ((y and (cTileWidth - 1)) shl cTileWidthBits) or (x and (cTileWidth - 1));
 
-  FromRGB(Value, T^.Pixels[0, yx], T^.Pixels[1, yx], T^.Pixels[2, yx]);
+  FromRGB(Value, T^.Pixels[IsJPEG, 0, yx], T^.Pixels[IsJPEG, 1, yx], T^.Pixels[IsJPEG, 2, yx]);
 end;
 
 { TTileHelper }
@@ -840,7 +839,7 @@ begin
   FreeMemAndNil(ATile);
 end;
 
-procedure TTileHelper.CopyRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer);
+procedure TTileHelper.CopyRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer; IsJPEG: Boolean);
 var
   tyx, ty, tx: Integer;
 begin
@@ -849,7 +848,7 @@ begin
   begin
     for tx := 0 to cTileWidth - 1 do
     begin
-      FromRGB(AFrameBuffer[AY, AX], Pixels[0, tyx], Pixels[1, tyx], Pixels[2, tyx]);
+      FromRGB(AFrameBuffer[AY, AX], Pixels[IsJPEG, 0, tyx], Pixels[IsJPEG, 1, tyx], Pixels[IsJPEG, 2, tyx]);
       Inc(AX);
       Inc(tyx);
     end;
@@ -858,7 +857,7 @@ begin
   end;
 end;
 
-procedure TTileHelper.BlendRGBPixels(const AFrameM1, AFrameM2: TIntegerDynArray2; AY, AX: Integer; AAlpha, AWeight: Integer);
+procedure TTileHelper.BlendRGBPixels(const AFrameM1, AFrameM2: TIntegerDynArray2; AY, AX: Integer; AAlpha, AWeight: Integer; IsJPEG: Boolean);
 var
   tyx, ty, tx: Integer;
 begin
@@ -867,7 +866,7 @@ begin
   begin
     for tx := 0 to cTileWidth - 1 do
     begin
-      BlendRGB(AFrameM1[AY, AX], AFrameM2[AY, AX], AAlpha, AWeight, CGTMBlendAlphaShift, CGTMBlendWeightBaseShift, Pixels[0, tyx], Pixels[1, tyx], Pixels[2, tyx]);
+      BlendRGB(AFrameM1[AY, AX], AFrameM2[AY, AX], AAlpha, AWeight, CGTMBlendAlphaShift, CGTMBlendWeightBaseShift, Pixels[IsJPEG, 0, tyx], Pixels[IsJPEG, 1, tyx], Pixels[IsJPEG, 2, tyx]);
       Inc(AX);
       Inc(tyx);
     end;
@@ -876,30 +875,33 @@ begin
   end;
 end;
 
-procedure TTileHelper.BlitRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer);
+procedure TTileHelper.BlitRGBPixels(const AFrameBuffer: TIntegerDynArray2; AVMirror, AHMirror: Boolean; AY, AX: Integer; IsJPEG: Boolean);
 var
-  tyx, ty, tx: Integer;
+  tyx, ty, tx, tym, txm: Integer;
 begin
-  tyx := 0;
   for ty := 0 to cTileWidth - 1 do
   begin
+    tym := ty;
+    if AVMirror then tym := cTileWidth - 1 - tym;
+
     for tx := 0 to cTileWidth - 1 do
     begin
-      AFrameBuffer[AY, AX] := ToRGB(Pixels[0, tyx], Pixels[1, tyx], Pixels[2, tyx]);
-      Inc(AX);
-      Inc(tyx);
+      txm := tx;
+      if AHMirror then txm := cTileWidth - 1 - txm;
+
+      tyx := (tym shl cTileWidthBits) + txm;
+
+      AFrameBuffer[AY + ty, AX + tx] := ToRGB(Pixels[IsJPEG, 0, tyx], Pixels[IsJPEG, 1, tyx], Pixels[IsJPEG, 2, tyx]);
     end;
-    Dec(AX, cTileWidth);
-    Inc(AY);
   end;
 end;
 
-procedure TTileHelper.ClearRGBPixels;
+procedure TTileHelper.ClearPixels;
 begin
   FillChar(Pixels, SizeOf(Pixels), 0);
 end;
 
-function TTileHelper.CompareHSVPixelsTo(const ATile: TTile): Integer;
+function TTileHelper.CompareHSVPixelsTo(const ATile: TTile; IsJPEG: Boolean): Integer;
 const
   CPrecisionDiv = 1;
 var
@@ -914,16 +916,16 @@ begin
 
   for iPx := 0 to Sqr(cTileWidth) - 1 do
   begin
-    luma := ToLuma(Pixels[0, iPx], Pixels[1, iPx], Pixels[2, iPx]);
+    luma := ToLuma(Pixels[IsJPEG, 0, iPx], Pixels[IsJPEG, 1, iPx], Pixels[IsJPEG, 2, iPx]);
     lumaAccL += luma;
 
-    RGBToHSV(Pixels[0, iPx], Pixels[1, iPx], Pixels[2, iPx], h, s, v);
+    RGBToHSV(Pixels[IsJPEG, 0, iPx], Pixels[IsJPEG, 1, iPx], Pixels[IsJPEG, 2, iPx], h, s, v);
     hAccL += h; sAccL += s; vAccL += v;
 
-    luma := ToLuma(ATile.Pixels[0, iPx], ATile.Pixels[1, iPx], ATile.Pixels[2, iPx]);
+    luma := ToLuma(ATile.Pixels[IsJPEG, 0, iPx], ATile.Pixels[IsJPEG, 1, iPx], ATile.Pixels[IsJPEG, 2, iPx]);
     lumaAccR += luma;
 
-    RGBToHSV(Pixels[0, iPx], Pixels[1, iPx], Pixels[2, iPx], h, s, v);
+    RGBToHSV(Pixels[IsJPEG, 0, iPx], Pixels[IsJPEG, 1, iPx], Pixels[IsJPEG, 2, iPx], h, s, v);
     hAccR += h; sAccR += s; vAccR += v;
   end;
 
@@ -936,9 +938,9 @@ begin
     Result := CompareValue(vAccL, vAccR, Sqr(cTileWidth) / High(Byte) * CPrecisionDiv);
 end;
 
-function TTileHelper.CompareRawPixelsTo(const ATile: TTile): Integer;
+function TTileHelper.CompareRawPixelsTo(const ATile: TTile; IsJPEG: Boolean): Integer;
 begin
-  Result := CompareByte(Pixels[0, 0], ATile.Pixels[0, 0], sqr(cTileWidth) * cColorCpns);
+  Result := CompareByte(Pixels[IsJPEG, 0, 0], ATile.Pixels[IsJPEG, 0, 0], sqr(cTileWidth) * cColorCpns);
 end;
 
 procedure TTileHelper.CopyFrom(const ATile: TTile);
@@ -1041,7 +1043,6 @@ begin
 
   FrameTilesEvent := CreateEvent(nil, True, False, nil);
   FrameTilesStream := TMemoryStream.Create;
-  FrameTilesJPEGStream := TMemoryStream.Create;
   InterframeCorrelationEvent := CreateEvent(nil, True, False, nil);
   LoadFromImageFinishedEvent := CreateEvent(nil, True, False, nil);
   SpinLeave(@FrameTilesLock);
@@ -1055,7 +1056,6 @@ begin
   CloseHandle(LoadFromImageFinishedEvent);
   CloseHandle(InterframeCorrelationEvent);
   FrameTilesStream.Free;
-  FrameTilesJPEGStream.Free;
   CloseHandle(FrameTilesEvent);
 
   inherited Destroy;
@@ -1084,10 +1084,7 @@ end;
 procedure TFrame.AcquireFrameTiles;
 var
   CompStream: Tdecompressionstream;
-  yx, ftrc: Integer;
-  FT: PTile;
-  Img: TRGBTiledImg;
-  JPEGRd: TFPReaderJPEG;
+  ftrc: Integer;
 begin
   SpinEnter(@FrameTilesLock);
   try
@@ -1111,27 +1108,6 @@ begin
       CompStream.Free;
     end;
 
-    FrameTilesJPEGStream.Position := 0;
-    FrameTilesJPEG := TTile.Array1DNew(Length(TileMap) * Length(TileMap[0]));
-    for yx := 0 to Length(TileMap) * Length(TileMap[0]) - 1 do
-    begin
-      FT := FrameTilesJPEG[yx];
-      FT^.Active := True;
-      FT^.UseCount := 1;
-    end;
-
-    Img := TRGBTiledImg.Create(Length(TileMap[0]) shl cTileWidthBits, Length(TileMap) shl cTileWidthBits);
-    JPEGRd := TFPReaderJPEG.Create;
-    try
-      JPEGRd.Performance := jpBestSpeed;
-      Img.TileStride := Length(TileMap[0]);
-      Img.Image := FrameTilesJPEG;
-      Img.LoadFromStream(FrameTilesJPEGStream, JPEGRd);
-    finally
-      JPEGRd.Free;
-      Img.Free;
-    end;
-
     // signal other threads decompression is done
     SetEvent(FrameTilesEvent);
   end
@@ -1150,7 +1126,6 @@ begin
     begin
       Assert(FrameTilesRefCount = 0);
       TTile.Array1DDispose(FrameTiles);
-      TTile.Array1DDispose(FrameTilesJPEG);
 
       ResetEvent(FrameTilesEvent);
     end;
@@ -1234,9 +1209,9 @@ procedure TFrame.PrepareDCTs(AMTPool: TMTPool; const ADCTs: TDCTDynArray; const 
     try
       for x := 0 to Encoder.FScreenWidth - cTileWidth do
       begin
-        DCTTile^.CopyRGBPixels(ABuffer, AIndex, x);
+        DCTTile^.CopyRGBPixels(ABuffer, AIndex, x, False);
 
-        Encoder.ConvertToCpnPixels(DCTTile^, False, False, CpnPixels);
+        Encoder.ConvertToCpnPixels(DCTTile^, False, False, False, CpnPixels);
         Encoder.ComputePsyVisFeatures(CpnPixels, pvsPSNRHVS, ADCTs[yx]);
 
         Inc(yx);
@@ -1351,7 +1326,7 @@ begin
       bestAlpha := 0;
       bestWeight := EnsureRange(Round(x[0]), CGTMBlendWeightMin, CGTMBlendWeightMax);
 
-      BlendTile^.BlendRGBPixels(pbData.FrameM1, pbData.FrameM1, ADY, ADX, bestAlpha, bestWeight);
+      BlendTile^.BlendRGBPixels(pbData.FrameM1, pbData.FrameM1, ADY, ADX, bestAlpha, bestWeight, False);
     end
     else
     begin
@@ -1364,10 +1339,10 @@ begin
       bestAlpha := EnsureRange(Round(x[0]), 0, CGTMBlendAlphaMax);
       bestWeight := EnsureRange(Round(x[1]), CGTMBlendWeightMin, CGTMBlendWeightMax);
 
-      BlendTile^.BlendRGBPixels(pbData.FrameM1, pbData.FrameM2, ADY, ADX, bestAlpha, bestWeight);
+      BlendTile^.BlendRGBPixels(pbData.FrameM1, pbData.FrameM2, ADY, ADX, bestAlpha, bestWeight, False);
     end;
 
-    Encoder.ConvertToCpnPixels(BlendTile^, False, False, BlendCpnPixels);
+    Encoder.ConvertToCpnPixels(BlendTile^, False, False, False, BlendCpnPixels);
     Encoder.ComputePsyVisFeatures(BlendCpnPixels, pvsPSNRHVS, BlendDCT);
     bestErr := CompareEuclideanDCTPtr_asm(ADCT, BlendDCT);
     bestErr += ApplyBlendPredictionPenalty(bestAlpha, bestWeight, ABackBufferOffset);
@@ -1446,7 +1421,7 @@ var
     TMI := @TileMap[sy, sx];
     FrameTile := FrameTiles[AIndex];
 
-    Encoder.ConvertToCpnPixels(FrameTile^, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, CurCpnPixels);
+    Encoder.ConvertToCpnPixels(FrameTile^, False, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, CurCpnPixels);
     Encoder.ComputePsyVisFeatures(CurCpnPixels, pvsPSNRHVS, @CurDCT[0]);
 
     dx := sx shl cTileWidthBits;
@@ -1567,7 +1542,7 @@ begin
 
           FT := FrameTiles[ti];
 
-          FromRGB(col, FT^.Pixels[2, tyx], FT^.Pixels[1, tyx], FT^.Pixels[0, tyx]);
+          FromRGB(col, FT^.Pixels[False, 2, tyx], FT^.Pixels[False, 1, tyx], FT^.Pixels[False, 0, tyx]);
         end;
       end;
   end;
@@ -1594,8 +1569,8 @@ procedure TFrame.DirectBlit(AMTPool: TMTPool; const ABuffer: TIntegerDynArray2);
     begin
       dx := sx shl cTileWidthBits;
 
-      FrameTile := FrameTilesJPEG[yx];
-      FrameTile^.BlitRGBPixels(ABuffer, dy, dx);
+      FrameTile := FrameTiles[yx];
+      FrameTile^.BlitRGBPixels(ABuffer, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, dy, dx, True);
 
       Inc(yx);
     end;
@@ -1657,10 +1632,10 @@ procedure TFrame.PredictedBlit(AMTPool: TMTPool; AFrameBuffer: TFrameBuffer);
       end
       else
       begin
-        // draw fb (plain tile)
+        // draw fb (JPEG tile)
 
-        FrameTile := FrameTilesJPEG[sy * Encoder.FTileMapWidth + sx];
-        FrameTile^.BlitRGBPixels(FrontBuf, dy, dx);
+        FrameTile := FrameTiles[sy * Encoder.FTileMapWidth + sx];
+        FrameTile^.BlitRGBPixels(FrontBuf, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, dy, dx, True);
       end;
     end;
   end;
@@ -1689,7 +1664,7 @@ begin
 
       for tyx := 0 to Sqr(cTileWidth) - 1 do
       begin
-        RGBToLAB(FT^.Pixels[0, tyx], FT^.Pixels[1, tyx], FT^.Pixels[2, tyx], l, a, b);
+        RGBToLAB(FT^.Pixels[False, 0, tyx], FT^.Pixels[False, 1, tyx], FT^.Pixels[False, 2, tyx], l, a, b);
         Result[di + 0] += l;
         Result[di + 1] += a;
         Result[di + 2] += b;
@@ -1713,9 +1688,9 @@ var
   TMI: PTileMapItem;
   prevFrameICD: TFloatDynArray;
   Img: TRGBTiledImg;
-  JPEGTiles: PTileDynArray;
   JPEGWr: TMyWriterJPEG;
   JPEGRd: TFPReaderJPEG;
+  JPEGStream: TMemoryStream;
   CpnPixels: TCpnPixelsF;
   PlainDCT, JPEGDCT: TDCT;
 begin
@@ -1736,32 +1711,34 @@ begin
   // Use JPEG to devise FrameTile target error (PSNR-HVS)
 
   Img := TRGBTiledImg.Create(Encoder.ScreenWidth, Encoder.ScreenHeight);
-  JPEGTiles := TTile.Array1DNew(Encoder.FTileMapSize);
   JPEGWr := TMyWriterJPEG.Create;
   JPEGRd := TFPReaderJPEG.Create;
+  JPEGStream := TMemoryStream.Create;
   try
     Img.Image := FrameTiles;
+    Img.IsJPEG := False;
     Img.TileStride := Encoder.FTileMapWidth;
 
     JPEGWr.CompressionQuality := Encoder.ReduceQuality;
     JPEGWr.ProgressiveEncoding := False;
     JPEGWr.ChromaSubsampling := False;
-    Img.SaveToStream(FrameTilesJPEGStream, JPEGWr);
+    Img.SaveToStream(JPEGStream, JPEGWr);
+
+    Img.IsJPEG := True;
 
     JPEGRd.Performance := jpBestSpeed;
-    Img.Image := JPEGTiles;
-    FrameTilesJPEGStream.Seek(0, soBeginning);
-    Img.LoadFromStream(FrameTilesJPEGStream, JPEGRd);
+    JPEGStream.Seek(0, soBeginning);
+    Img.LoadFromStream(JPEGStream, JPEGRd);
 
     errAcc := 0;
     for i := 0 to Encoder.FTileMapSize - 1 do
     begin
-      Tile := JPEGTiles[i];
-      Encoder.ConvertToCpnPixels(Tile^, False, False, CpnPixels);
+      Tile := FrameTiles[i];
+
+      Encoder.ConvertToCpnPixels(Tile^, True, False, False, CpnPixels);
       Encoder.ComputePsyVisFeatures(CpnPixels, pvsPSNRHVS, JPEGDCT);
 
-      Tile := FrameTiles[i];
-      Encoder.ConvertToCpnPixels(Tile^, False, False, CpnPixels);
+      Encoder.ConvertToCpnPixels(Tile^, False, False, False, CpnPixels);
       Encoder.ComputePsyVisFeatures(CpnPixels, pvsPSNRHVS, PlainDCT);
 
       Tile^.JPEGError := CompareEuclideanDCTPtr_asm(@PlainDCT[0], @JPEGDCT[0]);
@@ -1770,9 +1747,9 @@ begin
     end;
     FrameTilesJPEGPSNR := EuclideanToPSNR(errAcc div Encoder.FTileMapSize);
   finally
+    JPEGStream.Free;
     JPEGRd.Free;
     JPEGWr.Free;
-    TTile.Array1DDispose(JPEGTiles);
     Img.Free;
   end;
 
@@ -1783,7 +1760,7 @@ begin
     Tile := FrameTiles[i];
     TMI := @TileMap[i div Encoder.FTileMapWidth, i mod Encoder.FTileMapWidth];
 
-    Encoder.GetTileHVMirrorHeuristics(Tile^, -1, HMirror, VMirror);
+    Encoder.GetTileHVMirrorHeuristics(Tile^, HMirror, VMirror);
 
     Tile^.Active := True;
     Tile^.UseCount := 1;
@@ -2514,8 +2491,8 @@ end;
 
 procedure TTilingEncoder.SetRenderOutputJPEG(AValue: Boolean);
 begin
-  if FRenderOutputJPEG = AValue then Exit;
-  FRenderOutputJPEG := AValue;
+  if FRenderJPEG = AValue then Exit;
+  FRenderJPEG := AValue;
   FRenderOutputDirty := True;
 end;
 
@@ -2557,7 +2534,7 @@ begin
   FMotionPredictMaxBufferedFrames := EnsureRange(AValue, 1, 4);
 end;
 
-class procedure TTilingEncoder.ConvertToCpnPixels(const ATile: TTile; VMirror, HMirror: Boolean; out ACpnPixel: TCpnPixelsF);
+class procedure TTilingEncoder.ConvertToCpnPixels(const ATile: TTile; IsJPEG, VMirror, HMirror: Boolean; out ACpnPixel: TCpnPixelsF);
 var
   x, y, yx, xx, yy, yyxx: Integer;
 begin
@@ -2574,7 +2551,7 @@ begin
 
       yyxx := (yy shl cTileWidthBits) + xx;
 
-      RGBToYUV(ATile.Pixels[0, yyxx], ATile.Pixels[1, yyxx], ATile.Pixels[2, yyxx], ACpnPixel[0, yx], ACpnPixel[1, yx], ACpnPixel[2, yx], cDCTScale);
+      RGBToYUV(ATile.Pixels[IsJPEG, 0, yyxx], ATile.Pixels[IsJPEG, 1, yyxx], ATile.Pixels[IsJPEG, 2, yyxx], ACpnPixel[0, yx], ACpnPixel[1, yx], ACpnPixel[2, yx], cDCTScale);
 
       Inc(yx);
     end;
@@ -2616,10 +2593,16 @@ begin
       begin
         ji := (j shl cTileWidthBits) + i;
         rji := ((cTileWidth - 1 - j) shl cTileWidthBits) + i;
-        v := ATile.Pixels[iCpn, ji];
-        sv := ATile.Pixels[iCpn, rji];
-        ATile.Pixels[iCpn, ji] := sv;
-        ATile.Pixels[iCpn, rji] := v;
+
+        v := ATile.Pixels[False, iCpn, ji];
+        sv := ATile.Pixels[False, iCpn, rji];
+        ATile.Pixels[False, iCpn, ji] := sv;
+        ATile.Pixels[False, iCpn, rji] := v;
+
+        v := ATile.Pixels[True, iCpn, ji];
+        sv := ATile.Pixels[True, iCpn, rji];
+        ATile.Pixels[True, iCpn, ji] := sv;
+        ATile.Pixels[True, iCpn, rji] := v;
       end;
 end;
 
@@ -2636,10 +2619,16 @@ begin
       begin
         ji := (j shl cTileWidthBits) + i;
         jri := (j shl cTileWidthBits) + cTileWidth - 1 - i;
-        v := ATile.Pixels[iCpn, ji];
-        sv := ATile.Pixels[iCpn, jri];
-        ATile.Pixels[iCpn, ji] := sv;
-        ATile.Pixels[iCpn, jri] := v;
+
+        v := ATile.Pixels[False, iCpn, ji];
+        sv := ATile.Pixels[False, iCpn, jri];
+        ATile.Pixels[False, iCpn, ji] := sv;
+        ATile.Pixels[False, iCpn, jri] := v;
+
+        v := ATile.Pixels[True, iCpn, ji];
+        sv := ATile.Pixels[True, iCpn, jri];
+        ATile.Pixels[True, iCpn, ji] := sv;
+        ATile.Pixels[True, iCpn, jri] := v;
       end;
 end;
 
@@ -2790,7 +2779,7 @@ const
   CDummyTilesColor = $303030;
   CDrawPredictBaseLuma = $d0;
 
-  procedure DrawTile(const ABuffer: TIntegerDynArray2; ATilePtr: PTile; ASY, ASX: Integer; AHmirror, AVmirror, AForceActive: Boolean); inline;
+  procedure DrawTile(const ABuffer: TIntegerDynArray2; ATilePtr: PTile; ASY, ASX: Integer; AIsJPEG, AHmirror, AVmirror, AForceActive: Boolean); inline;
   var
     col, tx, ty, txm, tym, tyxm: Integer;
     psl: PInteger;
@@ -2811,7 +2800,7 @@ const
 
         col := $ff00ff;
         if ATilePtr^.Active or AForceActive then
-          col := ToRGB(ATilePtr^.Pixels[0, tyxm], ATilePtr^.Pixels[1, tyxm], ATilePtr^.Pixels[2, tyxm]);
+          col := ToRGB(ATilePtr^.Pixels[AIsJPEG, 0, tyxm], ATilePtr^.Pixels[AIsJPEG, 1, tyxm], ATilePtr^.Pixels[AIsJPEG, 2, tyxm]);
 
         psl^ := col;
         Inc(psl);
@@ -2959,7 +2948,7 @@ begin
               vmir := False;
             end;
 
-            DrawTile(TempBuf, tilePtr, 0, 0, hmir, vmir, True);
+            DrawTile(TempBuf, tilePtr, 0, 0, False, hmir, vmir, True);
 
             BlitBuffer(TempBuf, pFB, sy, sx, FInputBitmap.Width);
           end;
@@ -2989,14 +2978,14 @@ begin
                 FRenderFrameBuffer.GetBuffer(-TMI^.Attrs.BlendBackBufferOffset - 1),
                 sy shl cTileWidthBits,
                 sx shl cTileWidthBits,
-                TMI^.Attrs.Alpha, TMI^.Attrs.Weight)
+                TMI^.Attrs.Alpha, TMI^.Attrs.Weight, False)
             else
               TempTile^.CopyRGBPixels(
                 FRenderFrameBuffer.GetBuffer(-TMI^.Attrs.MotionBackBufferOffset),
                 (sy shl cTileWidthBits) + TMI^.Attrs.MotionY,
-                (sx shl cTileWidthBits) + TMI^.Attrs.MotionX);
+                (sx shl cTileWidthBits) + TMI^.Attrs.MotionX, False);
 
-            DrawTile(FRenderFrameBuffer.GetBuffer, TempTile, sy, sx, False, False, True)
+            DrawTile(FRenderFrameBuffer.GetBuffer, TempTile, sy, sx, False, False, False, True)
           end
           else if InRange(TMI^.TileIdx, 0, High(Tiles)) then
           begin
@@ -3011,7 +3000,7 @@ begin
               vmir := False;
             end;
 
-            DrawTile(FRenderFrameBuffer.GetBuffer, tilePtr, sy, sx, hmir, vmir, False);
+            DrawTile(FRenderFrameBuffer.GetBuffer, tilePtr, sy, sx, FRenderJPEG, hmir, vmir, False);
           end
           else
           begin
@@ -3127,7 +3116,7 @@ begin
                 vmir := False;
               end;
 
-              DrawTile(TempBuf, tilePtr, 0, 0, hmir, vmir, False);
+              DrawTile(TempBuf, tilePtr, 0, 0, FRenderJPEG, hmir, vmir, False);
 
               BlitBuffer(TempBuf, pFB, sy, sx, FTilesBitmap.Width);
             end;
@@ -3428,13 +3417,10 @@ begin
       if not TMI^.IsPredicted then
       begin
         Tile := Tiles[newTIdx];
-        Tile^.CopyFrom(AFrame.FrameTilesJPEG[yx]^);
+        Tile^.CopyFrom(AFrame.FrameTiles[yx]^);
 
         TMI^.TileIdx := newTIdx;
         TMI^.Error := AFrame.FrameTiles[yx]^.JPEGError;
-
-        if TMI^.HMirror then HMirrorTile(Tile^);
-        if TMI^.VMirror then VMirrorTile(Tile^);
 
         Inc(newTIdx);
       end
@@ -3538,7 +3524,7 @@ var
 begin
   t1 := PTile(Item1);
   t2 := PTile(Item2);
-  Result := t1^.CompareRawPixelsTo(t2^);
+  Result := t1^.CompareRawPixelsTo(t2^, True);
 end;
 
 procedure TTilingEncoder.MakeTilesUnique;
@@ -3623,7 +3609,7 @@ begin
     FTiles[tidx]^.UseCount := 0;
     FTiles[tidx]^.MergeIndex := BestTileIdx;
 
-    FTiles[tidx]^.ClearRGBPixels;
+    FTiles[tidx]^.ClearPixels;
   end;
 end;
 
@@ -3654,42 +3640,30 @@ begin
       end;
 end;
 
-class function TTilingEncoder.GetTileZoneSum(const ATile: TTile; ACpn, x, y, w, h: Integer): Integer;
+class function TTilingEncoder.GetTileZoneSum(const ATile: TTile; x, y, w, h: Integer): Integer;
 var
   i, j, ji: Integer;
 begin
   Result := 0;
 
-  if ACpn < 0 then
-  begin
-    for j := y to y + h - 1 do
-      for i := x to x + w - 1 do
-      begin
-        ji := (j shl cTileWidthBits) + i;
-        Result += ToLuma(ATile.Pixels[0, ji], ATile.Pixels[1, ji], ATile.Pixels[2, ji]);
-      end;
-  end
-  else
-  begin
-    for j := y to y + h - 1 do
-      for i := x to x + w - 1 do
-      begin
-        ji := (j shl cTileWidthBits) + i;
-        Result += ATile.Pixels[ACpn, ji];
-      end;
-  end;
+  for j := y to y + h - 1 do
+    for i := x to x + w - 1 do
+    begin
+      ji := (j shl cTileWidthBits) + i;
+      Result += ToLuma(ATile.Pixels[False, 0, ji], ATile.Pixels[False, 1, ji], ATile.Pixels[False, 2, ji]);
+    end;
 end;
 
-class procedure TTilingEncoder.GetTileHVMirrorHeuristics(const ATile: TTile; ACpn: Integer; out AHMirror, AVMirror: Boolean);
+class procedure TTilingEncoder.GetTileHVMirrorHeuristics(const ATile: TTile; out AHMirror, AVMirror: Boolean);
 var
   q00, q01, q10, q11: Integer;
 begin
   // enforce an heuristical 'spin' on tiles mirrors (brighter top-left corner)
 
-  q00 := GetTileZoneSum(ATile, ACpn, 0, 0, cTileWidth div 2, cTileWidth div 2);
-  q01 := GetTileZoneSum(ATile, ACpn, cTileWidth div 2, 0, cTileWidth div 2, cTileWidth div 2);
-  q10 := GetTileZoneSum(ATile, ACpn, 0, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2);
-  q11 := GetTileZoneSum(ATile, ACpn, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2);
+  q00 := GetTileZoneSum(ATile, 0, 0, cTileWidth div 2, cTileWidth div 2);
+  q01 := GetTileZoneSum(ATile, cTileWidth div 2, 0, cTileWidth div 2, cTileWidth div 2);
+  q10 := GetTileZoneSum(ATile, 0, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2);
+  q11 := GetTileZoneSum(ATile, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2, cTileWidth div 2);
 
   AHMirror := q00 + q10 < q01 + q11;
   AVMirror := q00 + q01 < q10 + q11;
@@ -4062,7 +4036,7 @@ begin
   Result := CompareValue(t2^.UseCount, t1^.UseCount);
 
   if Result = 0 then
-    Result := t1^.CompareHSVPixelsTo(t2^);
+    Result := t1^.CompareHSVPixelsTo(t2^, True);
 end;
 
 function CompareTileIdxsHSVPixels(Item1, Item2, UserParameter:Pointer):Integer;
@@ -4073,7 +4047,7 @@ begin
   t1 := Encoder.FTiles[PInteger(Item1)^];
   t2 := Encoder.FTiles[PInteger(Item2)^];
 
-  Result := t1^.CompareHSVPixelsTo(t2^);
+  Result := t1^.CompareHSVPixelsTo(t2^, True);
 end;
 
 procedure TTilingEncoder.SaveStream(AStream: TStream);
@@ -4510,7 +4484,7 @@ begin
   FRenderOuptutFrameIndex := -1;
   FRenderPredicted := True;
   FRenderMirrored := True;
-  FRenderOutputJPEG := True;
+  FRenderJPEG := True;
 
   FRenderPage := rpOutput;
   ReframeUI(80, 45);

@@ -559,7 +559,7 @@ begin
     FTilingEncoder.RenderFrameIndex := Max(0, tbFrame.Position);
     FTilingEncoder.RenderPredicted := chkPredicted.Checked;
     FTilingEncoder.RenderMirrored := chkMirrored.Checked;
-    FTilingEncoder.RenderOutputJPEG := chkJPEG.Checked;
+    FTilingEncoder.RenderJPEG := chkJPEG.Checked;
     FTilingEncoder.RenderUseGamma := chkGamma.Checked;
     FTilingEncoder.RenderTilePage := sbTiles.Position;
     FTilingEncoder.RenderGammaValue := seVisGamma.Value;
