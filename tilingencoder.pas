@@ -61,12 +61,10 @@ type
   // GlobalTile32:                     data -> global tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
   // KeyFrmTile16:                     data -> keyframe tile index (16 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
   // KeyFrmTile32:                     data -> keyframe tile index (32 bits); commandBits -> none (10 bits); V mirror (1 bit); H mirror (1 bit)
-  // PalTile:                          data -> tile index (32 bits); palette index (16 bits); commandBits -> none (9 bits); is keyframe tile (1 bit); V mirror (1 bit); H mirror (1 bit)
   //
   // (insert new commands here...)
   //
   // FrameEnd:                         data -> none; commandBits -> none (11 bits); is keyframe end (1 bit)
-  // LoadPalette:                      data -> palette index (16 bits); { RGBA bytes (32bits) } * indexes count; commandBits -> palette format (0: RGBA32) (6 bits); indexes count per palette - 1 (6 bits)
   // TileSet:                          data -> start tile (32 bits); end tile (32 bits); { palette index (16 bits) } * count; { indexes per pixel (64 [bytes] / [nibbles, ie: 103254...]) } * count; commandBits -> none (10 bits); is nibble coded (1 bit); is keyframe tileset (1 bit)
   // SetDimensions:                    data -> width in tiles (32 bits); height in tiles (32 bits); frame length in nanoseconds (32 bits) (2^32-1: still frame); global tile count (32 bits); maximum key frame tile count (32 bits); commandBits -> none (12 bits)
   // ExtendedCommand:                  data -> following bytes count (32 bits); custom commands, proprietary extensions, ...; commandBits -> extended command index (12 bits)
@@ -80,10 +78,8 @@ type
     gtGlobalTile32 = 5,
     gtKeyFrmTile16 = 6,
     gtKeyFrmTile32 = 7,
-    gtPalTile = 8,
 
-    gtFrameEnd = 11,
-    gtLoadPalette = 12,
+    gtFrameEnd = 12,
     gtTileSet = 13,
     gtSetDimensions = 14,
     gtExtendedCommand = 15
@@ -1999,8 +1995,8 @@ var
   DCTBuffer: TDCTBuffer;
   MTPool: TMTPool;
 
-  y, x: Integer;
-  palPict: TFastPortableNetworkGraphic;
+  //y, x: Integer;
+  //palPict: TFastPortableNetworkGraphic;
 begin
   if (Length(FFrames) = 0) or (FMotionPredictRadius <= 0) then
     Exit;
@@ -3741,10 +3737,10 @@ var
   end;
 
   procedure ReadTiles(isKF, isNibbleCoded: Boolean);
-  var
-    iRawTile, rawStartIdx, rawEndIdx, baseTileIdx, tileIdx, tileCnt, ty, tx: Integer;
-    b: Byte;
-    T: PTile;
+  //var
+  //  iRawTile, rawStartIdx, rawEndIdx, baseTileIdx, tileIdx, tileCnt, ty, tx: Integer;
+  //  b: Byte;
+  //  T: PTile;
   begin
     //rawStartIdx := ReadDWord; // start tile
     //rawEndIdx := ReadDWord; // end tile
@@ -3807,40 +3803,16 @@ var
     SetLength(rawTileIdxToTileIdx[True], tileCount);
   end;
 
-  procedure ReadPalette(palSize: Integer);
-  var
-    i, palIdx: Integer;
+  procedure SetTMI(tileIdx: Integer; attrs: Integer; var TMI: TTileMapItem);
   begin
-    //palIdx := ReadWord;
-    //
-    //if Length(FPalettes) <= palIdx then
-    //begin
-    //  SetLength(FPalettes, palIdx + 1);
-    //  for i := 0 to palIdx do
-    //    SetLength(FPalettes[i].PaletteRGB, palSize);
-    //
-    //  FPaletteCount := Length(FPalettes);
-    //end;
-    //
-    //for i := 0 to palSize - 1 do
-    //  FPalettes[palIdx].PaletteRGB[i] := ReadDWord and $ffffff;
-    //
-    //FPaletteSize := palSize;
-  end;
+    TMI.TileIdx := tileIdx;
+    TMI.HMirror := attrs and 1 <> 0;
+    TMI.VMirror := attrs and 2 <> 0;
 
-  procedure SetTMI(tileIdx, palIdx: Integer; attrs: Integer; var TMI: TTileMapItem);
-  begin
-    //TMI.TileIdx := tileIdx;
-    //TMI.PalIdx := palIdx;
-    //if palIdx < 0 then
-    //  TMI.PalIdx := FTiles[tileIdx]^.PalIdx;
-    //TMI.HMirror := attrs and 1 <> 0;
-    //TMI.VMirror := attrs and 2 <> 0;
-    //
-    //TMI.IsPredicted := False;
-    //TMI.IsBlended := False;
-    //
-    //TMI.Error := curKFPSNRError;
+    TMI.IsPredicted := False;
+    TMI.IsBlended := False;
+
+    TMI.Error := curKFPSNRError;
   end;
 
   function NextFrame(KF: TKeyFrame): TFrame;
@@ -3903,7 +3875,6 @@ var
   b: Byte;
   tmPos, iKF: Integer;
   tileIdx: Cardinal;
-  palIdx: Word;
   frm: TFrame;
   kf: TKeyFrame;
   TMI: PTileMapItem;
@@ -3968,10 +3939,6 @@ begin
           begin
             ReadTiles((CommandData and 1) <> 0, (CommandData and 2) <> 0);
           end;
-          gtLoadPalette:
-          begin
-            ReadPalette((CommandData and 63) + 1);
-          end;
           gtFrameEnd:
           begin
             Assert(tmPos = FTileMapSize, 'Incomplete tilemap');
@@ -4006,21 +3973,7 @@ begin
 
             tileIdx := rawTileIdxToTileIdx[Command in [gtKeyFrmTile16, gtKeyFrmTile32], tileIdx];
 
-            SetTMI(tileIdx, -1, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
-            Inc(tmPos);
-          end;
-          gtPalTile:
-          begin
-            tileIdx := ReadDWord;
-            palIdx := ReadWord;
-
-            // next frame if needed
-            if frm = nil then
-              frm := NextFrame(kf);
-
-            tileIdx := rawTileIdxToTileIdx[(CommandData and 4) <> 0, tileIdx];
-
-            SetTMI(tileIdx, palIdx, CommandData and 3, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
+            SetTMI(tileIdx, CommandData, frm.TileMap[tmPos div FTileMapWidth, tmPos mod FTileMapWidth]);
             Inc(tmPos);
           end;
           gtPredictedTileOffsets6x6:
@@ -4167,7 +4120,7 @@ var
   var
     finalTileIdx: Integer;
     attrs: Word;
-    isLongOffsets, isKeyFrameTile, isTile32, isPalTile: Boolean;
+    isLongOffsets, isKeyFrameTile, isTile32: Boolean;
   begin
     if TMI.IsBlended then
     begin
@@ -4204,58 +4157,26 @@ var
         Assert(finalTileIdx >= 0);
       end;
 
-      //isTile32 := finalTileIdx > High(Word);
-      //isPalTile := TMI.PalIdx <> FTiles[TMI.TileIdx]^.PalIdx;
-      //
-      //if isPalTile then
-      //begin
-      //  DoCmd(gtPalTile, attrs or (Ord(isKeyFrameTile) shl 2));
-      //  DoDWord(finalTileIdx);
-      //  DoWord(TMI.PalIdx);
-      //end
-      //else
-      //begin
-      //  if isTile32 then
-      //  begin
-      //    DoAltCmd(gtGlobalTile32, gtKeyFrmTile32, isKeyFrameTile, attrs);
-      //    DoDWord(finalTileIdx);
-      //  end
-      //  else
-      //  begin
-      //    DoAltCmd(gtGlobalTile16, gtKeyFrmTile16, isKeyFrameTile, attrs);
-      //    DoWord(finalTileIdx);
-      //  end;
-      //end;
+      isTile32 := finalTileIdx > High(Word);
+
+      if isTile32 then
+      begin
+        DoAltCmd(gtGlobalTile32, gtKeyFrmTile32, isKeyFrameTile, attrs);
+        DoDWord(finalTileIdx);
+      end
+      else
+      begin
+        DoAltCmd(gtGlobalTile16, gtKeyFrmTile16, isKeyFrameTile, attrs);
+        DoWord(finalTileIdx);
+      end;
     end;
   end;
 
-  procedure WritePalettes;
-  var
-    colIdx, palIdx, col: Integer;
-  begin
-    //for palIdx := 0 to FPaletteCount - 1 do
-    //begin
-    //  DoCmd(gtLoadPalette, (0 shl 6) or (FPaletteSize - 1));
-    //  DoWord(palIdx);
-    //  for colIdx := 0 to FPaletteSize - 1 do
-    //  begin
-    //    col := 0;
-    //    if InRange(palIdx, 0, High(FPalettes)) and InRange(colIdx, 0, High(FPalettes[palIdx].PaletteRGB)) then
-    //      col := FPalettes[palIdx].PaletteRGB[colIdx];
-    //
-    //    if col = cDitheringNullColor then
-    //      col := $ffffff;
-    //
-    //    DoDWord(col or $ff000000);
-    //  end;
-    //end;
-  end;
-
   procedure WriteTiles(const AList: TIntegerDynArray; IsKF: Boolean; AStart: Integer = 0);
-  var
-    tx, ty, tlIdx: Integer;
-    isNibbleCoded: Boolean;
-    T: PTile;
+  //var
+  //  tx, ty, tlIdx: Integer;
+  //  isNibbleCoded: Boolean;
+  //  T: PTile;
   begin
     if Length(AList) > 0 then
     begin
@@ -4469,7 +4390,6 @@ begin
 
     WriteSettings;
     WriteDimensions;
-    WritePalettes;
     WriteTiles(globalTiles, False);
 
     bpsAcc := 0;
