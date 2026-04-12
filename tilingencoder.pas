@@ -592,7 +592,7 @@ const
 
     Result := CompareValue(t2^.UseCount, t1^.UseCount);
     if Result = 0 then
-      Result := t1^.CompareHSVPixelsTo(t2^, True)
+      Result := t1^.CompareRawPixelsTo(t2^, True)
   end;
 
 { TTileMapItemHelper }
@@ -968,17 +968,15 @@ begin
     luma := ToLuma(ATile.Pixels[IsJPEG, 0, iPx], ATile.Pixels[IsJPEG, 1, iPx], ATile.Pixels[IsJPEG, 2, iPx]);
     lumaAccR += luma;
 
-    RGBToHSV(Pixels[IsJPEG, 0, iPx], Pixels[IsJPEG, 1, iPx], Pixels[IsJPEG, 2, iPx], h, s, v);
+    RGBToHSV(ATile.Pixels[IsJPEG, 0, iPx], ATile.Pixels[IsJPEG, 1, iPx], ATile.Pixels[IsJPEG, 2, iPx], h, s, v);
     hAccR += h; sAccR += s; vAccR += v;
   end;
 
   Result := CompareValue(lumaAccL, lumaAccR, Sqr(cTileWidth) * cLumaDiv * CPrecisionDiv);
   if Result = 0 then
-    Result := CompareValue(0.0, FMod(hAccL - hAccR, Sqr(cTileWidth)), Sqr(cTileWidth) / High(Byte) * CPrecisionDiv);
+    Result := CompareValue(hAccL, hAccR, Sqr(cTileWidth) / High(Byte) * CPrecisionDiv);
   if Result = 0 then
     Result := CompareValue(sAccL, sAccR, Sqr(cTileWidth) / High(Byte) * CPrecisionDiv);
-  if Result = 0 then
-    Result := CompareValue(vAccL, vAccR, Sqr(cTileWidth) / High(Byte) * CPrecisionDiv);
 end;
 
 function TTileHelper.CompareRawPixelsTo(const ATile: TTile; IsJPEG: Boolean): Integer;
@@ -4209,6 +4207,9 @@ begin
 
   if Result = 0 then
     Result := t1^.CompareHSVPixelsTo(t2^, True);
+
+  if Result = 0 then
+    Result := t1^.CompareRawPixelsTo(t2^, True);
 end;
 
 function CompareTileIdxsHSVPixels(Item1, Item2, UserParameter:Pointer):Integer;
@@ -4220,6 +4221,9 @@ begin
   t2 := Encoder.FTiles[PInteger(Item2)^];
 
   Result := t1^.CompareHSVPixelsTo(t2^, True);
+
+  if Result = 0 then
+    Result := t1^.CompareRawPixelsTo(t2^, True);
 end;
 
 procedure TTilingEncoder.SaveStream(AStream: TStream);
