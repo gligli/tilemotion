@@ -142,7 +142,7 @@ type
     procedure CopyFrom(const ATile: TTile);
     procedure CopyRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer); overload;
     procedure BlendRGBPixels(const AFrameM1, AFrameM2: TIntegerDynArray2; AY, AX: Integer; AAlpha, AWeight: Integer);
-    procedure BlitRGBPixels(const AFrameBuffer: TIntegerDynArray2; AVMirror, AHMirror: Boolean; AY, AX: Integer);
+    procedure BlitRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer);
     procedure ClearRGBPixels;
     function CompareRawPixelsTo(const ATile: TTile): Integer;
     function CompareHSVPixelsTo(const ATile: TTile): Integer;
@@ -275,7 +275,6 @@ type
       const ADCT: TDCT; const ACpnPixels: TCpnPixelsF; AFrameBuffer: TFrameBuffer);
     procedure PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT;
       const ADCTs: TDCTDynArray; const APenaltyLUT: TCardinalDynArray);
-    procedure PredictTileIntra(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray);
 
     // processes
 
@@ -863,18 +862,16 @@ begin
   end;
 end;
 
-procedure TTileHelper.BlendRGBPixels(const AFrameM1, AFrameM2: TIntegerDynArray2; AY, AX: Integer; AAlpha,
-  AWeight: Integer);
+procedure TTileHelper.BlendRGBPixels(const AFrameM1, AFrameM2: TIntegerDynArray2; AY, AX: Integer; AAlpha, AWeight: Integer);
 var
-  tyx, ty, tx, col: Integer;
+  tyx, ty, tx: Integer;
 begin
   tyx := 0;
   for ty := 0 to cTileWidth - 1 do
   begin
     for tx := 0 to cTileWidth - 1 do
     begin
-      col := BlendRGB(AFrameM1[AY, AX], AFrameM2[AY, AX], AAlpha, AWeight, CGTMBlendAlphaShift, CGTMBlendWeightBaseShift);
-      FromRGB(col, Pixels[0, tyx], Pixels[1, tyx], Pixels[2, tyx]);
+      BlendRGB(AFrameM1[AY, AX], AFrameM2[AY, AX], AAlpha, AWeight, CGTMBlendAlphaShift, CGTMBlendWeightBaseShift, Pixels[0, tyx], Pixels[1, tyx], Pixels[2, tyx]);
       Inc(AX);
       Inc(tyx);
     end;
@@ -883,24 +880,21 @@ begin
   end;
 end;
 
-procedure TTileHelper.BlitRGBPixels(const AFrameBuffer: TIntegerDynArray2; AVMirror, AHMirror: Boolean; AY, AX: Integer);
+procedure TTileHelper.BlitRGBPixels(const AFrameBuffer: TIntegerDynArray2; AY, AX: Integer);
 var
-  tyx, ty, tx, tym, txm: Integer;
+  tyx, ty, tx: Integer;
 begin
+  tyx := 0;
   for ty := 0 to cTileWidth - 1 do
   begin
-    tym := ty;
-    if AVMirror then tym := cTileWidth - 1 - tym;
-
     for tx := 0 to cTileWidth - 1 do
     begin
-      txm := tx;
-      if AHMirror then txm := cTileWidth - 1 - txm;
-
-      tyx := (tym shl cTileWidthBits) + txm;
-
-      AFrameBuffer[AY + ty, AX + tx] := ToRGB(Pixels[0, tyx], Pixels[1, tyx], Pixels[2, tyx]);
+      AFrameBuffer[AY, AX] := ToRGB(Pixels[0, tyx], Pixels[1, tyx], Pixels[2, tyx]);
+      Inc(AX);
+      Inc(tyx);
     end;
+    Dec(AX, cTileWidth);
+    Inc(AY);
   end;
 end;
 
@@ -1439,62 +1433,6 @@ begin
   end;
 end;
 
-procedure TFrame.PredictTileIntra(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray);
-var
-  oy, ox, oymn, oymx, oxmn, oxmx, yx, bestX, bestY: Integer;
-  bestErr: Cardinal;
-  PSNRAcc: TFloat;
-  PSNRIdx, PSNRCnt, err: Cardinal;
-  PrevDCTPtr: PDCTScalar;
-begin
-  GetPredictExtents(High(ShortInt), ADY, ADX, oxmn, oxmx, oymn, oymx);
-
-  bestErr := High(Cardinal);
-  bestY := MaxInt;
-  bestX := MaxInt;
-
-  PSNRAcc := 0;
-  PSNRIdx := 1;
-  PSNRCnt := 0;
-  for oy := oymn to oymx do
-  begin
-    if InRange(oy - ADY, -cTileWidth, cTileWidth - 1) then
-      Continue;
-
-    yx := oy * (Encoder.FScreenWidth - cTileWidth + 1) + oxmn;
-    for ox := oxmn to oxmx do
-    begin
-      if InRange(ox - ADX, -cTileWidth, cTileWidth - 1) then
-        Continue;
-
-      PrevDCTPtr := ADCTs[yx];
-
-      err := CompareEuclideanDCTPtr_asm(ADCT, PrevDCTPtr);
-
-      if err < bestErr then
-      begin
-        bestErr := err;
-        bestY := oy;
-        bestX := ox;
-
-        PSNRAcc += EuclideanToPSNR(err) * PSNRIdx;
-        Inc(PSNRCnt, PSNRIdx);
-        Inc(PSNRIdx);
-      end;
-
-      Inc(yx);
-    end;
-  end;
-
-  ATMI^.IsPredicted := True;
-  ATMI^.IsBlended := False;
-  ATMI^.TileIdx := -1;
-  ATMI^.PalIdx := -1;
-  ATMI^.Error := PSNRToEuclidean(PSNRAcc / PSNRCnt);
-  ATMI^.Attrs.MotionY := bestY - ADY;
-  ATMI^.Attrs.MotionX := bestX - ADX;
-end;
-
 procedure TFrame.Predict(AMTPool: TMTPool; ARadius, ABackBufferOffset: Integer; ADCTBuffer: TDCTBuffer; AFrameBuffer: TFrameBuffer);
 var
   PenaltyLUT: TCardinalDynArray;
@@ -1518,26 +1456,19 @@ var
     dx := sx shl cTileWidthBits;
     dy := sy shl cTileWidthBits;
 
-    if ABackBufferOffset = 0 then
+    if Encoder.MotionPredictBlendingMode = bmAlphaWeight then
     begin
-      PredictTileIntra(dy, dx, TMI, CurDCT, ADCTBuffer.GetBuffer)
-    end
-    else
-    begin
-      if Encoder.MotionPredictBlendingMode = bmAlphaWeight then
-      begin
-        if ABackBufferOffset >= 2 then
-          PredictTileBlending(False, ABackBufferOffset - 1, dy, dx, TMI, CurDCT, CurCpnPixels, AFrameBuffer)
-        else if (ABackBufferOffset = 1) and (Index = PKeyFrame.StartFrame + 1) then
-          PredictTileBlending(True, ABackBufferOffset, dy, dx, TMI, CurDCT, CurCpnPixels, AFrameBuffer);
-      end
-      else if Encoder.MotionPredictBlendingMode = bmWeight then
-      begin
+      if ABackBufferOffset >= 2 then
+        PredictTileBlending(False, ABackBufferOffset - 1, dy, dx, TMI, CurDCT, CurCpnPixels, AFrameBuffer)
+      else if (ABackBufferOffset = 1) and (Index = PKeyFrame.StartFrame + 1) then
         PredictTileBlending(True, ABackBufferOffset, dy, dx, TMI, CurDCT, CurCpnPixels, AFrameBuffer);
-      end;
-
-      PredictTileMotion(ARadius, ABackBufferOffset, dy, dx, TMI, CurDCT, ADCTBuffer.GetBuffer(-ABackBufferOffset), PenaltyLUT);
+    end
+    else if Encoder.MotionPredictBlendingMode = bmWeight then
+    begin
+      PredictTileBlending(True, ABackBufferOffset, dy, dx, TMI, CurDCT, CurCpnPixels, AFrameBuffer);
     end;
+
+    PredictTileMotion(ARadius, ABackBufferOffset, dy, dx, TMI, CurDCT, ADCTBuffer.GetBuffer(-ABackBufferOffset), PenaltyLUT);
   end;
 
 var
@@ -1545,7 +1476,7 @@ var
   pPenalty: PCardinal;
 begin
   Assert(ARadius >= 0);
-  Assert(ABackBufferOffset >= 0);
+  Assert(ABackBufferOffset > 0);
 
   if ARadius = 0 then
     Exit;
@@ -1668,7 +1599,7 @@ procedure TFrame.DirectBlit(AMTPool: TMTPool; const ABuffer: TIntegerDynArray2);
       dx := sx shl cTileWidthBits;
 
       FrameTile := FrameTilesJPEG[yx];
-      FrameTile^.BlitRGBPixels(ABuffer, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, dy, dx);
+      FrameTile^.BlitRGBPixels(ABuffer, dy, dx);
 
       Inc(yx);
     end;
@@ -1733,7 +1664,7 @@ procedure TFrame.PredictedBlit(AMTPool: TMTPool; AFrameBuffer: TFrameBuffer);
         // draw fb (plain tile)
 
         FrameTile := FrameTilesJPEG[sy * Encoder.FTileMapWidth + sx];
-        FrameTile^.BlitRGBPixels(FrontBuf, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, dy, dx);
+        FrameTile^.BlitRGBPixels(FrontBuf, dy, dx);
       end;
     end;
   end;
@@ -2067,6 +1998,9 @@ var
   FrameBuffer: TFrameBuffer;
   DCTBuffer: TDCTBuffer;
   MTPool: TMTPool;
+
+  y, x: Integer;
+  palPict: TFastPortableNetworkGraphic;
 begin
   if (Length(FFrames) = 0) or (FMotionPredictRadius <= 0) then
     Exit;
@@ -2115,6 +2049,19 @@ begin
       finally
         Frame.ReleaseFrameTiles;
       end;
+
+      //palPict := TFastPortableNetworkGraphic.Create;
+      //
+      //palPict.Width := FScreenWidth;
+      //palPict.Height := FScreenHeight;
+      //palPict.PixelFormat := pf24bit;
+      //
+      //for y := 0 to FScreenHeight - 1 do
+      //  for x := 0 to FScreenWidth - 1 do
+      //    palPict.Canvas.Pixels[x, y] := FrameBuffer.GetBuffer[y, x];
+      //
+      //palPict.SaveToFile(Format('%s_%.4d.png', [ChangeFileExt(FOutputFileName, ''), Frame.Index]));
+      //palPict.Free;
 
       DCTBuffer.AdvanceFrame;
       FrameBuffer.AdvanceFrame;
@@ -2615,35 +2562,26 @@ begin
 end;
 
 class procedure TTilingEncoder.ConvertToCpnPixels(const ATile: TTile; VMirror, HMirror: Boolean; out ACpnPixel: TCpnPixelsF);
-
-  procedure ToCpn(col, yx: Integer);
-  var
-    r, g, b: Byte;
-  begin
-    FromRGB(col, r, g, b);
-    RGBToYUV(r, g, b, ACpnPixel[0, yx], ACpnPixel[1, yx], ACpnPixel[2, yx], cDCTScale);
-  end;
-
 var
-  iCpn, x, y, yx, xx, yy, yyxx: Integer;
+  x, y, yx, xx, yy, yyxx: Integer;
 begin
-  for iCpn := 0 to cColorCpns - 1 do
+  yx := 0;
+  for y := 0 to (cTileWidth - 1) do
   begin
-    yx := 0;
-    for y := 0 to (cTileWidth - 1) do
-      for x := 0 to (cTileWidth - 1) do
-      begin
-        xx := x;
-        yy := y;
-        if HMirror then xx := cTileWidth - 1 - x;
-        if VMirror then yy := cTileWidth - 1 - y;
+    yy := y;
+    if VMirror then yy := cTileWidth - 1 - y;
 
-        yyxx := (yy shl cTileWidthBits) + xx;
+    for x := 0 to (cTileWidth - 1) do
+    begin
+      xx := x;
+      if HMirror then xx := cTileWidth - 1 - x;
 
-        ACpnPixel[iCpn, yx] := ATile.Pixels[iCpn, yyxx];
+      yyxx := (yy shl cTileWidthBits) + xx;
 
-        Inc(yx);
-      end;
+      RGBToYUV(ATile.Pixels[0, yyxx], ATile.Pixels[1, yyxx], ATile.Pixels[2, yyxx], ACpnPixel[0, yx], ACpnPixel[1, yx], ACpnPixel[2, yx], cDCTScale);
+
+      Inc(yx);
+    end;
   end;
 end;
 
