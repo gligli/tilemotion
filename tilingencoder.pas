@@ -1133,7 +1133,7 @@ begin
     Img := TRGBTiledImg.Create(Length(TileMap[0]) shl cTileWidthBits, Length(TileMap) shl cTileWidthBits);
     JPEGRd := TFPReaderJPEG.Create;
     try
-      JPEGRd.Performance := jpBestQuality;
+      JPEGRd.Performance := jpBestSpeed;
       Img.TileStride := Length(TileMap[0]);
       Img.Image := FrameTilesJPEG;
       Img.LoadFromStream(FrameTilesJPEGStream, JPEGRd);
@@ -1568,28 +1568,34 @@ end;
 
 function TFrame.GRPSNR(x: Double; Data: Pointer): Double;
 var
-  sy, sx: Integer;
+  sy, sx, yx: Integer;
   errLimit: Cardinal;
   meanErr: UInt64;
   TMI: PTileMapItem;
+  FT: PTile;
 begin
   errLimit := PSNRToEuclidean(x);
 
+  yx := 0;
   meanErr := 0;
   for sy := 0 to Encoder.FTileMapHeight - 1 do
     for sx := 0 to Encoder.FTileMapWidth - 1 do
     begin
       TMI := @TileMap[sy, sx];
+      FT := FrameTiles[yx];
 
       if TMI^.Error < errLimit then
       begin
         TMI^.IsPredicted := True;
-        meanErr += TMI^.Error
+        meanErr += TMI^.Error;
       end
       else
       begin
         TMI^.IsPredicted := False;
+        meanErr += FT^.JPEGError;
       end;
+
+      Inc(yx);
     end;
 
   Result := EuclideanToPSNR(meanErr div Encoder.FTileMapSize);
@@ -1650,11 +1656,12 @@ procedure TFrame.DirectBlit(AMTPool: TMTPool; const ABuffer: TIntegerDynArray2);
 
   procedure DoBlit(AIndex: PtrInt; AData: Pointer);
   var
-    dx, dy, sx, yx: Integer;
+    dx, dy, sx, sy, yx: Integer;
     FrameTile: PTile;
   begin
-    dy := AIndex shl cTileWidthBits;
-    yx := AIndex * Encoder.FTileMapWidth;
+    sy := AIndex;
+    dy := sy shl cTileWidthBits;
+    yx := sy * Encoder.FTileMapWidth;
 
     for sx := 0 to Encoder.FTileMapWidth - 1 do
     begin
@@ -1676,13 +1683,10 @@ procedure TFrame.PredictedBlit(AMTPool: TMTPool; AFrameBuffer: TFrameBuffer);
   procedure DoBlit(AIndex: PtrInt; AData: Pointer);
   var
     sy, sx, dx, dy, ty, tx: Integer;
-    errCml: UInt64;
     TMI: PTileMapItem;
     FrontBuf, BackBuf, M1Buf, M2Buf: TIntegerDynArray2;
     FrameTile: PTile;
   begin
-    errCml := 0;
-
     sy := AIndex;
     dy := sy shl cTileWidthBits;
 
@@ -1731,13 +1735,7 @@ procedure TFrame.PredictedBlit(AMTPool: TMTPool; AFrameBuffer: TFrameBuffer);
         FrameTile := FrameTilesJPEG[sy * Encoder.FTileMapWidth + sx];
         FrameTile^.BlitRGBPixels(FrontBuf, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, dy, dx);
       end;
-
-      errCml += TMI^.Error;
     end;
-
-    SpinEnter(@PKeyFrame.ReconstructLock);
-    PKeyFrame.ReconstructErrCml += errCml;
-    SpinLeave(@PKeyFrame.ReconstructLock);
   end;
 
 begin
@@ -1823,7 +1821,7 @@ begin
     JPEGWr.ChromaSubsampling := False;
     Img.SaveToStream(FrameTilesJPEGStream, JPEGWr);
 
-    JPEGRd.Performance := jpBestQuality;
+    JPEGRd.Performance := jpBestSpeed;
     Img.Image := JPEGTiles;
     FrameTilesJPEGStream.Seek(0, soBeginning);
     Img.LoadFromStream(FrameTilesJPEGStream, JPEGRd);
@@ -3475,7 +3473,7 @@ end;
 
 procedure TTilingEncoder.TransferTiles(AFrame: TFrame);
 var
-  tileCount, newTIdx, sx, sy: Integer;
+  tileCount, newTIdx, sx, sy, yx: Integer;
   Tile: PTile;
   TMI: PTileMapItem;
 begin
@@ -3487,6 +3485,7 @@ begin
   else
     TTile.Array1DRealloc(FTiles, tileCount);
 
+  yx := 0;
   for sy := 0 to FTileMapHeight - 1 do
     for sx := 0 to FTileMapWidth - 1 do
     begin
@@ -3495,9 +3494,10 @@ begin
       if not TMI^.IsPredicted then
       begin
         Tile := Tiles[newTIdx];
-        Tile^.CopyFrom(AFrame.FrameTilesJPEG[sy * FTileMapWidth + sx]^);
+        Tile^.CopyFrom(AFrame.FrameTilesJPEG[yx]^);
 
         TMI^.TileIdx := newTIdx;
+        TMI^.Error := AFrame.FrameTiles[yx]^.JPEGError;
 
         if TMI^.HMirror then HMirrorTile(Tile^);
         if TMI^.VMirror then VMirrorTile(Tile^);
@@ -3508,6 +3508,10 @@ begin
       begin
         TMI^.TileIdx := -1;
       end;
+
+      AFrame.PKeyFrame.ReconstructErrCml += TMI^.Error;
+
+      Inc(yx);
     end;
 
   Assert(newTIdx = tileCount);
