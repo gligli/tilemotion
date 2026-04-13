@@ -190,7 +190,7 @@ object MainForm: TMainForm
           Left = 8
           Height = 15
           Top = 29
-          Width = 93
+          Width = 94
           Caption = 'Output (GTM file)'
           ParentColor = False
         end
@@ -242,7 +242,7 @@ object MainForm: TMainForm
             '32'
             '64'
           )
-          TabOrder = 9
+          TabOrder = 10
           OnChange = UpdateGUI
         end
         object cbxPalCount: TComboBox
@@ -271,7 +271,7 @@ object MainForm: TMainForm
             '32768'
             '65536'
           )
-          TabOrder = 8
+          TabOrder = 9
           OnChange = UpdateGUI
         end
         object cbxScaling: TComboBox
@@ -329,7 +329,7 @@ object MainForm: TMainForm
             '64'
             '128'
           )
-          TabOrder = 10
+          TabOrder = 11
           OnChange = UpdateGUI
         end
         object cbxMPMBF: TComboBox
@@ -346,38 +346,38 @@ object MainForm: TMainForm
             '4'
           )
           Style = csDropDownList
-          TabOrder = 11
+          TabOrder = 12
           OnChange = UpdateGUI
         end
         object Label14: TLabel
           Left = 8
           Height = 15
-          Top = 121
-          Width = 136
-          Caption = 'Quality (higher -> bigger)'
+          Top = 125
+          Width = 197
+          Caption = 'Quality / tile count (higher -> bigger)'
           ParentColor = False
         end
-        object tbQuality: TTrackBar
-          Left = 342
-          Height = 26
-          Top = 120
-          Width = 136
-          Frequency = 10
-          Max = 100
-          PageSize = 5
-          Position = 50
-          ShowSelRange = False
-          OnChange = UpdateGUI
-          Color = 3487029
-          ParentColor = False
+        object seQ: TFloatSpinEdit
+          Left = 346
+          Height = 23
+          Top = 121
+          Width = 64
+          DecimalPlaces = 1
+          Increment = 0.1
+          MaxValue = 100
           TabOrder = 7
+          OnChange = seQChange
         end
-        object lblQuality: TLabel
-          Left = 480
-          Height = 15
+        object seTC: TSpinEdit
+          Left = 411
+          Height = 23
           Top = 121
-          Width = 51
-          Caption = 'lblQuality'
+          Width = 96
+          Increment = 1000
+          MaxValue = 2000000000
+          TabOrder = 8
+          Value = 200000000
+          OnChange = UpdateGUI
         end
       end
       object gbCPU: TGroupBox
@@ -393,7 +393,7 @@ object MainForm: TMainForm
           Left = 8
           Height = 15
           Top = 8
-          Width = 240
+          Width = 239
           Caption = 'Maximum CPU cores used for multithreading'
           ParentColor = False
         end
@@ -449,7 +449,7 @@ object MainForm: TMainForm
           Left = 8
           Height = 15
           Top = 158
-          Width = 161
+          Width = 160
           Caption = 'Yliluoma 2 mixed colors count'
           ParentColor = False
         end
@@ -477,7 +477,7 @@ object MainForm: TMainForm
           Left = 8
           Height = 15
           Top = 8
-          Width = 207
+          Width = 206
           Caption = 'Keyframes length (seconds) (min; max)'
           ParentColor = False
         end
@@ -719,7 +719,7 @@ object MainForm: TMainForm
     Left = 264
     Height = 15
     Top = 12
-    Width = 12
+    Width = 13
     Caption = 'To'
     ParentColor = False
   end
@@ -924,7 +924,7 @@ object MainForm: TMainForm
   end
   object tiTrackbar: TTimer
     Enabled = False
-    Interval = 250
+    Interval = 500
     OnTimer = tiTrackbarTimer
     Left = 776
     Top = 496

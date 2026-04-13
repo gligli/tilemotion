@@ -59,7 +59,6 @@ type
     Label4: TLabel;
     lblMaxCores: TLabel;
     lblPct: TLabel;
-    lblQuality: TLabel;
     llPalTileDesc: TPanel;
     miGeneratePNGsOutput: TMenuItem;
     miGeneratePNGsInput: TMenuItem;
@@ -83,15 +82,16 @@ type
     sdGTM: TSaveDialog;
     sdSettings: TSaveDialog;
     seFrameCount: TSpinEdit;
+    seTC: TSpinEdit;
     seMaxCores: TSpinEdit;
     Separator1: TMenuItem;
     Separator3: TMenuItem;
     seShotTransCorrelLoThres: TFloatSpinEdit;
     seShotTransMaxSecondsPerKF: TFloatSpinEdit;
     seShotTransMinSecondsPerKF: TFloatSpinEdit;
+    seQ: TFloatSpinEdit;
     seStartFrame: TSpinEdit;
     seVisGamma: TFloatSpinEdit;
-    tbQuality: TTrackBar;
     tiTrackbar: TTimer;
     tsTilesPal: TTabSheet;
     To1: TLabel;
@@ -153,8 +153,8 @@ type
     procedure miReloadClick(Sender: TObject);
     procedure miSaveSettingsClick(Sender: TObject);
     procedure sbPalettesChange(Sender: TObject);
-    procedure sbTilesChange(Sender: TObject);
     procedure screenClick(Sender: TObject);
+    procedure seQChange(Sender: TObject);
     procedure tbFrameChange(Sender: TObject);
     procedure tiTrackbarTimer(Sender: TObject);
     procedure UpdateVideo(Sender: TObject);
@@ -491,14 +491,16 @@ begin
   imgPalette.Invalidate;
 end;
 
-procedure TMainForm.sbTilesChange(Sender: TObject);
-begin
-
-end;
-
 procedure TMainForm.screenClick(Sender: TObject);
 begin
   tbFrame.SetFocus;
+end;
+
+procedure TMainForm.seQChange(Sender: TObject);
+begin
+  FTilingEncoder.GlobalTilingQualityBasedTileCount := seQ.Value;
+  seTC.Value := FTilingEncoder.GlobalTilingTileCount;
+  UpdateGUI(Sender);
 end;
 
 procedure TMainForm.btnRunAllClick(Sender: TObject);
@@ -512,6 +514,7 @@ begin
   lastStep := TEncoderStep(cbxEndStep.ItemIndex);
 
   FTilingEncoder.RunRange(firstStep, lastStep);
+  LoadGUISettings;
   UpdateVideo(nil);
 end;
 
@@ -631,17 +634,14 @@ end;
 
 procedure TMainForm.IdleTimerTimer(Sender: TObject);
 begin
-  if chkPlay.Checked then
+  if chkPlay.Checked and not tiTrackbar.Enabled then
   begin
-    if tbFrame.Position >= tbFrame.Max then
-    begin
-      tbFrame.Position := 0;
-      Exit;
-    end;
-
     FLockChanges := True;
     try
-      tbFrame.Position := tbFrame.Position + 1;
+      if tbFrame.Position >= tbFrame.Max then
+        tbFrame.Position := 0
+      else
+        tbFrame.Position := tbFrame.Position + 1;
     finally
       FLockChanges := False;
     end;
@@ -747,7 +747,8 @@ begin
     FTilingEncoder.MotionPredictMaxBufferedFrames := StrToIntDef(cbxMPMBF.Text, 0);
     FTilingEncoder.MotionPredictBlendingMode := TBlendingMode(cbxBlendingMode.ItemIndex);
 
-    FTilingEncoder.ReduceQuality := tbQuality.Position;
+    FTilingEncoder.GlobalTilingQualityBasedTileCount := seQ.Value;
+    FTilingEncoder.GlobalTilingTileCount := seTC.Value;
 
     FTilingEncoder.DitheringMode := TPsyVisMode(cbxDitheringMode.ItemIndex);
     FTilingEncoder.DitheringYliluoma2MixedColors := StrToIntDef(cbxYilMix.Text, 1);
@@ -788,7 +789,6 @@ begin
     tbFrame.PageSize := Round(FTilingEncoder.FramesPerSecond);
     sbPalettes.Max := Max(0, Length(FTilingEncoder.Palettes) - sbPalettes.LargeChange);
     sbTiles.Max := FTilingEncoder.RenderTilePageCount - sbTiles.LargeChange;
-    lblQuality.Caption := IntToStr(FTilingEncoder.ReduceQuality) + ' %';
 
     if FTrackbarTickCount <> FTilingEncoder.KeyFrameCount then
     begin
@@ -837,7 +837,8 @@ begin
    cbxMPMBF.Text := IntToStr(FTilingEncoder.MotionPredictMaxBufferedFrames);
    cbxBlendingMode.ItemIndex := Ord(FTilingEncoder.MotionPredictBlendingMode);
 
-   tbQuality.Position := FTilingEncoder.ReduceQuality;
+   seQ.Value := FTilingEncoder.GlobalTilingQualityBasedTileCount;
+   seTC.Value := FTilingEncoder.GlobalTilingTileCount;
 
    cbxDitheringMode.ItemIndex := Ord(FTilingEncoder.DitheringMode);
    chkUseTK.Checked := FTilingEncoder.DitheringUseThomasKnoll;

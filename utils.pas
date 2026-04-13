@@ -227,7 +227,7 @@ function LABToRGB(ll, aa, bb: TFloat): Integer;
 function YUVToRGB(y, u, v, scl: TFloat): Integer;
 function lerp(x, y, alpha: Double): Double; inline;
 function ilerp(x, y, alpha, maxAlpha: Integer): Integer; inline;
-function revlerp(x, r, alpha: Double): Double; inline;
+function revlerp(x, y, res: Double): Double; inline;
 procedure BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte; out r, g, b: Byte);
 function BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte): Integer;
 function Posterize(v: Byte; cvt: Integer): Byte; inline;
@@ -670,9 +670,9 @@ begin
   Result := x + ((y - x) * alpha) div maxAlpha;
 end;
 
-function revlerp(x, r, alpha: Double): Double; inline;
+function revlerp(x, y, res: Double): Double;
 begin
-  Result := x + (r - x) / alpha;
+  Result := DivDef(res - x, y - x, NaN);
 end;
 
 procedure BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte; out r, g, b: Byte);
