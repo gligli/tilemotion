@@ -1942,7 +1942,6 @@ procedure TFrame.PredictedBlit(AMTPool: TMTPool; AFrameBuffer: TFrameBuffer);
   var
     sy, sx, dx, dy, ty, tx: Integer;
     errCml: UInt64;
-    FrameTile: PTile;
     TMI: PTileMapItem;
     FrontBuf, BackBuf, M1Buf, M2Buf: TIntegerDynArray2;
   begin
@@ -1991,10 +1990,9 @@ procedure TFrame.PredictedBlit(AMTPool: TMTPool; AFrameBuffer: TFrameBuffer);
       end
       else
       begin
-        // draw fb (plain tile)
+        // draw fb (pal tile)
 
-        FrameTile := FrameTiles[sy * Encoder.FTileMapWidth + sx];
-        FrameTile^.BlitRGBPixels(FrontBuf, FrameTile^.VMirror_Initial, FrameTile^.HMirror_Initial, dy, dx);
+        Encoder.FTiles[TMI^.TileIdx]^.BlitPalPixels(FrontBuf, Encoder.FPalettes[TMI^.PalIdx].PaletteRGB, TMI^.VMirror, TMI^.HMirror, dy, dx);
       end;
 
       errCml += TMI^.Error;
@@ -4213,7 +4211,7 @@ begin
   MotionPredictMaxBufferedFrames := 3;
   MotionPredictBlendingMode := bmAlphaWeight;
 
-  GlobalTilingQualityBasedTileCount := 7.0;
+  GlobalTilingQualityBasedTileCount := 10.0;
   GlobalTilingTileCount := 0; // after GlobalTilingQualityBasedTileCount because has priority
 
   DitheringMode := pvsWeightedSpeDCT;
