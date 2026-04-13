@@ -284,13 +284,8 @@ function renderEnd() {
 }
 
 function drawTilemapItem(tileIdx, palIdx, attrs, iskf) {
-	if (palIdx < 0)
-	{
+	if (palIdx < 0) {
 		palIdx = gtmTilePalIdxs[iskf][tileIdx];
-	}
-	else
-	{
-		console.log(tileIdx, palIdx, attrs, iskf);
 	}	
 
 	let tOff = tileIdx * CTileSize;
@@ -395,8 +390,7 @@ function drawBlendedTilemapItem(weight, alpha, backBufOff) {
 }
 
 function skipBlock(skipCount) {
-	for(let s = 0; s < skipCount; s++)
-	{
+	for(let s = 0; s < skipCount; s++) {
 		drawPredictedTilemapItem(0, 0, 1);
 	}
 }
@@ -406,8 +400,7 @@ function readBuffer_Unsafe(buffer, offset, size) {
 	
 	gtmDataBufPos += size;
 	
-	if (gtmDataBufPos >= gtmOutStream.buffers[gtmDataBufIdx].length)
-	{
+	if (gtmDataBufPos >= gtmOutStream.buffers[gtmDataBufIdx].length) {
 		// move to next buffer
 		++gtmDataBufIdx;
 		gtmDataBufPos = 0;
@@ -419,8 +412,7 @@ function readBuffer_Unsafe(buffer, offset, size) {
 function readByte() {
 	let v = gtmOutStream.buffers[gtmDataBufIdx][gtmDataBufPos++];
 	
-	if (gtmDataBufPos >= gtmOutStream.buffers[gtmDataBufIdx].length)
-	{
+	if (gtmDataBufPos >= gtmOutStream.buffers[gtmDataBufIdx].length) {
 		// move to next buffer
 		++gtmDataBufIdx;
 		gtmDataBufPos = 0;
@@ -619,8 +611,7 @@ function decodeFrame() {
 		console.log('Processing awaiting video...');
 
 		gtmReady = false;
-		if (gtmAwaitingFile != null)
-		{
+		if (gtmAwaitingFile != null) {
 			gtmPlayFromFile(gtmAwaitingFile, gtmAwaitingCanvasId)
 		} else if (gtmAwaitingURL != null) {
 			gtmPlayFromURL(gtmAwaitingURL, gtmAwaitingCanvasId)
