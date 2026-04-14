@@ -330,6 +330,8 @@ type
     IntraReducedTiles: PTileDynArray;
     IntraReducedTileIndexes: TIntegerDynArray2;
 
+    PSNRPenalties: TFloatDynArray;
+
     constructor Create(AParent: TTilingEncoder; AIndex: Integer);
     destructor Destroy; override;
 
@@ -2049,11 +2051,14 @@ end;
 
 procedure TFrame.AsyncLoadFromImage;
 var
-  i: Integer;
+  yx, iDCT: Integer;
   HMirror, VMirror: Boolean;
+  errAcc: Cardinal;
   Tile: PTile;
   TMI: PTileMapItem;
   prevFrameICD: TFloatDynArray;
+  CpnPixels: TCpnPixels;
+  PlainDCT: TDCT;
 begin
   // compute inter-frame correlations
 
@@ -2071,10 +2076,11 @@ begin
 
   // also handle tilemap H/V mirrors
 
-  for i := 0 to Encoder.FTileMapSize - 1 do
+  SetLength(PSNRPenalties, Encoder.FTileMapSize);
+  for yx := 0 to Encoder.FTileMapSize - 1 do
   begin
-    Tile := FrameTiles[i];
-    TMI := @TileMap[i div Encoder.FTileMapWidth, i mod Encoder.FTileMapWidth];
+    Tile := FrameTiles[yx];
+    TMI := @TileMap[yx div Encoder.FTileMapWidth, yx mod Encoder.FTileMapWidth];
 
     Encoder.GetTileHVMirrorHeuristics(Tile^, False, HMirror, VMirror);
 
@@ -2089,6 +2095,14 @@ begin
 
     if HMirror then Encoder.HMirrorTile(Tile^);
     if VMirror then Encoder.VMirrorTile(Tile^);
+
+    Encoder.ConvertToCpnPixels(Tile^, False, False, False, False, nil, CpnPixels);
+    Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsPSNRHVS, cColorCpns, @PlainDCT[0]);
+
+    errAcc := 0;
+    for iDCT := cColorCpns to cTileDCTSize - 1 do
+      errAcc += Sqr(PlainDCT[iDCT]);
+    PSNRPenalties[yx] := Sqrt(Max(0, EuclideanToPSNR(errAcc)));
   end;
 
   // compress frame tiles to save memory
@@ -4405,16 +4419,13 @@ end;
 function TTilingEncoder.GRPSNR(x: Double; Data: Pointer): Double;
 var
   GRData: PGRPSNRData absolute Data;
-  frmIdx, sy, sx, kfffUPCSum, kfNewUTC, kfIdx: Integer;
+  frmIdx, sy, sx, yx, kfffUPCSum, kfNewUTC, kfIdx: Integer;
   isKFFF: Boolean;
-  errThres: Cardinal;
   meanErr: UInt64;
   KFFFFactor: Double;
   Frame: TFrame;
   TMI: PTileMapItem;
 begin
-  errThres := PSNRToEuclidean(x);
-
   meanErr := 0;
   GRData^.MeanPSNR := 0.0;
   GRData^.GlobalUnpredictedTileCount := 0;
@@ -4426,6 +4437,7 @@ begin
     kfIdx := Frame.PKeyFrame.Index;
     isKFFF := Frame.Index = Frame.PKeyFrame.StartFrame;
 
+    yx := 0;
     for sy := 0 to FTileMapHeight - 1 do
       for sx := 0 to FTileMapWidth - 1 do
       begin
@@ -4433,7 +4445,7 @@ begin
 
         // trim high (unfit) Errors
 
-        if TMI^.Error < errThres then
+        if TMI^.Error < PSNRToEuclidean(Max(0.0, x - Frame.PSNRPenalties[yx])) then
         begin
           TMI^.IsPredicted := True;
           meanErr += TMI^.Error;
@@ -4444,6 +4456,8 @@ begin
           Inc(GRData^.GlobalUnpredictedTileCount);
           Inc(GRData^.KFFFUnpredictedTileCount[kfIdx], Ord(isKFFF));
         end;
+
+        Inc(yx);
       end;
   end;
 

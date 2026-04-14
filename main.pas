@@ -544,8 +544,7 @@ begin
   edOutput.Text := ExtractFilePath(Application.ExeName) + 'debug.gtm';
   seFrameCount.Value := IfThen(seFrameCount.Value >= 12, IfThen(seFrameCount.Value = 12, 48, 2), 12);
   cbxScaling.ItemIndex := 4;
-  cbxPalCount.Text := '256';
-  cbxMPRadius.Text := '128';
+  seQ.Value := 1.0;
 
   FTilingEncoder.Test;
 
@@ -558,8 +557,7 @@ begin
   edOutput.Text :=  ExtractFilePath(Application.ExeName) + 'debug.gtm';
   seFrameCount.Value := IfThen(seFrameCount.Value >= 12, IfThen(seFrameCount.Value = 12, 24, 2), 12);
   cbxScaling.ItemIndex := 2;
-  cbxPalCount.Text := '256';
-  cbxMPRadius.Text := '128';
+  seQ.Value := 1.0;
 
   FTilingEncoder.Test;
 
