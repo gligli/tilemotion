@@ -2978,12 +2978,12 @@ begin
   luma1 := (r1 * cRedMul + g1 * cGreenMul + b1 * cBlueMul) * (1.0 / (cLumaDiv * 255.0));
   luma2 := (r2 * cRedMul + g2 * cGreenMul + b2 * cBlueMul) *  (1.0 / (cLumaDiv * 255.0));
   lumadiff := luma1 - luma2;
-  diffR := r1 - r2;
-  diffG := g1 - g2;
-  diffB := b1 - b2;
-  Result := (diffR * diffR) * (cRedMul / 255.0 * 0.75);
-  Result += (diffG * diffG) * (cGreenMul / 255.0 * 0.75);
-  Result += (diffB * diffB) * (cBlueMul / 255.0 * 0.75);
+  diffR := (r1 - r2) * (1.0 / 255.0);
+  diffG := (g1 - g2) * (1.0 / 255.0);
+  diffB := (b1 - b2) * (1.0 / 255.0);
+  Result := (diffR * diffR) * (cRedMul * 0.75);
+  Result += (diffG * diffG) * (cGreenMul * 0.75);
+  Result += (diffB * diffB) * (cBlueMul * 0.75);
   Result += lumadiff * lumadiff;
 end;
 
