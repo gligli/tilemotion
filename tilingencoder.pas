@@ -11,7 +11,7 @@ interface
 uses
   windows, Classes, SysUtils, strutils, types, Math, FileUtil, typinfo, zstream, IniFiles, Graphics,
   IntfGraphics, FPimage, FPCanvas, FPWritePNG, GraphType, fgl, bufstream,
-  tbbmalloc, extern, utils, powell, mtpool;
+  tbbmalloc, extern, utils, powell, mtpool, ParallelMiniBatchKMeans;
 type
   TEncoderStep = (esAll = -1, esLoad = 0, esPredict, esReduce, esPreparePalettes, esDither, esReindex1, esReconstruct, esReindex2, esSave);
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
@@ -514,6 +514,8 @@ type
     procedure ConvertToCpnPixels(const ATile: TTile; FromPal, UseLAB, VMirror, HMirror: Boolean; const APalette: TIntegerDynArray; out ACpnPixels: TCpnPixels); inline;
     procedure ComputeCpnPixelsPsyVisFeatures(const ACpnPixel: TCpnPixels; Mode: TPsyVisMode; ColorCpns: Integer; ADCT: PDCTScalar); inline;
 
+    procedure ComputeTilePsyVisFeatures(const ATile: TTile; Mode: TPsyVisMode; FromPal, UseLAB, VMirror, HMirror: Boolean;
+     ColorCpns: Integer; const APalette: TIntegerDynArray; ADCT: PDCTScalar); inline; overload;
     procedure ComputeTilePsyVisFeatures(const ATile: TTile; Mode: TPsyVisMode; FromPal, UseLAB, VMirror, HMirror: Boolean;
      ColorCpns: Integer; const APalette: TIntegerDynArray; ADCT: PDouble); inline; overload;
     procedure ComputeInvTilePsyVisFeatures(DCT: PDouble; Mode: TPsyVisMode; UseLAB: Boolean; ColorCpns: Integer; var ATile: TTile);
@@ -3433,6 +3435,19 @@ begin
 end;
 
 procedure TTilingEncoder.ComputeTilePsyVisFeatures(const ATile: TTile; Mode: TPsyVisMode; FromPal, UseLAB, VMirror,
+  HMirror: Boolean; ColorCpns: Integer; const APalette: TIntegerDynArray; ADCT: PDCTScalar);
+var
+  i: Integer;
+  LocalCpnPixels: TCpnPixels;
+  LocalDCT: TDCT;
+begin
+  ConvertToCpnPixels(ATile, FromPal, UseLAB, VMirror, HMirror, APalette, LocalCpnPixels);
+  ComputeCpnPixelsPsyVisFeatures(LocalCpnPixels, Mode, ColorCpns, @LocalDCT[0]);
+  for i := 0 to cTileDCTSize - 1 do
+    ADCT[i] := LocalDCT[i];
+end;
+
+procedure TTilingEncoder.ComputeTilePsyVisFeatures(const ATile: TTile; Mode: TPsyVisMode; FromPal, UseLAB, VMirror,
   HMirror: Boolean; ColorCpns: Integer; const APalette: TIntegerDynArray; ADCT: PDouble);
 var
   i: Integer;
@@ -4586,7 +4601,7 @@ end;
 
 procedure TTilingEncoder.DoPalettization;
 var
-  YakmoDataset: TDoubleDynArray2;
+  YakmoDataset: TDCTDynArray;
   YakmoWeights: TCardinalDynArray;
 
   procedure DoDCT(AIndex: PtrInt; AData: Pointer);
@@ -4605,7 +4620,7 @@ var
 
   Tile: PTile;
 
-  Yakmo: PYakmo;
+  MBKM: TParallelMiniBatchKMeans;
 
   YakmoClusters: TIntegerDynArray;
   PalIdxLUT: TIntegerDynArray;
@@ -4619,21 +4634,17 @@ begin
 
   if DSLen > FPaletteCount then
   begin
-    SetLength(YakmoDataset, DSLen, cTileDCTSize);
+    SetLength(YakmoDataset, DSLen);
 
     TMTPool.DoStandaloneLocalProc(@DoDCT, 0, DSLen - 1, MaxThreadCount);
 
     if FPaletteCount > 1 then
     begin
-      Yakmo := yakmo_create(FPaletteCount, 1, cYakmoMaxIterations, 1, 0, 0, 1);
+      MBKM := TParallelMiniBatchKMeans.Create(YakmoDataset, YakmoWeights, FPaletteCount, Ceil(EqualQualityTileCount(DSLen)), MaxThreadCount, False);
       try
-        yakmo_set_num_threads(MaxThreadCount);
-
-        yakmo_load_train_data_weighted(Yakmo, Length(YakmoDataset), cTileDCTSize, PPDouble(@YakmoDataset[0]), @YakmoWeights[0]);
-        SetLength(YakmoDataset, 0); // free up some memory
-        yakmo_train_on_data(Yakmo, @YakmoClusters[0]);
+        MBKM.Run(YakmoClusters);
       finally
-        yakmo_destroy(Yakmo);
+        MBKM.Free;
       end;
     end;
   end

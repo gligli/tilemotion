@@ -215,7 +215,7 @@
         <PackageName Value="LCL"/>
       </Item1>
     </RequiredPackages>
-    <Units Count="8">
+    <Units Count="9">
       <Unit0>
         <Filename Value="tiler.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -251,6 +251,11 @@
         <Filename Value="mywritejpeg.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit7>
+      <Unit8>
+        <Filename Value="parallelminibatchkmeans.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ParallelMiniBatchKMeans"/>
+      </Unit8>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

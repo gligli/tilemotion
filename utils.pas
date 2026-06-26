@@ -167,6 +167,15 @@ type
   PIndexWeight = ^TIndexWeight;
   TIndexWeightList = specialize TFPGList<PIndexWeight>;
 
+  { TKRng }
+
+  TKRng = record
+    x, y, z, w: UInt64;
+    procedure init();
+    function randInt(): UInt64; // Xorshift RNG; http://www.jstatsoft.org/v08/i14/paper
+    function random(): Double;
+  end;
+
   { TDCTCribbleState }
 
   TDCTCribbleState = packed record
@@ -205,7 +214,6 @@ procedure Exchange(var a, b: Integer); overload;
 procedure Exchange(var a, b: Cardinal); overload;
 procedure Exchange(var a, b: Double); overload;
 procedure Exchange(var a, b: Single); overload;
-function RandInt(Range: Cardinal; var Seed: Cardinal): Cardinal;
 function iDivDef(x, y, def: Integer): Integer;overload;inline;
 function iDivDef(x, y, def: Int64): Int64;overload;inline;
 function DivDef(x, y, def: TFloat): TFloat;inline;
@@ -352,15 +360,6 @@ begin
   b := a;
   a := tmp;
 end;
-
-{$PUSH}
-{$RANGECHECKS OFF}
-function RandInt(Range: Cardinal; var Seed: Cardinal): Cardinal;
-begin
-  Seed := Integer(Seed * $08088405) + 1;
-  Result := (Seed * Range) shr 32;
-end;
-{$POP}
 
 function iDivDef(x, y, def: Integer): Integer;
 begin
@@ -1537,6 +1536,30 @@ begin
   Result := L;
   if not InRange(Result, AFirstItem, ALastItem) then
     Result := -1;
+end;
+
+{ TKRng }
+
+procedure TKRng.init();
+begin
+  x := 123456789;
+  y := 362436069;
+  z := 521288629;
+  w := 88675123;
+end;
+
+function TKRng.randInt(): UInt64;
+var
+  t: UInt64;
+begin
+  t := (x xor (x shl 11)); x := y; y := z; z := w;
+  w := (w xor (w shr 19)) xor (t xor (t shr 8));
+  Result := w;
+end;
+
+function TKRng.random: Double;
+begin
+  Result := randInt() / High(UInt64);
 end;
 
 end.

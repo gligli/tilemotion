@@ -62,15 +62,6 @@ type
     constructor Create(ASize, ANumThreads: Cardinal);
   end;
 
-  { TKRng }
-
-  TKRng = record
-    x, y, z, w: UInt64;
-    procedure init();
-    function randInt(): UInt64; // Xorshift RNG; http://www.jstatsoft.org/v08/i14/paper
-    function random(): TKFloat;
-  end;
-
   { TKPoint }
 
   TKPoint = class
@@ -827,30 +818,6 @@ begin
     BinSize := Max(cKMTMinBinSize, (BinSize - 1) div NumThreads + 1);
   NumThreads := (ASize - 1) div BinSize + 1;
   LastThreadIndex := NumThreads - 1;
-end;
-
-{ TKRng }
-
-procedure TKRng.init();
-begin
-  x := 123456789;
-  y := 362436069;
-  z := 521288629;
-  w := 88675123;
-end;
-
-function TKRng.randInt(): UInt64;
-var
-  t: UInt64;
-begin
-  t := (x xor (x shl 11)); x := y; y := z; z := w;
-  w := (w xor (w shr 19)) xor (t xor (t shr 8));
-  Result := w;
-end;
-
-function TKRng.random(): TKFloat;
-begin
-  Result := randInt() / High(UInt64);
 end;
 
 { TOrthogonalKmeans }
