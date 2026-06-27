@@ -4597,8 +4597,8 @@ end;
 
 procedure TTilingEncoder.DoPalettization;
 var
-  YakmoDataset: TDCTDynArray;
-  YakmoWeights: TCardinalDynArray;
+  MBKMDataset: TDCTDynArray;
+  MBKMWeights: TCardinalDynArray;
 
   procedure DoDCT(AIndex: PtrInt; AData: Pointer);
   var
@@ -4607,8 +4607,8 @@ var
     Tile := FTiles[AIndex];
     Assert(Tile^.Active);
 
-    ComputeTilePsyVisFeatures(Tile^, DitheringMode, False, True, False, False, cColorCpns, nil, @YakmoDataset[AIndex, 0]);
-    YakmoWeights[AIndex] := Tile^.UseCount;
+    ComputeTilePsyVisFeatures(Tile^, DitheringMode, False, True, False, False, cColorCpns, nil, @MBKMDataset[AIndex, 0]);
+    MBKMWeights[AIndex] := Tile^.UseCount;
   end;
 
 var
@@ -4618,27 +4618,27 @@ var
 
   MBKM: TParallelMiniBatchKMeans;
 
-  YakmoClusters: TIntegerDynArray;
+  MBKMClusters: TIntegerDynArray;
   PalIdxLUT: TIntegerDynArray;
 begin
   DSLen := Length(FTiles);
 
   // cluster by palette index
 
-  SetLength(YakmoWeights, DSLen);
-  SetLength(YakmoClusters, DSLen);
+  SetLength(MBKMWeights, DSLen);
+  SetLength(MBKMClusters, DSLen);
 
   if DSLen > FPaletteCount then
   begin
-    SetLength(YakmoDataset, DSLen);
+    SetLength(MBKMDataset, DSLen);
 
     TMTPool.DoStandaloneLocalProc(@DoDCT, 0, DSLen - 1, MaxThreadCount);
 
     if FPaletteCount > 1 then
     begin
-      MBKM := TParallelMiniBatchKMeans.Create(YakmoDataset, YakmoWeights, FPaletteCount, Ceil(EqualQualityTileCount(DSLen)), MaxThreadCount, False);
+      MBKM := TParallelMiniBatchKMeans.Create(MBKMDataset, MBKMWeights, FPaletteCount, Ceil(EqualQualityTileCount(DSLen)), MaxThreadCount, False);
       try
-        MBKM.Run(YakmoClusters);
+        MBKM.Run(MBKMClusters);
       finally
         MBKM.Free;
       end;
@@ -4646,10 +4646,10 @@ begin
   end
   else
   begin
-    for di := 0 to High(YakmoClusters) do
+    for di := 0 to High(MBKMClusters) do
     begin
-      YakmoWeights[di] := FTiles[di]^.UseCount;
-      YakmoClusters[di] := di;
+      MBKMWeights[di] := FTiles[di]^.UseCount;
+      MBKMClusters[di] := di;
     end;
   end;
 
@@ -4664,8 +4664,8 @@ begin
     FPalettes[palIdx].PalIdx_Initial := palIdx;
   end;
 
-  for di := 0 to High(YakmoClusters) do
-    Inc(FPalettes[YakmoClusters[di]].UseCount, YakmoWeights[di]);
+  for di := 0 to High(MBKMClusters) do
+    Inc(FPalettes[MBKMClusters[di]].UseCount, MBKMWeights[di]);
 
   QuickSort(FPalettes[0], 0, FPaletteCount - 1, SizeOf(FPalettes[0]), @ComparePaletteUseCount, Self);
   for palIdx := 0 to FPaletteCount - 1 do
@@ -4678,7 +4678,7 @@ begin
     Tile := FTiles[tIdx];
     Assert(Tile^.Active);
 
-    Tile^.PalIdx := PalIdxLUT[YakmoClusters[tIdx]];
+    Tile^.PalIdx := PalIdxLUT[MBKMClusters[tIdx]];
   end;
 end;
 
