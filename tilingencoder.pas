@@ -3437,14 +3437,10 @@ end;
 procedure TTilingEncoder.ComputeTilePsyVisFeatures(const ATile: TTile; Mode: TPsyVisMode; FromPal, UseLAB, VMirror,
   HMirror: Boolean; ColorCpns: Integer; const APalette: TIntegerDynArray; ADCT: PDCTScalar);
 var
-  i: Integer;
   LocalCpnPixels: TCpnPixels;
-  LocalDCT: TDCT;
 begin
   ConvertToCpnPixels(ATile, FromPal, UseLAB, VMirror, HMirror, APalette, LocalCpnPixels);
-  ComputeCpnPixelsPsyVisFeatures(LocalCpnPixels, Mode, ColorCpns, @LocalDCT[0]);
-  for i := 0 to cTileDCTSize - 1 do
-    ADCT[i] := LocalDCT[i];
+  ComputeCpnPixelsPsyVisFeatures(LocalCpnPixels, Mode, ColorCpns, @ADCT[0]);
 end;
 
 procedure TTilingEncoder.ComputeTilePsyVisFeatures(const ATile: TTile; Mode: TPsyVisMode; FromPal, UseLAB, VMirror,
