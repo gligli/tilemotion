@@ -1,5 +1,5 @@
 // from https://github.com/CippoX/apple-silicon-kmeans/blob/main/LMD-K-means-Clustering-Algorithm/kmeans/parallel-mini-batch-kmeans.cpp
-// ported to pascal using AI
+// ported to freepascal using AI
 // improved by GliGli
 
 unit ParallelMiniBatchKMeans;
@@ -32,7 +32,6 @@ type
     numberOfThreads: Cardinal;
     mtPool: TMTPool;
     rngMB: TKRng;
-    rngInit: TKRng;
     verbose: Boolean;
     function MinimumEuclideanDistance(const v1, v2: TDCT; minDist: Cardinal): Cardinal;
     function EuclideanDistance(const v1, v2: TDCT): Cardinal;
@@ -77,7 +76,6 @@ begin
 
   mtPool := TMTPool.Create(_numberOfThreads);
   rngMB.init();
-  rngInit.init();
 end;
 
 destructor TParallelMiniBatchKMeans.Destroy;
