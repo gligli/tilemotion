@@ -252,7 +252,7 @@ begin
   SetLength(chosen, Length(images));
 
   for i := 0 to High(minDistances) do
-    minDistances[i] := High(Cardinal);
+    minDistances[i] := High(Cardinal) * weights[i];
 
   first := 0;
   centroids[0] := images[first];
