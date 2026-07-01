@@ -4247,7 +4247,7 @@ begin
   MotionPredictMaxBufferedFrames := 2;
   MotionPredictBlendingMode := bmWeight;
 
-  GlobalTilingQualityBasedTileCount := 10.0;
+  GlobalTilingQualityBasedTileCount := 7.0;
   GlobalTilingTileCount := 0; // after GlobalTilingQualityBasedTileCount because has priority
 
   DitheringMode := pvsWeightedSpeDCT;
