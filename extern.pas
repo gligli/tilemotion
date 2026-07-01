@@ -656,7 +656,7 @@ begin
     FFSWSCtx := sws_getContext(
         AFFMPEG.CodecCtx^.width, AFFMPEG.CodecCtx^.height, AFFMPEG.CodecCtx^.pix_fmt,
         AFFMPEG.DstWidth, AFFMPEG.DstHeight, FFDstPixFmt,
-        SWS_LANCZOS, nil, nil, nil);
+        Ord(SWS_LANCZOS), nil, nil, nil);
     if not Assigned(FFSWSCtx) then
       raise EFFMPEGError.Create('Could not get scaler context');
 
