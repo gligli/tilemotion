@@ -452,12 +452,31 @@ begin
 end;
 
 procedure TMainForm.miLoadSettingsClick(Sender: TObject);
+var
+  unicityNumber: Integer;
 begin
   if FileExists(edInput.Text) then
     odSettings.FileName := ChangeFileExt(edInput.Text, '.gtm_settings');
   if odSettings.Execute then
   begin
-    FTilingEncoder.LoadSettings(odSettings.FileName);
+    if LowerCase(ExtractFileExt(odSettings.FileName)) = '.gtm' then
+    begin
+      FTilingEncoder.ReloadGTM(odSettings.FileName, True);
+
+      if SameFileName(FTilingEncoder.OutputFileName, odSettings.FileName) then
+      begin
+        unicityNumber := 2;
+        while FileExists(FTilingEncoder.OutputFileName) do
+        begin
+          FTilingEncoder.OutputFileName := ChangeFileExt(odSettings.FileName, '_' + IntToStr(unicityNumber) + ExtractFileExt(odSettings.FileName));
+          Inc(unicityNumber);
+        end;
+      end;
+    end
+    else
+    begin
+      FTilingEncoder.LoadSettings(odSettings.FileName);
+    end;
     LoadGUISettings;
     UpdateGUI(nil);
   end;
@@ -467,7 +486,7 @@ procedure TMainForm.miReloadClick(Sender: TObject);
 begin
   if odGTM.Execute then
   begin
-    FTilingEncoder.ReloadGTM(odGTM.FileName);
+    FTilingEncoder.ReloadGTM(odGTM.FileName, False);
     FTilingEncoder.Run(esReindex2);
     LoadGUISettings;
     edOutput.Text := ChangeFileExt(odGTM.FileName, '.reloaded.gtm');
@@ -888,7 +907,8 @@ begin
     cbxEndStep.ItemIndex := Ord(High(TEncoderStep));
 
     for pvs := Low(TPsyVisMode) to High(TPsyVisMode) do
-      cbxDitheringMode.AddItem(Copy(GetEnumName(TypeInfo(TPsyVisMode), Ord(pvs)), 4), TObject(PtrInt(Ord(pvs))));
+      if pvs <> pvsPSNRHVS then // PSNR-HVS has no meaning for L*a*b color space
+        cbxDitheringMode.AddItem(Copy(GetEnumName(TypeInfo(TPsyVisMode), Ord(pvs)), 4), TObject(PtrInt(Ord(pvs))));
 
     seMaxCores.MaxValue := NumberOfProcessors + QuarterNumberOfProcessors;
   finally

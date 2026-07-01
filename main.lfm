@@ -21,7 +21,7 @@ object MainForm: TMainForm
   ParentDoubleBuffered = False
   PopupMenu = pmProcesses
   Position = poScreenCenter
-  LCLVersion = '4.6.0.0'
+  LCLVersion = '4.8.0.0'
   OnCreate = FormCreate
   OnDestroy = FormDestroy
   OnKeyDown = FormKeyDown
@@ -903,7 +903,7 @@ object MainForm: TMainForm
   object odSettings: TOpenDialog
     Title = 'Open settings'
     DefaultExt = '.gtm_settings'
-    Filter = 'GTM Settings|*.gtm_settings'
+    Filter = 'GTM Settings|*.gtm_settings;*.gtm'
     Left = 708
     Top = 328
   end

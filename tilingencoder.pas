@@ -561,7 +561,7 @@ type
 
     procedure RenderFrame(AFrameIndex: Integer; APage: TRenderPage);
 
-    procedure LoadStream(AStream: TStream);
+    procedure LoadStream(AStream: TStream; AloadSettingsOnly: Boolean);
     procedure SaveStream(AStream: TStream);
 
     // processes
@@ -592,7 +592,7 @@ type
     procedure LoadSettings(ASettingsFileName: String);
     procedure LoadDefaultSettings;
 
-    procedure ReloadGTM(AFileName: String);
+    procedure ReloadGTM(AFileName: String; AloadSettingsOnly: Boolean);
 
     procedure Test;
 
@@ -2700,7 +2700,7 @@ begin
   ProgressRedraw(1, '');
 end;
 
-procedure TTilingEncoder.ReloadGTM(AFileName: String);
+procedure TTilingEncoder.ReloadGTM(AFileName: String; AloadSettingsOnly: Boolean);
 var
   fs: TBufferedFileStream;
 begin
@@ -2708,7 +2708,7 @@ begin
 
   fs := TBufferedFileStream.Create(AFileName, fmOpenRead or fmShareDenyWrite);
   try
-    LoadStream(fs);
+    LoadStream(fs, AloadSettingsOnly);
   finally
     fs.Free;
   end;
@@ -3713,6 +3713,8 @@ begin
   FreeAndNil(FRenderFrameBuffer);
 
   TTile.Array1DDispose(FTiles);
+
+  FRenderOutputDirty := True;
 end;
 
 procedure TTilingEncoder.RenderFrame(AFrameIndex: Integer; APage: TRenderPage);
@@ -5148,7 +5150,7 @@ begin
   AVMirror := q00 + q01 < q10 + q11;
 end;
 
-procedure TTilingEncoder.LoadStream(AStream: TStream);
+procedure TTilingEncoder.LoadStream(AStream: TStream; AloadSettingsOnly: Boolean);
 var
   KFStream: TMemoryStream;
   frmIdx, kfIdx, loadedFrmCount: Integer;
@@ -5314,7 +5316,10 @@ var
     Result := TKeyFrame.Create(Self, kfIdx, loadedFrmCount, -1);
 
     if kfIdx >= Length(FKeyFrames) then
+    begin
       SetLength(FKeyFrames, kfIdx + 1);
+      SetLength(kfPSNRs, kfIdx + 1);
+    end;
     FKeyFrames[kfIdx] := Result;
 
     FKeyFrames[kfIdx].ReconstructPSNR := kfPSNRs[kfIdx];
@@ -5353,6 +5358,7 @@ var
   tmPos, iKF: Integer;
   tileIdx: Cardinal;
   palIdx: Word;
+  settingsLoaded: Boolean;
   frm: TFrame;
   kf: TKeyFrame;
   TMI: PTileMapItem;
@@ -5360,11 +5366,14 @@ begin
   FillChar(Header, SizeOf(Header), 0);
 
   AStream.ReadBuffer(Header, SizeOf(Header.FourCC));
-  AStream.Seek(0, soBeginning);
+  if Header.FourCC <> 'GTMv' then
+    raise ETilingEncoderGTMReloadError.Create('Not a GTM file!');
 
-  if Header.FourCC = 'GTMv' then
+  AStream.Seek(0, soBeginning);
+  AStream.ReadBuffer(Header, SizeOf(Header));
+
+  if not AloadSettingsOnly then
   begin
-    AStream.ReadBuffer(Header, SizeOf(Header));
     if Header.EncoderVersion <> 6 then
       raise ETilingEncoderGTMReloadError.Create('Can only reload GTM files made with current version!');
 
@@ -5378,6 +5387,10 @@ begin
       AStream.ReadBuffer(KFInfo, SizeOf(KFInfo));
       kfPSNRs[iKF] := KFInfo.PSNRHVS / (1000.0 * 1000.0);
     end;
+  end
+  else
+  begin
+    AStream.Seek(Header.WholeHeaderSize, soBeginning);
   end;
 
   ClearAll(True);
@@ -5387,6 +5400,7 @@ begin
   frmIdx := -1;
   kfIdx := -1;
   loadedFrmCount := 0;
+  settingsLoaded := False;
   KFStream := TMemoryStream.Create;
   try
     repeat
@@ -5405,7 +5419,12 @@ begin
           gtExtendedCommand:
           begin
             if CommandData = 0 then
-              ReadSettings
+            begin
+              ReadSettings;
+              settingsLoaded := True;
+              if AloadSettingsOnly then
+                Break;
+            end
             else
               KFStream.Seek(ReadDWord, soCurrent);
           end;
@@ -5538,13 +5557,13 @@ begin
       kf.EndFrame := loadedFrmCount - 1;
       kf.FrameCount := kf.EndFrame - kf.StartFrame + 1;
 
-    until AStream.Position >= AStream.Size;
+    until (AStream.Position >= AStream.Size) or (AloadSettingsOnly and settingsLoaded);
   finally
     KFStream.Free;
   end;
 
-  ReframeUI(FTileMapWidth, FTileMapHeight); // for FPaletteBitmap
-  FRenderOutputDirty := True;
+  if not AloadSettingsOnly then
+    ReframeUI(FTileMapWidth, FTileMapHeight); // for FPaletteBitmap
 end;
 
 function CompareTileIdxsUseCountPalPixels(Item1, Item2, UserParameter:Pointer):Integer;
@@ -6042,6 +6061,7 @@ begin
   FRenderOutputDithered := True;
 
   FRenderPage := rpOutput;
+  ClearAll(False);
   ReframeUI(80, 45);
   FFramesPerSecond := 24.0;
 
