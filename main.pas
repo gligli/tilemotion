@@ -767,7 +767,7 @@ begin
     FTilingEncoder.GlobalTilingQualityBasedTileCount := seQ.Value;
     FTilingEncoder.GlobalTilingTileCount := seTC.Value;
 
-    FTilingEncoder.DitheringMode := TPsyVisMode(cbxDitheringMode.ItemIndex);
+    FTilingEncoder.DitheringMode := TPsyVisMode(PtrInt(cbxDitheringMode.Items.Objects[Max(0, cbxDitheringMode.ItemIndex)]));
     FTilingEncoder.DitheringYliluoma2MixedColors := StrToIntDef(cbxYilMix.Text, 1);
     FTilingEncoder.DitheringUseThomasKnoll := chkUseTK.Checked;
 
@@ -857,7 +857,7 @@ begin
    seQ.Value := FTilingEncoder.GlobalTilingQualityBasedTileCount;
    seTC.Value := FTilingEncoder.GlobalTilingTileCount;
 
-   cbxDitheringMode.ItemIndex := Ord(FTilingEncoder.DitheringMode);
+   cbxDitheringMode.ItemIndex := cbxDitheringMode.Items.IndexOfObject(TObject(PtrInt(Ord(FTilingEncoder.DitheringMode))));
    chkUseTK.Checked := FTilingEncoder.DitheringUseThomasKnoll;
    cbxYilMix.Text := IntToStr(FTilingEncoder.DitheringYliluoma2MixedColors);
 
@@ -907,7 +907,7 @@ begin
     cbxEndStep.ItemIndex := Ord(High(TEncoderStep));
 
     for pvs := Low(TPsyVisMode) to High(TPsyVisMode) do
-      if pvs <> pvsPSNRHVS then // PSNR-HVS has no meaning for L*a*b color space
+      if not (pvs in [pvsWavelets_Legacy, pvsPSNRHVS]) then // PSNR-HVS has no meaning for L*a*b color space
         cbxDitheringMode.AddItem(Copy(GetEnumName(TypeInfo(TPsyVisMode), Ord(pvs)), 4), TObject(PtrInt(Ord(pvs))));
 
     seMaxCores.MaxValue := NumberOfProcessors + QuarterNumberOfProcessors;

@@ -16,7 +16,7 @@ type
   TEncoderStep = (esAll = -1, esLoad = 0, esPredict, esReduce, esPreparePalettes, esDither, esReindex1, esReconstruct, esReindex2, esSave);
   TKeyFrameReason = (kfrNone, kfrManual, kfrLength, kfrDecorrelation, kfrEuclidean);
   TRenderPage = (rpNone, rpInput, rpOutput, rpTiles);
-  TPsyVisMode = (pvsDCT, pvsWeightedDCT, pvsSpeDCT, pvsWeightedSpeDCT, pvsPSNRHVS);
+  TPsyVisMode = (pvsDCT, pvsWeightedDCT, pvsWavelets_Legacy, pvsSpeDCT, pvsWeightedSpeDCT, pvsPSNRHVS);
   TBlendingMode = (bmNone, bmWeight, bmAlphaWeight);
 
 const
@@ -2269,6 +2269,10 @@ begin
                   FDCTLut[pvm, i] := cos((x + 0.5) * u * PI / (cTileWidth * 2)) * cos((y + 0.5) * v * PI / (cTileWidth * 2)) * cDCTUVRatio[Min(v, 7), Min(u, 7)];
                   FInvDCTLutDouble[pvm, i] := NaN;
                 end;
+                pvsWavelets_Legacy:
+                begin
+                  // nothing
+                end;
                 pvsWeightedDCT:
                 begin
                   FDCTLut[pvm, i] := FDCTLut[pvsDCT, i] * cJPEGWeights[c, v, u];
@@ -3273,7 +3277,7 @@ end;
 
 procedure TTilingEncoder.SetRenderGammaValue(AValue: Double);
 begin
-  if FGamma[1] = AValue then Exit;
+  if SameValue(FGamma[1], AValue) then Exit;
   FGamma[1] := Max(0.0, AValue);
   InitLuts;
 end;
@@ -4181,6 +4185,7 @@ end;
 procedure TTilingEncoder.LoadSettings(ASettingsFileName: String);
 var
   ini: TMemIniFile;
+  v: Integer;
 begin
   ini := TMemIniFile.Create(ASettingsFileName, []);
   try
@@ -4201,7 +4206,11 @@ begin
 
     PaletteSize := ini.ReadInteger('Dither', 'PaletteSize', PaletteSize);
     PaletteCount := ini.ReadInteger('Dither', 'PaletteCount', PaletteCount);
-    DitheringMode := TPsyVisMode(EnsureRange(ini.ReadInteger('Dither', 'DitheringMode', Ord(DitheringMode)), Ord(Low(TPsyVisMode)), Ord(High(TPsyVisMode))));
+
+    v := ini.ReadInteger('Dither', 'DitheringMode', Ord(DitheringMode));
+    if v in [Ord(pvsDCT), Ord(pvsSpeDCT), Ord(pvsWeightedDCT), Ord(pvsWeightedSpeDCT)] then
+      DitheringMode := TPsyVisMode(v);
+
     DitheringUseThomasKnoll := ini.ReadBool('Dither', 'DitheringUseThomasKnoll', DitheringUseThomasKnoll);
     DitheringYliluoma2MixedColors := ini.ReadInteger('Dither', 'DitheringYliluoma2MixedColors', DitheringYliluoma2MixedColors);
 
@@ -4232,11 +4241,11 @@ begin
 {$endif}
 
   PaletteSize := 16;
-  PaletteCount := 1024;
+  PaletteCount := 2048;
 
   MotionPredictRadius := 64;
-  MotionPredictMaxBufferedFrames := 3;
-  MotionPredictBlendingMode := bmAlphaWeight;
+  MotionPredictMaxBufferedFrames := 2;
+  MotionPredictBlendingMode := bmWeight;
 
   GlobalTilingQualityBasedTileCount := 10.0;
   GlobalTilingTileCount := 0; // after GlobalTilingQualityBasedTileCount because has priority
