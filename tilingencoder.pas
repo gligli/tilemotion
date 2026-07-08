@@ -350,7 +350,7 @@ type
     procedure GetPredictExtents(ARadius, ADY, ADX: Integer; out oxmn, oxmx, oymn, oymx: Integer);
 
     procedure PredictTileBlending(AUnipolar: Boolean; ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem;
-      const ADCT: TDCT; const ACpnPixels: TCpnPixels; AFrameBuffer: TFrameBuffer);
+      const ADCT: TDCT; AFrameBuffer: TFrameBuffer);
     procedure PredictTileMotion(ARadius, ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT;
       const ADCTs: TDCTDynArray; const APenaltyLUT: TCardinalDynArray);
     procedure PredictTileIntra(ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ADCTs: TDCTDynArray);
@@ -1476,7 +1476,7 @@ type
   TPowellBlendData = record
     DX, DY: Integer;
     FrameM1, FrameM2: TIntegerDynArray2;
-    RefCpnPixels: TCpnPixels;
+    RefDCT: TDCT;
   end;
 
   PPowellBlendData = ^TPowellBlendData;
@@ -1486,7 +1486,8 @@ var
   pbData: PPowellBlendData absolute data;
   dx, dy, ty, tx, alpha, weight: Integer;
   r, g, b: Byte;
-  y, u, v: TFloat;
+  BlendCpnPixels: TCpnPixels;
+  BlendDCT: TDCT;
 begin
   Assert((Length(x) = 2) = Assigned(pbData^.FrameM2));
 
@@ -1506,10 +1507,7 @@ begin
       begin
         BlendRGB(pbData^.FrameM1[dy, dx], pbData^.FrameM2[dy, dx], alpha, weight, CGTMBlendAlphaShift, CGTMBlendWeightBaseShift, r, g, b);
 
-        RGBToYUV(r, g, b, y, u, v, cDCTScale);
-        Result += Sqr(pbData^.RefCpnPixels[0, ty, tx] - y);
-        Result += Sqr(pbData^.RefCpnPixels[1, ty, tx] - u);
-        Result += Sqr(pbData^.RefCpnPixels[2, ty, tx] - v);
+        RGBToYUV(r, g, b, BlendCpnPixels[0, ty, tx], BlendCpnPixels[1, ty, tx], BlendCpnPixels[2, ty, tx], cDCTScale);
 
         Inc(dx);
       end;
@@ -1528,10 +1526,7 @@ begin
       begin
         BlendRGB(pbData^.FrameM1[dy, dx], 0, alpha, weight, CGTMBlendAlphaShift, CGTMBlendWeightBaseShift, r, g, b);
 
-        RGBToYUV(r, g, b, y, u, v, cDCTScale);
-        Result += Sqr(pbData^.RefCpnPixels[0, ty, tx] - y);
-        Result += Sqr(pbData^.RefCpnPixels[1, ty, tx] - u);
-        Result += Sqr(pbData^.RefCpnPixels[2, ty, tx] - v);
+        RGBToYUV(r, g, b, BlendCpnPixels[0, ty, tx], BlendCpnPixels[1, ty, tx], BlendCpnPixels[2, ty, tx], cDCTScale);
 
         Inc(dx);
       end;
@@ -1539,58 +1534,44 @@ begin
       Inc(dy);
     end;
   end;
+
+  Encoder.ComputeCpnPixelsPsyVisFeatures(BlendCpnPixels, pvsPSNRHVS, cColorCpns, @BlendDCT[0]);
+  Result := CompareEuclideanDCTPtr_asm(@pbData^.RefDCT[0], @BlendDCT[0]);
 end;
 
-procedure TFrame.PredictTileBlending(AUnipolar: Boolean; ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; const ACpnPixels: TCpnPixels; AFrameBuffer: TFrameBuffer);
+procedure TFrame.PredictTileBlending(AUnipolar: Boolean; ABackBufferOffset, ADY, ADX: Integer; ATMI: PTileMapItem; const ADCT: TDCT; AFrameBuffer: TFrameBuffer);
 var
   bestAlpha, bestWeight: Integer;
   bestErr: Cardinal;
   pbData: TPowellBlendData;
   X: TVector;
-  BlendTile: PTile;
-  BlendCpnPixels: TCpnPixels;
-  BlendDCT: TDCT;
 begin
   pbData.DX := ADX;
   pbData.DY := ADY;
-  pbData.RefCpnPixels := ACpnPixels;
+  pbData.RefDCT := ADCT;
   pbData.FrameM1 := AFrameBuffer.GetBuffer(-ABackBufferOffset);
 
-  BlendTile := TTile.New(True, False);
-  try
-    if AUnipolar then
-    begin
-      Assert(InRange(ABackBufferOffset, 1, Encoder.MotionPredictMaxBufferedFrames));
+  if AUnipolar then
+  begin
+    Assert(InRange(ABackBufferOffset, 1, Encoder.MotionPredictMaxBufferedFrames));
 
-      pbData.FrameM2 := nil;
+    pbData.FrameM2 := nil;
 
-      X := [0.0];
-      bestErr := Round(NelderMeadMinimize(@PowellBlending, X, [-CGTMBlendWeightMin], 0.5, @pbData));
-      bestAlpha := 0;
-      bestWeight := EnsureRange(Round(x[0]), CGTMBlendWeightMin, CGTMBlendWeightMax);
+    X := [0.0];
+    bestErr := Round(NelderMeadMinimize(@PowellBlending, X, [-CGTMBlendWeightMin], 0.5, @pbData));
+    bestAlpha := 0;
+    bestWeight := EnsureRange(Round(x[0]), CGTMBlendWeightMin, CGTMBlendWeightMax);
+  end
+  else
+  begin
+    Assert(InRange(ABackBufferOffset, 1, Encoder.MotionPredictMaxBufferedFrames - 1));
 
-      BlendTile^.BlendRGBPixels(pbData.FrameM1, pbData.FrameM1, ADY, ADX, bestAlpha, bestWeight);
-    end
-    else
-    begin
-      Assert(InRange(ABackBufferOffset, 1, Encoder.MotionPredictMaxBufferedFrames - 1));
+    pbData.FrameM2 := AFrameBuffer.GetBuffer(-ABackBufferOffset - 1);
 
-      pbData.FrameM2 := AFrameBuffer.GetBuffer(-ABackBufferOffset - 1);
-
-      X := [(CGTMBlendAlphaMax + 1) * 0.25, 0.0];
-      bestErr := Round(NelderMeadMinimize(@PowellBlending, X, [(CGTMBlendAlphaMax + 1) * 0.25, -CGTMBlendWeightMin], 0.5, @pbData));
-      bestAlpha := EnsureRange(Round(x[0]), 0, CGTMBlendAlphaMax);
-      bestWeight := EnsureRange(Round(x[1]), CGTMBlendWeightMin, CGTMBlendWeightMax);
-
-      BlendTile^.BlendRGBPixels(pbData.FrameM1, pbData.FrameM2, ADY, ADX, bestAlpha, bestWeight);
-    end;
-
-    Encoder.ConvertToCpnPixels(BlendTile^, False, False, False, False, nil, BlendCpnPixels);
-    Encoder.ComputeCpnPixelsPsyVisFeatures(BlendCpnPixels, pvsPSNRHVS, cColorCpns, BlendDCT);
-    bestErr := CompareEuclideanDCTPtr_asm(ADCT, BlendDCT);
-    bestErr += ApplyBlendPredictionPenalty(bestAlpha, bestWeight, ABackBufferOffset);
-  finally
-    TTile.Dispose(BlendTile);
+    X := [(CGTMBlendAlphaMax + 1) * 0.25, 0.0];
+    bestErr := Round(NelderMeadMinimize(@PowellBlending, X, [(CGTMBlendAlphaMax + 1) * 0.25, -CGTMBlendWeightMin], 0.5, @pbData));
+    bestAlpha := EnsureRange(Round(x[0]), 0, CGTMBlendAlphaMax);
+    bestWeight := EnsureRange(Round(x[1]), CGTMBlendWeightMin, CGTMBlendWeightMax);
   end;
 
   if bestErr < ATMI^.Error then
@@ -1735,13 +1716,13 @@ var
       if Encoder.MotionPredictBlendingMode = bmAlphaWeight then
       begin
         if ABackBufferOffset >= 2 then
-          PredictTileBlending(False, ABackBufferOffset - 1, dy, dx, TMI, CurDCT, CurCpnPixels, AFrameBuffer)
+          PredictTileBlending(False, ABackBufferOffset - 1, dy, dx, TMI, CurDCT, AFrameBuffer)
         else if (ABackBufferOffset = 1) and (Index = PKeyFrame.StartFrame + 1) then
-          PredictTileBlending(True, ABackBufferOffset, dy, dx, TMI, CurDCT, CurCpnPixels, AFrameBuffer);
+          PredictTileBlending(True, ABackBufferOffset, dy, dx, TMI, CurDCT, AFrameBuffer);
       end
       else if Encoder.MotionPredictBlendingMode = bmWeight then
       begin
-        PredictTileBlending(True, ABackBufferOffset, dy, dx, TMI, CurDCT, CurCpnPixels, AFrameBuffer);
+        PredictTileBlending(True, ABackBufferOffset, dy, dx, TMI, CurDCT, AFrameBuffer);
       end;
 
       PredictTileMotion(ARadius, ABackBufferOffset, dy, dx, TMI, CurDCT, ADCTBuffer.GetBuffer(-ABackBufferOffset), PenaltyLUT);
