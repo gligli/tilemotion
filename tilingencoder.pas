@@ -5139,7 +5139,9 @@ begin
       for i := x to x + w - 1 do
       begin
         FromRGB(ATile.RGBPixels[j, i], r, g, b);
-        Result += ToLuma(r, g, b);
+        Result += r;
+        Result += g;
+        Result += b;
       end;
   end;
 end;
