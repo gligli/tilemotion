@@ -2080,10 +2080,10 @@ begin
     if VMirror then Encoder.VMirrorTile(Tile^);
 
     Encoder.ConvertToCpnPixels(Tile^, False, False, False, False, nil, CpnPixels);
-    Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsPSNRHVS, cColorCpns, @PlainDCT[0]);
+    Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsDCT, cColorCpns, @PlainDCT[0]);
 
     errAcc := 0;
-    for iDCT := cColorCpns to cTileDCTSize - 1 do
+    for iDCT := cTileDCTUndispersedCount to cTileDCTSize - 1 do
       errAcc += Sqr(PlainDCT[iDCT]);
     PSNRPenalties[yx] := Sqrt(Max(0, EuclideanToPSNR(errAcc)));
   end;
@@ -3444,7 +3444,7 @@ end;
 procedure TTilingEncoder.ComputeInvTilePsyVisFeatures(DCT: PDouble; Mode: TPsyVisMode; UseLAB: Boolean; ColorCpns: Integer;
  var ATile: TTile);
 var
-  i, u, v, x, y, cpn: Integer;
+  u, v, x, y, cpn: Integer;
   CpnPixels: TCpnPixelsDouble;
   pCpn, pLut, pDCT: PDouble;
   pSnake: PInteger;
@@ -3470,17 +3470,13 @@ begin
   pDCT := @LocalDCT[0];
   pSnake := @FDCTSnake[0];
   for cpn := 0 to ColorCpns - 1 do
-  begin
-    i := 0;
     for v := 0 to cTileWidth - 1 do
       for u := 0 to cTileWidth - 1 do
       begin
         pDCT^ := DCT[pSnake^];
         Inc(pDCT);
         Inc(pSnake);
-        Inc(i);
       end;
-  end;
 
   pLut := @FInvDCTLutDouble[Mode, 0];
   for cpn := 0 to ColorCpns - 1 do

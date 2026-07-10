@@ -16,6 +16,7 @@ const
   cPSNRPrecision = 1e-6;
   cPSNREpsilon = 0.1;
   cYakmoMaxIterations = 1000;
+  cTileDCTUndispersedCount = 9;
 
   cRedMul = 299;
   cGreenMul = 587;
