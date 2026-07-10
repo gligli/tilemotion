@@ -28,9 +28,8 @@ const
 
   cLumaDiv = cRedMul + cGreenMul + cBlueMul;
 
-  cBitsPerCpnBits = 3;
-  cBitsPerCpn = 1 shl cBitsPerCpnBits;
-  cCpnMaxValue = (1 shl cBitsPerCpn) - 1;
+  cBitsPerCompBits = 3;
+  cBitsPerComp = 1 shl cBitsPerCompBits;
   cVecInvWidth = 16;
   cTileWidthBits = 3;
   cTileWidth = 1 shl cTileWidthBits;
@@ -40,6 +39,7 @@ const
   cPhi = (1 + sqrt(5)) / 2;
   cInvPhi = 1 / cPhi;
 
+  cDitheringNullColor = Integer($ffff00ff);
   cDitheringListLen = 256;
   cDitheringMap : array[0..8*8 - 1] of Byte = (
      0, 48, 12, 60,  3, 51, 15, 63,
@@ -204,38 +204,9 @@ type
   TDCTDynArray = array of TDCT;
   TDCTDynArray2 = array of TDCTDynArray;
 
-  TPlanarCpn = SmallInt;
-  PPlanarCpn = ^TPlanarCpn;
-
-  TPlanarCpnTile = array[0..cColorCpns - 1, 0..cTileWidth - 1,0..cTileWidth - 1] of TPlanarCpn;
-  TPalTile = array[0..cTileWidth - 1,0..cTileWidth - 1] of Byte;
-  PPlanarCpnTile = ^TPlanarCpnTile;
-  PPalTile = ^TPalTile;
-
-  TPlanarCpnTileSingle = array[0..cColorCpns - 1, 0..cTileWidth - 1,0..cTileWidth - 1] of Single;
-  TPlanarCpnTileDouble = array[0..cColorCpns - 1, 0..cTileWidth - 1,0..cTileWidth - 1] of Double;
-
-  TPlanarCpnMatrix = array of array of TPlanarCpn;
-
-  TPixel = array[0 .. cColorCpns - 1] of TPlanarCpn;
-
-  TPalette = array of TPixel;
-
-  TFrameBuffer = array[0 .. cColorCpns - 1] of TPlanarCpnMatrix;
-  TFrameBuffer2 = array of TFrameBuffer;
-
-  { TPixelBlender }
-
-  TPixelBlender = record
-    alpha, invAlpha, rounding: Integer;
-    shift: Byte;
-    procedure Prepare(AAlpha, AWeight: Integer; AAlphaShift, AWeightShift: Byte);
-    function BlendCpn(x, y: TPlanarCpn): TPlanarCpn; inline;
-  end;
-
 const
-  cDCTScale = -Low(TDCTScalar) / ((1 shl cBitsPerCpn) * Sqr(cTileWidth));
-  cBestPSNR = 20.0 * Ln((1 shl cBitsPerCpn) * cDCTScale - 1) / Ln(10.0);
+  cDCTScale = -Low(TDCTScalar) / ((1 shl cBitsPerComp) * Sqr(cTileWidth));
+  cBestPSNR = 20.0 * Ln((1 shl cBitsPerComp) * cDCTScale - 1) / Ln(10.0);
 
 procedure SpinEnter(Lock: PSpinLock); register; assembler;
 procedure SpinEnterSleep(Lock: PSpinLock); register; assembler;
@@ -249,25 +220,25 @@ function iDivDef(x, y, def: Int64): Int64;overload;inline;
 function DivDef(x, y, def: TFloat): TFloat;inline;
 function NanDef(x, def: TFloat): TFloat; inline;
 function SwapRB(c: Integer): Integer; inline;
-function ToRGB(r, g, b: TPlanarCpn): Integer; inline;
-function ToRGB(const col: TPixel): Integer; inline;
+function ToRGB(r, g, b: Byte): Integer; inline;
 procedure FromRGB(col: Integer; out r, g, b: Integer); inline; overload;
-procedure FromRGB(col: Integer; out r, g, b: TPlanarCpn); inline; overload;
-function FromRGB(col: Integer): TPixel; inline; overload;
+procedure FromRGB(col: Integer; out r, g, b: Byte); inline; overload;
 function ToLuma(r, g, b: Integer): Integer; inline;
 function ToBW(col: Integer): Integer;
-function ToPixel(r, g, b: Integer): TPixel;
 function HSVToRGB(h, s, v: Byte): Integer;
 procedure RGBToHSV(r, g, b: Byte; out h, s, v: Byte); overload;
 procedure RGBToHSV(r, g, b: Byte; out h, s, v: TFloat); overload;
-procedure RGBToYUV(r, g, b: TPlanarCpn; out y, u, v: TFloat; scl: TFloat);
+procedure RGBToYUV(col: Integer; out y, u, v: TFloat; scl: TFloat);
+procedure RGBToYUV(r, g, b: Byte; out y, u, v: TFloat; scl: TFloat);
 procedure RGBToLAB(r, g, b: TFloat; out ol, oa, ob: TFloat);
-procedure RGBToLAB(ir, ig, ib: TPlanarCpn; out ol, oa, ob: TFloat);
-function LABToRGB(ll, aa, bb: TFloat): TPixel;
-function YUVToRGB(y, u, v, scl: TFloat): TPixel;
+procedure RGBToLAB(ir, ig, ib: Integer; out ol, oa, ob: TFloat);
+function LABToRGB(ll, aa, bb: TFloat): Integer;
+function YUVToRGB(y, u, v, scl: TFloat): Integer;
 function lerp(x, y, alpha: Double): Double; inline;
 function ilerp(x, y, alpha, maxAlpha: Integer): Integer; inline;
 function revlerp(x, y, res: Double): Double; inline;
+procedure BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte; out r, g, b: Byte);
+function BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte): Integer;
 function Posterize(v: Byte; cvt: Integer): Byte; inline;
 function PosterizeBpc(v, bpc: Byte): Byte; inline;
 function CompareEuclideanDCTPtr(pa, pb: PDCTScalar): Cardinal;
@@ -424,14 +395,9 @@ begin
   Result := ((c and $ff) shl 16) or ((c shr 16) and $ff) or (c and $ff00);
 end;
 
-function ToRGB(r, g, b: TPlanarCpn): Integer;
+function ToRGB(r, g, b: Byte): Integer; inline;
 begin
   Result := (b shl 16) or (g shl 8) or r;
-end;
-
-function ToRGB(const col: TPixel): Integer;
-begin
-  Result := ToRGB(col[0], col[1], col[2]);
 end;
 
 procedure FromRGB(col: Integer; out r, g, b: Integer); inline; overload;
@@ -441,16 +407,11 @@ begin
   b := (col shr 16) and $ff;
 end;
 
-procedure FromRGB(col: Integer; out r, g, b: TPlanarCpn);
+procedure FromRGB(col: Integer; out r, g, b: Byte); inline; overload;
 begin
   r := col and $ff;
   g := (col shr 8) and $ff;
   b := (col shr 16) and $ff;
-end;
-
-function FromRGB(col: Integer): TPixel;
-begin
-  FromRGB(col, Result[0], Result[1], Result[2]);
 end;
 
 function ToLuma(r, g, b: Integer): Integer; inline;
@@ -460,7 +421,7 @@ end;
 
 function ToBW(col: Integer): Integer;
 var
-  r, g, b: TPlanarCpn;
+  r, g, b: Byte;
 begin
   FromRGB(col, r, g, b);
   Result := ToLuma(r, g, b);
@@ -522,13 +483,6 @@ begin
   v := ll and $ff;
 end;
 
-function ToPixel(r, g, b: Integer): TPixel;
-begin
-  Result[0] := EnsureRange(r, -cCpnMaxValue, cCpnMaxValue);
-  Result[1] := EnsureRange(g, -cCpnMaxValue, cCpnMaxValue);
-  Result[2] := EnsureRange(b, -cCpnMaxValue, cCpnMaxValue);
-end;
-
 function HSVToRGB(h, s, v: Byte): Integer;
 const
   MaxHue: Integer = 252;
@@ -576,13 +530,13 @@ begin
   v := bv / 255.0;
 end;
 
-procedure RGBToLAB(ir, ig, ib: TPlanarCpn; out ol, oa, ob: TFloat);
+procedure RGBToLAB(ir, ig, ib: Integer; out ol, oa, ob: TFloat); inline;
 var
   r, g, b, x, y, z: TFloat;
 begin
-  r := ir * (1.0 / cCpnMaxValue);
-  g := ig * (1.0 / cCpnMaxValue);
-  b := ib * (1.0 / cCpnMaxValue);
+  r := ir / 255.0;
+  g := ig / 255.0;
+  b := ib / 255.0;
 
   if r > 0.04045 then r := power((r + 0.055) / 1.055, 2.4) else r := r / 12.92;
   if g > 0.04045 then g := power((g + 0.055) / 1.055, 2.4) else g := g / 12.92;
@@ -618,13 +572,13 @@ procedure RGBToLAB(r, g, b: TFloat; out ol, oa, ob: TFloat); inline;
 var
   ll, aa, bb: TFloat;
 begin
-  RGBToLAB(TPlanarCpn(round(r * cCpnMaxValue)), round(g * cCpnMaxValue), round(b * cCpnMaxValue), ll, aa, bb);
+  RGBToLAB(Integer(round(r * 255.0)), round(g * 255.0), round(b * 255.0), ll, aa, bb);
   ol := ll;
   oa := aa;
   ob := bb;
 end;
 
-function LABToRGB(ll, aa, bb: TFloat): TPixel;
+function LABToRGB(ll, aa, bb: TFloat): Integer;
 var
   x, y, z, r, g, b: TFloat;
 begin
@@ -667,20 +621,28 @@ begin
   else
     b := 12.92 * b;
 
-  Result[0] := EnsureRange(Round(r * cCpnMaxValue), -cCpnMaxValue, cCpnMaxValue);
-  Result[1] := EnsureRange(Round(g * cCpnMaxValue), -cCpnMaxValue, cCpnMaxValue);
-  Result[2] := EnsureRange(Round(b * cCpnMaxValue), -cCpnMaxValue, cCpnMaxValue);
+  Result := ToRGB(EnsureRange(Round(r * 255.0), 0, 255), EnsureRange(Round(g * 255.0), 0, 255), EnsureRange(Round(b * 255.0), 0, 255));
+end;
+
+procedure RGBToYUV(col: Integer; out y, u, v: TFloat; scl: TFloat); inline;
+var
+  yy, uu, vv: TFloat;
+  r, g, b: Byte;
+begin
+  FromRGB(col, r, g, b);
+  RGBToYUV(r, g, b, yy, uu, vv, scl);
+  y := yy; u := uu; v := vv; // for safe "out" param
 end;
 
 // from https://en.wikipedia.org/wiki/YCbCr#JPEG_conversion (0..255 digital version)
-procedure RGBToYUV(r, g, b: TPlanarCpn; out y, u, v: TFloat; scl: TFloat);
+procedure RGBToYUV(r, g, b: Byte; out y, u, v: TFloat; scl: TFloat);
 begin
   y := (        0.299    * r + 0.587    * g + 0.114    * b) * scl;
   u := (128.0 - 0.168736 * r - 0.331264 * g + 0.5      * b) * scl;
   v := (128.0 + 0.5      * r - 0.418688 * g - 0.081312 * b) * scl;
 end;
 
-function YUVToRGB(y, u, v, scl: TFloat): TPixel;
+function YUVToRGB(y, u, v, scl: TFloat): Integer;
 var
   r, g, b: TFloat;
 begin
@@ -695,9 +657,7 @@ begin
   g := y - 0.344136 * u - 0.714136 * v;
   b := y + 1.772    * u;
 
-  Result[0] := EnsureRange(Round(r), -cCpnMaxValue, cCpnMaxValue);
-  Result[1] := EnsureRange(Round(g), -cCpnMaxValue, cCpnMaxValue);
-  Result[2] := EnsureRange(Round(b), -cCpnMaxValue, cCpnMaxValue);
+  Result := ToRGB(EnsureRange(Round(r), 0, 255), EnsureRange(Round(g), 0, 255), EnsureRange(Round(b), 0, 255));
 end;
 
 function lerp(x, y, alpha: Double): Double; inline;
@@ -713,6 +673,39 @@ end;
 function revlerp(x, y, res: Double): Double;
 begin
   Result := DivDef(res - x, y - x, NaN);
+end;
+
+procedure BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte; out r, g, b: Byte);
+var
+  r1, g1, b1: Integer;
+  r2, g2, b2: Integer;
+  shift: Byte;
+  invAlpha, weightVal, rounding: Integer;
+begin
+  FromRGB(x, r1, g1, b1);
+  FromRGB(y, r2, g2, b2);
+
+  weightVal := (1 shl weightShift) + weight;
+  invAlpha := ((1 shl alphaShift) - alpha) * weightVal;
+  alpha *= weightVal;
+  shift := alphaShift + weightShift;
+  rounding := 1 shl (shift - 1);
+
+  r1 := (r1 * invAlpha + r2 * alpha + rounding) shr shift;
+  g1 := (g1 * invAlpha + g2 * alpha + rounding) shr shift;
+  b1 := (b1 * invAlpha + b2 * alpha + rounding) shr shift;
+
+  r := EnsureRange(r1, 0, High(Byte));
+  g := EnsureRange(g1, 0, High(Byte));
+  b := EnsureRange(b1, 0, High(Byte));
+end;
+
+function BlendRGB(x, y, alpha, weight: Integer; alphaShift, weightShift: Byte): Integer;
+var
+  r, g, b: Byte;
+begin
+  BlendRGB(x, y, alpha, weight, alphaShift, weightShift, r, g, b);
+  Result := ToRGB(r, g, b);
 end;
 
 function Posterize(v: Byte; cvt: Integer): Byte; inline;
@@ -1568,29 +1561,6 @@ end;
 function TKRng.random: Double;
 begin
   Result := randInt() / High(UInt64);
-end;
-
-{ TPixelBlender }
-
-procedure TPixelBlender.Prepare(AAlpha, AWeight: Integer; AAlphaShift, AWeightShift: Byte);
-var
-  weightVal: Integer;
-begin
-  weightVal := (1 shl AWeightShift) + AWeight;
-
-  invAlpha := ((1 shl AAlphaShift) - AAlpha) * weightVal;
-  alpha := AAlpha * weightVal;
-  shift := AAlphaShift + AWeightShift;
-  rounding := 1 shl (shift - 1);
-end;
-
-function TPixelBlender.BlendCpn(x, y: TPlanarCpn): TPlanarCpn;
-var
-  r: Integer;
-begin
-  r := (x * invAlpha + y * alpha + rounding) shr shift;
-
-  Result := EnsureRange(r, -cCpnMaxValue, cCpnMaxValue);
 end;
 
 end.

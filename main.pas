@@ -340,8 +340,8 @@ begin
       if y < Length(FTilingEncoder.Palettes) then
       begin
         C.Brush.Color := imgPalette.Color;
-        if x < Length(FTilingEncoder.Palettes[y].Palette) then
-          C.Brush.Color := ToRGB(FTilingEncoder.Palettes[y].Palette[x]);
+        if x < Length(FTilingEncoder.Palettes[y].PaletteRGB) then
+          C.Brush.Color := FTilingEncoder.Palettes[y].PaletteRGB[x];
       end;
       C.FillRect(R);
       R.Offset(rectSize, 0);
