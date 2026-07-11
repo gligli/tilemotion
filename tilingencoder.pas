@@ -255,7 +255,6 @@ type
   TMixingPlan = record
     // static
     LumaPal: array of Integer;
-    Remap: array of Byte;
     Y2Palette: array of array[0..3] of Integer;
     Y2MixedColors: Integer;
   end;
@@ -2905,44 +2904,31 @@ end;
 
 procedure TTilingEncoder.PreparePlan(var Plan: TMixingPlan; const pal: array of Integer);
 var
-  i, cnt, r, g, b: Integer;
+  i, r, g, b: Integer;
 begin
   FillChar(Plan, SizeOf(Plan), 0);
 
   Plan.Y2MixedColors := FDitheringYliluoma2MixedColors;
   SetLength(Plan.LumaPal, length(pal));
   SetLength(Plan.Y2Palette, length(pal));
-  SetLength(Plan.Remap, length(pal));
 
-  cnt := 0;
   for i := 0 to High(pal) do
   begin
-    if pal[i] = cDitheringNullColor then
-      Continue;
-
     FromRGB(pal[i], r, g, b);
 
-    Plan.LumaPal[cnt] := r*cRedMul + g*cGreenMul + b*cBlueMul;
+    Plan.LumaPal[i] := r*cRedMul + g*cGreenMul + b*cBlueMul;
 
-    Plan.Y2Palette[cnt][0] := r;
-    Plan.Y2Palette[cnt][1] := g;
-    Plan.Y2Palette[cnt][2] := b;
-    Plan.Y2Palette[cnt][3] := Plan.LumaPal[cnt] div cLumaDiv;
-
-    Plan.Remap[cnt] := i;
-    Inc(cnt);
+    Plan.Y2Palette[i][0] := r;
+    Plan.Y2Palette[i][1] := g;
+    Plan.Y2Palette[i][2] := b;
+    Plan.Y2Palette[i][3] := Plan.LumaPal[i] div cLumaDiv;
   end;
-
-  SetLength(Plan.LumaPal, cnt);
-  SetLength(Plan.Y2Palette, cnt);
-  SetLength(Plan.Remap, cnt);
 end;
 
 procedure TTilingEncoder.TerminatePlan(var Plan: TMixingPlan);
 begin
   SetLength(Plan.LumaPal, 0);
   SetLength(Plan.Y2Palette, 0);
-  SetLength(Plan.Remap, 0);
 end;
 
 function PlanCompareLuma(Item1,Item2,UserParameter:Pointer):Integer;
@@ -3157,7 +3143,7 @@ begin
         begin
           map_value := cDitheringMap[((y and 7) shl 3) or (x and 7)];
           DeviseBestMixingPlanThomasKnoll(Plan, ATile.RGBPixels[y, x], TKList);
-          ATile.PalPixels[y, x] := Plan.Remap[TKList[map_value]];
+          ATile.PalPixels[y, x] := TKList[map_value];
         end;
     end
     else
@@ -3168,7 +3154,7 @@ begin
           map_value := cDitheringMap[((y and 7) shl 3) or (x and 7)];
           count := DeviseBestMixingPlanYliluoma(Plan, ATile.RGBPixels[y, x], YilList);
           map_value := (map_value * count) shr 6;
-          ATile.PalPixels[y, x] := Plan.Remap[YilList[map_value]];
+          ATile.PalPixels[y, x] := YilList[map_value];
         end;
     end;
   finally
@@ -4751,9 +4737,7 @@ begin
   begin
     New(CMItem);
 
-    CMItem^.R := 0;
-    CMItem^.G := 0;
-    CMItem^.B := 0;
+    FromRGB(cDitheringNullColor, CMItem^.R, CMItem^.G, CMItem^.B);
 
     if not IsNan(Centroids[i, 0]) and not IsNan(Centroids[i, 1]) and not IsNan(Centroids[i, 2]) then
     begin
@@ -5695,12 +5679,9 @@ var
       DoWord(palIdx);
       for colIdx := 0 to FPaletteSize - 1 do
       begin
-        col := 0;
+        col := cDitheringNullColor;
         if InRange(palIdx, 0, High(FPalettes)) and InRange(colIdx, 0, High(FPalettes[palIdx].PaletteRGB)) then
           col := FPalettes[palIdx].PaletteRGB[colIdx];
-
-        if col = cDitheringNullColor then
-          col := $ffffff;
 
         DoDWord(col or $ff000000);
       end;

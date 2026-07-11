@@ -39,7 +39,7 @@ const
   cPhi = (1 + sqrt(5)) / 2;
   cInvPhi = 1 / cPhi;
 
-  cDitheringNullColor = Integer($ffff00ff);
+  cDitheringNullColor = Integer($ffffff);
   cDitheringListLen = 256;
   cDitheringMap : array[0..8*8 - 1] of Byte = (
      0, 48, 12, 60,  3, 51, 15, 63,
