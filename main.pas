@@ -336,12 +336,12 @@ begin
   begin
     for x := 0 to FTilingEncoder.PaletteSize - 1 do
     begin
-      C.Brush.Color := clFuchsia;
+      C.Brush.Color := clAqua;
       if y < Length(FTilingEncoder.Palettes) then
       begin
-        C.Brush.Color := imgPalette.Color;
+        C.Brush.Color := clFuchsia;
         if x < Length(FTilingEncoder.Palettes[y].PaletteRGB) then
-          C.Brush.Color := FTilingEncoder.Palettes[y].PaletteRGB[x];
+          C.Brush.Color := FTilingEncoder.Palettes[y].PaletteRGB[x] and $ffffff;
       end;
       C.FillRect(R);
       R.Offset(rectSize, 0);

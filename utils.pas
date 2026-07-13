@@ -30,6 +30,7 @@ const
 
   cBitsPerCompBits = 3;
   cBitsPerComp = 1 shl cBitsPerCompBits;
+  cCompMaxValue = (1 shl cBitsPerComp) - 1;
   cVecInvWidth = 16;
   cTileWidthBits = 3;
   cTileWidth = 1 shl cTileWidthBits;
@@ -39,7 +40,7 @@ const
   cPhi = (1 + sqrt(5)) / 2;
   cInvPhi = 1 / cPhi;
 
-  cDitheringNullColor = Integer($ffffff);
+  cDitheringNullColor = Integer($ffff00ff);
   cDitheringListLen = 256;
   cDitheringMap : array[0..8*8 - 1] of Byte = (
      0, 48, 12, 60,  3, 51, 15, 63,
@@ -146,17 +147,17 @@ type
   TSpinlock = LongInt;
   PSpinLock = ^TSpinlock;
 
-  { TCountIndex }
+  { TDetailedColor }
 
-  TCountIndex = record
-    Index, Count: Integer;
-    R, G, B: Byte;
+  TDetailedColor = record
+    RGB: Integer;
     Luma: Integer;
     Hue, Sat, Val: Byte;
+    Active: Boolean;
   end;
 
-  PCountIndex = ^TCountIndex;
-  TCountIndexList = specialize TFPGList<PCountIndex>;
+  PDetailedColor = ^TDetailedColor;
+  TDetailedPalette = specialize TFPGList<PDetailedColor>;
 
   { TIndexWeight }
 
@@ -244,7 +245,7 @@ function PosterizeBpc(v, bpc: Byte): Byte; inline;
 function CompareEuclideanDCTPtr(pa, pb: PDCTScalar): Cardinal;
 function CompareEuclideanDCTPtr_asm(pa_rcx, pb_rdx: PDCTScalar): Cardinal; register; assembler;
 function CompareEuclidean(a, b: PFloat; size: Integer): Double; inline;
-function CompareCountIndexYSH(const Item1,Item2:PCountIndex):Integer;
+function CompareDetailedColorYSH(const Item1,Item2:PDetailedColor):Integer;
 function CompareIntegers(Item1,Item2,UserParameter:Pointer):Integer;
 function CompareDoubles(Item1,Item2,UserParameter:Pointer):Integer;
 function ComparePaletteUseCount(Item1,Item2,UserParameter:Pointer):Integer;
@@ -824,9 +825,11 @@ begin
   Result := CompareValue(PInteger(Item1)^, PInteger(Item2)^);
 end;
 
-function CompareCountIndexYSH(const Item1,Item2:PCountIndex):Integer;
+function CompareDetailedColorYSH(const Item1,Item2:PDetailedColor):Integer;
 begin
-  Result := CompareValue(Item1^.Luma, Item2^.Luma);
+  Result := CompareValue(Ord(Item1^.Active), Ord(Item2^.Active));
+  if Result = 0 then
+    Result := CompareValue(Item1^.Luma, Item2^.Luma);
   if Result = 0 then
     Result := CompareValue(Item1^.Sat, Item2^.Sat);
   if Result = 0 then

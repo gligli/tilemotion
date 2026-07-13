@@ -255,6 +255,7 @@ type
   TMixingPlan = record
     // static
     LumaPal: array of Integer;
+    Remap: array of Byte;
     Y2Palette: array of array[0..3] of Integer;
     Y2MixedColors: Integer;
   end;
@@ -270,7 +271,7 @@ type
     PaletteRGB: TIntegerDynArray;
     MixingPlan: TMixingPlan;
     TileCount, TileOffset: Integer;
-    CMPal: TCountIndexList;
+    DetailedPalette: TDetailedPalette;
   end;
 
   TPaletteArray = array of TPalette;
@@ -2904,31 +2905,44 @@ end;
 
 procedure TTilingEncoder.PreparePlan(var Plan: TMixingPlan; const pal: array of Integer);
 var
-  i, r, g, b: Integer;
+  i, cnt, r, g, b: Integer;
 begin
   FillChar(Plan, SizeOf(Plan), 0);
 
   Plan.Y2MixedColors := FDitheringYliluoma2MixedColors;
   SetLength(Plan.LumaPal, length(pal));
   SetLength(Plan.Y2Palette, length(pal));
+  SetLength(Plan.Remap, length(pal));
 
+  cnt := 0;
   for i := 0 to High(pal) do
   begin
+    if pal[i] = cDitheringNullColor then
+      Continue;
+
     FromRGB(pal[i], r, g, b);
 
-    Plan.LumaPal[i] := r*cRedMul + g*cGreenMul + b*cBlueMul;
+    Plan.LumaPal[cnt] := r*cRedMul + g*cGreenMul + b*cBlueMul;
 
-    Plan.Y2Palette[i][0] := r;
-    Plan.Y2Palette[i][1] := g;
-    Plan.Y2Palette[i][2] := b;
-    Plan.Y2Palette[i][3] := Plan.LumaPal[i] div cLumaDiv;
+    Plan.Y2Palette[cnt][0] := r;
+    Plan.Y2Palette[cnt][1] := g;
+    Plan.Y2Palette[cnt][2] := b;
+    Plan.Y2Palette[cnt][3] := Plan.LumaPal[cnt] div cLumaDiv;
+
+    Plan.Remap[cnt] := i;
+    Inc(cnt);
   end;
+
+  SetLength(Plan.LumaPal, cnt);
+  SetLength(Plan.Y2Palette, cnt);
+  SetLength(Plan.Remap, cnt);
 end;
 
 procedure TTilingEncoder.TerminatePlan(var Plan: TMixingPlan);
 begin
   SetLength(Plan.LumaPal, 0);
   SetLength(Plan.Y2Palette, 0);
+  SetLength(Plan.Remap, 0);
 end;
 
 function PlanCompareLuma(Item1,Item2,UserParameter:Pointer):Integer;
@@ -3143,7 +3157,7 @@ begin
         begin
           map_value := cDitheringMap[((y and 7) shl 3) or (x and 7)];
           DeviseBestMixingPlanThomasKnoll(Plan, ATile.RGBPixels[y, x], TKList);
-          ATile.PalPixels[y, x] := TKList[map_value];
+          ATile.PalPixels[y, x] := Plan.Remap[TKList[map_value]];
         end;
     end
     else
@@ -3154,7 +3168,7 @@ begin
           map_value := cDitheringMap[((y and 7) shl 3) or (x and 7)];
           count := DeviseBestMixingPlanYliluoma(Plan, ATile.RGBPixels[y, x], YilList);
           map_value := (map_value * count) shr 6;
-          ATile.PalPixels[y, x] := YilList[map_value];
+          ATile.PalPixels[y, x] := Plan.Remap[YilList[map_value]];
         end;
     end;
   finally
@@ -4666,14 +4680,14 @@ var
   Dataset, Centroids: TDoubleDynArray2;
   Clusters: TIntegerDynArray;
   Yakmo: PYakmo;
-  CMPal: TCountIndexList;
-  CMItem: PCountIndex;
+  DetailedPal: TDetailedPalette;
+  DetailedCol: PDetailedColor;
 begin
-  CMPal := FPalettes[APalIdx].CMPal;
+  DetailedPal := FPalettes[APalIdx].DetailedPalette;
 
-  for i := 0 to CMPal.Count - 1 do
-    Dispose(CMPal[i]);
-  CMPal.Clear;
+  for i := 0 to DetailedPal.Count - 1 do
+    Dispose(DetailedPal[i]);
+  DetailedPal.Clear;
 
   DSLen := 0;
   for tIdx := 0 to High(FTiles) do
@@ -4700,9 +4714,9 @@ begin
         for tx := 0 to cTileWidth - 1 do
         begin
           FromRGB(Tile^.RGBPixels[ty, tx], rr, gg, bb);
-          Dataset[di, 0] := GammaCorrect(0, rr);
-          Dataset[di, 1] := GammaCorrect(0, gg);
-          Dataset[di, 2] := GammaCorrect(0, bb);
+          Dataset[di, 0] := rr;
+          Dataset[di, 1] := gg;
+          Dataset[di, 2] := bb;
           Inc(di);
         end;
   end;
@@ -4735,31 +4749,36 @@ begin
 
   for i := 0 to AColorCount - 1 do
   begin
-    New(CMItem);
+    New(DetailedCol);
 
-    FromRGB(cDitheringNullColor, CMItem^.R, CMItem^.G, CMItem^.B);
+    DetailedCol^.Active := not IsNan(Centroids[i, 0]) and not IsNan(Centroids[i, 1]) and not IsNan(Centroids[i, 2]);
 
-    if not IsNan(Centroids[i, 0]) and not IsNan(Centroids[i, 1]) and not IsNan(Centroids[i, 2]) then
+    if DetailedCol^.Active then
     begin
-      CMItem^.R := GammaUncorrect(0, Centroids[i, 0]);
-      CMItem^.G := GammaUncorrect(0, Centroids[i, 1]);
-      CMItem^.B := GammaUncorrect(0, Centroids[i, 2]);
+      rr := EnsureRange(Round(Centroids[i, 0]), 0, cCompMaxValue);
+      gg := EnsureRange(Round(Centroids[i, 1]), 0, cCompMaxValue);
+      bb := EnsureRange(Round(Centroids[i, 2]), 0, cCompMaxValue);
+      DetailedCol^.RGB := ToRGB(rr, gg, bb);
+    end
+    else
+    begin
+      DetailedCol^.RGB := cDitheringNullColor;
     end;
 
-    CMItem^.Count := 0;
-    RGBToHSV(CMItem^.R, CMItem^.G, CMItem^.B, CMItem^.Hue, CMItem^.Sat, CMItem^.Val);
-    CMItem^.Luma := ToLuma(CMItem^.R, CMItem^.G, CMItem^.B);
-    CMPal.Add(CMItem);
+    FromRGB(DetailedCol^.RGB, rr, gg, bb);
+    RGBToHSV(rr, gg, bb, DetailedCol^.Hue, DetailedCol^.Sat, DetailedCol^.Val);
+    DetailedCol^.Luma := ToLuma(rr, gg, bb);
+    DetailedPal.Add(DetailedCol);
   end;
 end;
 
 procedure TTilingEncoder.DoQuantization(APalIdx: Integer);
 var
-  CMPal: TCountIndexList;
+  DetailedPal: TDetailedPalette;
   i: Integer;
 begin
-  CMPal := TCountIndexList.Create;
-  FPalettes[APalIdx].CMPal := CMPal;
+  DetailedPal := TDetailedPalette.Create;
+  FPalettes[APalIdx].DetailedPalette := DetailedPal;
   try
     // do quantize
 
@@ -4767,21 +4786,18 @@ begin
 
     // split most used colors into tile palettes
 
-    CMPal.Sort(@CompareCountIndexYSH);
+    DetailedPal.Sort(@CompareDetailedColorYSH);
 
-    SetLength(FPalettes[APalIdx].PaletteRGB, FPaletteSize);
-    for i := 0 to CMPal.Count - 1 do
+    SetLength(FPalettes[APalIdx].PaletteRGB, DetailedPal.Count);
+    for i := 0 to DetailedPal.Count - 1 do
     begin
-      FPalettes[APalIdx].PaletteRGB[i] := ToRGB(CMPal[i]^.R, CMPal[i]^.G, CMPal[i]^.B);
-      Dispose(CMPal[i]);
+      FPalettes[APalIdx].PaletteRGB[i] := DetailedPal[i]^.RGB;
+      Dispose(DetailedPal[i]);
     end;
 
-    for i := CMPal.Count to FPaletteSize - 1 do
-      FPalettes[APalIdx].PaletteRGB[i] := cDitheringNullColor;
-
   finally
-    CMPal.Free;
-    FPalettes[APalIdx].CMPal := nil;
+    DetailedPal.Free;
+    FPalettes[APalIdx].DetailedPalette := nil;
   end;
 end;
 
@@ -5682,6 +5698,9 @@ var
         col := cDitheringNullColor;
         if InRange(palIdx, 0, High(FPalettes)) and InRange(colIdx, 0, High(FPalettes[palIdx].PaletteRGB)) then
           col := FPalettes[palIdx].PaletteRGB[colIdx];
+
+        if col = cDitheringNullColor then
+          col := $ffffff;
 
         DoDWord(col or $ff000000);
       end;
