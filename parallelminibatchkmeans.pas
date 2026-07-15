@@ -375,7 +375,7 @@ begin
     if verbose then
       WriteLn;
 
-    if Abs(delta) < cPSNRPrecision then
+    if delta < cPSNRPrecision then
       Break;
   end;
 
