@@ -330,7 +330,7 @@ type
     IntraReducedTiles: PTileDynArray;
     IntraReducedTileIndexes: TIntegerDynArray2;
 
-    PSNRPenalties: TFloatDynArray;
+    PSNRMasks: TCardinalDynArray;
 
     constructor Create(AParent: TTilingEncoder; AIndex: Integer);
     destructor Destroy; override;
@@ -405,6 +405,7 @@ type
     FDCTLut:array[TPsyVisMode, 0..cUnrolledDCTSize - 1] of TFloat;
     FInvDCTLutDouble:array[TPsyVisMode, 0..cUnrolledDCTSize - 1] of Double;
     FDCTSnake: array[0 .. cTileDCTSize - 1] of Integer;
+    FPSNRHVSMCoeff: array[0 .. cTileDCTSize - 1] of TFloat;
 
     FTiles: PTileDynArray;
     FKeyFrames: TKeyFrameArray;
@@ -519,6 +520,8 @@ type
     procedure ComputeTilePsyVisFeatures(const ATile: TTile; Mode: TPsyVisMode; FromPal, UseLAB, VMirror, HMirror: Boolean;
      ColorCpns: Integer; const APalette: TIntegerDynArray; ADCT: PDouble); inline; overload;
     procedure ComputeInvTilePsyVisFeatures(DCT: PDouble; Mode: TPsyVisMode; UseLAB: Boolean; ColorCpns: Integer; var ATile: TTile);
+
+    function GetPSNRHVSMMask(const ACpnPixel: TCpnPixels; ADCT: PDCTScalar): Cardinal;
 
     // Dithering algorithms ported from http://bisqwit.iki.fi/story/howto/dither/jy/
 
@@ -2034,9 +2037,8 @@ end;
 
 procedure TFrame.AsyncLoadFromImage;
 var
-  yx, iDCT: Integer;
+  yx: Integer;
   HMirror, VMirror: Boolean;
-  errAcc: Cardinal;
   Tile: PTile;
   TMI: PTileMapItem;
   prevFrameICD: TFloatDynArray;
@@ -2059,7 +2061,7 @@ begin
 
   // also handle tilemap H/V mirrors
 
-  SetLength(PSNRPenalties, Encoder.FTileMapSize);
+  SetLength(PSNRMasks, Encoder.FTileMapSize);
   for yx := 0 to Encoder.FTileMapSize - 1 do
   begin
     Tile := FrameTiles[yx];
@@ -2080,12 +2082,9 @@ begin
     if VMirror then Encoder.VMirrorTile(Tile^);
 
     Encoder.ConvertToCpnPixels(Tile^, False, False, False, False, nil, CpnPixels);
-    Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsDCT, cColorCpns, @PlainDCT[0]);
+    Encoder.ComputeCpnPixelsPsyVisFeatures(CpnPixels, pvsPSNRHVS, cColorCpns, @PlainDCT[0]);
 
-    errAcc := 0;
-    for iDCT := cTileDCTUndispersedCount to cTileDCTSize - 1 do
-      errAcc += Sqr(PlainDCT[iDCT]);
-    PSNRPenalties[yx] := Sqrt(Max(0, EuclideanToPSNR(errAcc)));
+    PSNRMasks[yx] := Encoder.GetPSNRHVSMMask(CpnPixels, @PlainDCT[0]);
   end;
 
   // compress frame tiles to save memory
@@ -2218,6 +2217,8 @@ procedure TTilingEncoder.InitLuts;
 var
   pvm: TPsyVisMode;
   c, g, i, v, u, y, x: Int64;
+  pSnake: PInteger;
+  pCoeff: PFloat;
 begin
   // gamma
 
@@ -2282,6 +2283,19 @@ begin
   for i := 0 to Sqr(cTileWidth) - 1 do
     for c := 0 to cColorCpns - 1 do
       FDCTSnake[c * Sqr(cTileWidth) + i] := cDCTSnake[i] * cColorCpns + c;
+
+  // PSNRHVS-M Coeffs
+
+  pSnake := @FDCTSnake[0];
+  for c := 0 to cColorCpns - 1 do
+    for v := 0 to cTileWidth - 1 do
+      for u := 0 to cTileWidth - 1 do
+      begin
+        pCoeff := @FPSNRHVSMCoeff[pSnake^];
+        Inc(pSnake);
+
+        pCoeff^ := 1.0 / (cPSNRWeights[c, v, u] * cPSNRMaskSquaredFactor);
+      end;
 end;
 
 function TTilingEncoder.GammaCorrect(lut: Integer; x: Byte): TFloat;
@@ -3496,6 +3510,83 @@ begin
       ATile.RGBPixels[y, x] := FromCpn(x, y);
 end;
 
+function TTilingEncoder.GetPSNRHVSMMask(const ACpnPixel: TCpnPixels; ADCT: PDCTScalar): Cardinal;
+var
+  cpn, x, y, iQuarter, iDCT: Integer;
+  sub: Integer;
+  ret: Single;
+  sMeans, sVars: array[0..3] of Single;
+  sGMean, sGVar, sMask, sMaskD: Single;
+  pDCT: PDCTScalar;
+  pCoeff: PFloat;
+begin
+  ret := 0;
+
+  for cpn := 0 to cColorCpns - 1 do
+  begin
+    sGMean := 0;
+    sGVar := 0;
+    sMask := 0;
+    for iQuarter := 0 to 3 do
+    begin
+      sMeans[iQuarter] := 0;
+      sVars[iQuarter] := 0;
+    end;
+
+    for y := 0 to cTileWidth - 1 do
+      for x := 0 to cTileWidth - 1 do
+      begin
+        sub := ((x and 4) shr 2) + ((y and 4) shr 1);
+        sGMean := sGMean + ACpnPixel[cpn, y, x];
+        sMeans[sub] := sMeans[sub] + ACpnPixel[cpn, y, x];
+      end;
+
+    sGMean := sGMean / Sqr(cTileWidth);
+    for iQuarter := 0 to 3 do
+      sMeans[iQuarter] := sMeans[iQuarter] / (Sqr(cTileWidth) div 4);
+
+    for y := 0 to cTileWidth - 1 do
+      for x := 0 to cTileWidth - 1 do
+      begin
+        sub := ((x and 4) shr 2) + ((y and 4) shr 1);
+        sGVar := sGVar + Sqr(ACpnPixel[cpn, y, x] - sGMean);
+        sVars[sub] := sVars[sub] + Sqr(ACpnPixel[cpn, y, x] - sMeans[sub]);
+      end;
+
+    sGVar := sGVar * (1.0 / (Sqr(cTileWidth) - 1)) * Sqr(cTileWidth);
+    for iQuarter := 0 to 3 do
+      sVars[iQuarter] := sVars[iQuarter] * (1.0 / (Sqr(cTileWidth) div 4 - 1)) * (Sqr(cTileWidth) div 4);
+
+    if sGVar > 0 then
+      sGVar := (sVars[0] + sVars[1] + sVars[2] + sVars[3]) / sGVar;
+
+    pDCT := @ADCT[cpn];
+    for iDCT := 0 to Sqr(cTileWidth) - 1 do
+    begin
+      if iDCT > 0 then
+        sMask := sMask + Sqr(pDCT^) * cPSNRMaskSquaredFactor;
+
+      Inc(pDCT, cColorCpns);
+    end;
+
+    sMask := Sqrt(sMask * sGVar) / (Sqr(cTileWidth) div 2);
+
+    pCoeff := @FPSNRHVSMCoeff[cpn];
+    for iDCT := 0 to Sqr(cTileWidth) - 1 do
+    begin
+      if iDCT > 0 then
+      begin
+        sMaskD := sMask * pCoeff^;
+        ret += Sqr(sMaskD);
+      end;
+
+      Inc(pCoeff, cColorCpns);
+    end;
+  end;
+
+  Result := Round(Sqrt(ret));
+end;
+
 class procedure TTilingEncoder.VMirrorTile(var ATile: TTile; APalOnly: Boolean);
 var
   j, i: Integer;
@@ -4419,12 +4510,15 @@ function TTilingEncoder.GRPSNR(x: Double; Data: Pointer): Double;
 var
   GRData: PGRPSNRData absolute Data;
   frmIdx, sy, sx, yx, kfffUPCSum, kfNewUTC, kfIdx: Integer;
+  xErr: Cardinal;
   isKFFF: Boolean;
   meanErr: UInt64;
   KFFFFactor: Double;
   Frame: TFrame;
   TMI: PTileMapItem;
 begin
+  xErr := PSNRToEuclidean(x);
+
   meanErr := 0;
   GRData^.MeanPSNR := 0.0;
   GRData^.GlobalUnpredictedTileCount := 0;
@@ -4444,7 +4538,7 @@ begin
 
         // trim high (unfit) Errors
 
-        if TMI^.Error < PSNRToEuclidean(Max(0.0, x - Frame.PSNRPenalties[yx])) then
+        if TMI^.Error < xErr + Frame.PSNRMasks[yx] then
         begin
           TMI^.IsPredicted := True;
           meanErr += TMI^.Error;
